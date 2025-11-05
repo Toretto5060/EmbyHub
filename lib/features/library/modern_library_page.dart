@@ -43,9 +43,9 @@ class ModernLibraryPage extends ConsumerWidget {
     final views = ref.watch(_viewsProvider);
 
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        middle: Text('媒体库', style: TextStyle(color: CupertinoTheme.of(context).primaryContrastingColor)),
-        backgroundColor: const Color(0x00000000),
+      navigationBar: const CupertinoNavigationBar(
+        middle: Text('媒体库'),
+        backgroundColor: Color(0x00000000),
         border: null,
       ),
       child: SafeArea(
@@ -112,10 +112,9 @@ class ModernLibraryPage extends ConsumerWidget {
         children: [
           Text(
             title,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
-              color: CupertinoTheme.of(context).primaryContrastingColor,
             ),
           ),
           if (viewId != null)
@@ -253,10 +252,9 @@ class ModernLibraryPage extends ConsumerWidget {
               item.seriesName ?? item.name ?? '未知',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: CupertinoTheme.of(context).primaryContrastingColor,
               ),
             ),
             if (item.seriesName != null)
@@ -297,10 +295,9 @@ class ModernLibraryPage extends ConsumerWidget {
           children: [
             Text(
               view.name ?? '加载中...',
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
-                color: CupertinoTheme.of(context).primaryContrastingColor,
               ),
             ),
             const SizedBox(height: 16),
@@ -379,10 +376,7 @@ class ModernLibraryPage extends ConsumerWidget {
               item.name ?? '未知',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                color: CupertinoTheme.of(context).primaryContrastingColor,
-              ),
+              style: const TextStyle(fontSize: 13),
             ),
           ],
         ),

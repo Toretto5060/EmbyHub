@@ -58,7 +58,7 @@ class _PlaceholderPage extends StatelessWidget {
 
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
-        middle: Text(title, style: TextStyle(color: CupertinoTheme.of(context).primaryContrastingColor)),
+        middle: Text(title),
         backgroundColor: const Color(0x00000000),
         border: null,
       ),

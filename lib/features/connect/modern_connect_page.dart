@@ -23,7 +23,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
 
   String _protocol = 'http';
   final TextEditingController _host = TextEditingController();
-  final TextEditingController _port = TextEditingController(text: '8096');
+  final TextEditingController _port = TextEditingController();
   final TextEditingController _user = TextEditingController();
   final TextEditingController _pwd = TextEditingController();
 
@@ -81,7 +81,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
       await ref.read(serverSettingsProvider.notifier).save(ServerSettings(
           protocol: _protocol,
           host: _host.text.trim(),
-          port: _port.text.trim()));
+          port: _port.text.trim().isEmpty ? '8096' : _port.text.trim()));
       final api = await EmbyApi.create();
       final info = await api.systemInfo();
       setState(() {
@@ -176,30 +176,22 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
     return Scaffold(
       extendBodyBehindAppBar: true,
       extendBody: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          if (!_serverConnected)
-            TextButton.icon(
-              onPressed: () => context.go('/'),
-              icon: const Icon(Icons.home_rounded, color: Colors.white),
-              label: const Text('跳过', style: TextStyle(color: Colors.white)),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-              ),
+      appBar: !_serverConnected
+          ? AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              actions: [
+                TextButton.icon(
+                  onPressed: () => context.go('/'),
+                  icon: const Icon(Icons.home_rounded, color: Colors.white),
+                  label: const Text('跳过', style: TextStyle(color: Colors.white)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                  ),
+                ),
+              ],
             )
-          else
-            TextButton.icon(
-              onPressed: _loading ? null : _login,
-              icon: const Icon(Icons.login_rounded, color: Colors.white),
-              label: const Text('登录', style: TextStyle(color: Colors.white)),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-              ),
-            ),
-        ],
-      ),
+          : null,
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -384,7 +376,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 style: const TextStyle(fontSize: 16),
                 decoration: InputDecoration(
                   labelText: '端口',
-                  hintText: '8096',
+                  hintText: '默认 8096',
                   prefixIcon: const Icon(Icons.settings_ethernet_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,
@@ -603,14 +595,31 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                   ),
                 ),
               ],
-              const SizedBox(height: 24),
-              Text(
-                '点击右上角"登录"按钮',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade600,
+              const SizedBox(height: 32),
+              FilledButton(
+                onPressed: _loading ? null : _login,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  backgroundColor: Colors.deepPurple,
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  elevation: 4,
                 ),
+                child: _loading
+                    ? const SizedBox(
+                        height: 24,
+                        width: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        '登录',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      ),
               ),
             ],
           ),

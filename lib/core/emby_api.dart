@@ -118,6 +118,7 @@ class EmbyApi {
   // Get latest items from a library
   Future<List<ItemInfo>> getLatestItems(String userId, {required String parentId, int limit = 16}) async {
     try {
+      print('Fetching latest items for parentId: $parentId, userId: $userId');
       final res = await _dio.get('/Users/$userId/Items/Latest', queryParameters: {
         'ParentId': parentId,
         'Limit': limit,
@@ -126,14 +127,20 @@ class EmbyApi {
         'EnableImageTypes': 'Primary,Backdrop,Thumb',
       });
       
+      print('Latest API response type: ${res.data.runtimeType}');
+      print('Latest API response data: ${res.data}');
+      
       // Latest API returns an array directly, not wrapped in Items
       if (res.data is List) {
         final list = (res.data as List).cast<Map<String, dynamic>>();
+        print('Found ${list.length} items');
         return list.map((e) => ItemInfo.fromJson(e)).toList();
       }
+      print('Response data is not a List');
       return [];
-    } catch (e) {
+    } catch (e, stack) {
       print('Error fetching latest items for $parentId: $e');
+      print('Stack trace: $stack');
       return [];
     }
   }
