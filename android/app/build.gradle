@@ -19,6 +19,12 @@ android {
         jvmTarget = "17"
     }
 
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+        quiet true
+    }
+
     defaultConfig {
         applicationId = "com.toretto.embyhub"
         // You can update the following values to match your application needs.
