@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -72,8 +74,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(middle: Text('播放器')),
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+    
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (!didPop) {
+          context.go('/');
+        }
+      },
+      child: CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: Text(
+          '播放器',
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        leading: CupertinoButton(
+          padding: EdgeInsets.zero,
+          child: Icon(
+            CupertinoIcons.back,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+          onPressed: () => context.go('/'),
+        ),
+        backgroundColor: CupertinoColors.systemBackground,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.1),
+            width: 0.5,
+          ),
+        ),
+      ),
       child: SafeArea(
         bottom: false,
         child: _ready
@@ -102,6 +136,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 ],
               )
             : const Center(child: CupertinoActivityIndicator()),
+      ),
       ),
     );
   }

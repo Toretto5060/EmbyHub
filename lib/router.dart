@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart' as sp;
 
@@ -7,6 +8,17 @@ import 'features/home/home_page.dart';
 import 'features/item/item_detail_page.dart';
 import 'features/library/library_items_page.dart';
 import 'features/player/player_page.dart';
+
+// Cupertino style page transition
+CupertinoPage<T> buildCupertinoPage<T>({
+  required Widget child,
+  required GoRouterState state,
+}) {
+  return CupertinoPage<T>(
+    key: state.pageKey,
+    child: child,
+  );
+}
 
 GoRouter createRouter() {
   return GoRouter(
@@ -37,30 +49,47 @@ GoRouter createRouter() {
     routes: [
       GoRoute(
         path: '/connect',
-        pageBuilder: (context, state) =>
-            const NoTransitionPage(child: ModernConnectPage()),
+        pageBuilder: (context, state) {
+          final startAtLogin = state.uri.queryParameters['startAtLogin'] == 'true';
+          return buildCupertinoPage(
+            child: ModernConnectPage(startAtLogin: startAtLogin),
+            state: state,
+          );
+        },
       ),
       GoRoute(
         path: '/',
-        pageBuilder: (context, state) =>
-            const NoTransitionPage(child: HomePage()),
-      ),
-      GoRoute(
-        path: '/library/:viewId',
-        pageBuilder: (context, state) => NoTransitionPage(
-          child: LibraryItemsPage(viewId: state.pathParameters['viewId'] ?? ''),
+        pageBuilder: (context, state) => buildCupertinoPage(
+          child: const HomePage(),
+          state: state,
         ),
       ),
       GoRoute(
+        path: '/library/:viewId',
+        pageBuilder: (context, state) {
+          final viewId = state.pathParameters['viewId'] ?? '';
+          final viewName = state.uri.queryParameters['name'] ?? '媒体库';
+          return buildCupertinoPage(
+            child: LibraryItemsPage(
+              viewId: viewId,
+              viewName: viewName,
+            ),
+            state: state,
+          );
+        },
+      ),
+      GoRoute(
         path: '/item/:itemId',
-        pageBuilder: (context, state) => NoTransitionPage(
+        pageBuilder: (context, state) => buildCupertinoPage(
           child: ItemDetailPage(itemId: state.pathParameters['itemId'] ?? ''),
+          state: state,
         ),
       ),
       GoRoute(
         path: '/player/:itemId',
-        pageBuilder: (context, state) => NoTransitionPage(
+        pageBuilder: (context, state) => buildCupertinoPage(
           child: PlayerPage(itemId: state.pathParameters['itemId'] ?? ''),
+          state: state,
         ),
       ),
     ],

@@ -97,9 +97,36 @@ class EmbyApi {
   }
 
   Future<List<ViewInfo>> getUserViews(String userId) async {
-    final res = await _dio.get('/Users/$userId/Views');
-    final list = (res.data['Items'] as List).cast<Map<String, dynamic>>();
-    return list.map((e) => ViewInfo.fromJson(e)).toList();
+    try {
+      print('getUserViews: userId=$userId');
+      final res = await _dio.get('/Users/$userId/Views');
+      print('getUserViews response type: ${res.data.runtimeType}');
+      print('getUserViews response: ${res.data}');
+      
+      if (res.data is! Map<String, dynamic>) {
+        print('getUserViews: Response is not a Map');
+        return [];
+      }
+      
+      final items = res.data['Items'];
+      if (items == null) {
+        print('getUserViews: No Items field in response');
+        return [];
+      }
+      
+      if (items is! List) {
+        print('getUserViews: Items is not a List');
+        return [];
+      }
+      
+      final list = items.cast<Map<String, dynamic>>();
+      print('getUserViews: Found ${list.length} views');
+      return list.map((e) => ViewInfo.fromJson(e)).toList();
+    } catch (e, stack) {
+      print('getUserViews error: $e');
+      print('Stack trace: $stack');
+      rethrow;
+    }
   }
 
   // Get resume items (continue watching)
@@ -196,15 +223,21 @@ class LoginResult {
 class ViewInfo {
   ViewInfo(
       {required this.id, required this.name, required this.collectionType});
-  final String id;
+  final String? id;
   final String name;
   final String? collectionType;
 
   factory ViewInfo.fromJson(Map<String, dynamic> json) {
+    final id = json['Id'] as String?;
+    final name = json['Name'] as String? ?? 'Unknown';
+    final collectionType = json['CollectionType'] as String?;
+    
+    print('ViewInfo.fromJson: id=$id, name=$name, type=$collectionType');
+    
     return ViewInfo(
-      id: json['Id'] as String,
-      name: json['Name'] as String,
-      collectionType: json['CollectionType'] as String?,
+      id: id,
+      name: name,
+      collectionType: collectionType,
     );
   }
 }
@@ -222,7 +255,7 @@ class ItemInfo {
     this.indexNumber,
   });
   
-  final String id;
+  final String? id;
   final String name;
   final String type;
   final String? overview;
@@ -234,9 +267,9 @@ class ItemInfo {
 
   factory ItemInfo.fromJson(Map<String, dynamic> json) {
     return ItemInfo(
-      id: json['Id'] as String,
-      name: json['Name'] as String,
-      type: json['Type'] as String,
+      id: json['Id'] as String?,
+      name: json['Name'] as String? ?? 'Unknown',
+      type: json['Type'] as String? ?? 'Unknown',
       overview: json['Overview'] as String?,
       runTimeTicks: (json['RunTimeTicks'] as num?)?.toInt(),
       userData: json['UserData'] as Map<String, dynamic>?,

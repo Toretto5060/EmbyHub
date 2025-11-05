@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -22,8 +23,40 @@ class ItemDetailPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final item = ref.watch(itemProvider(itemId));
-    return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(middle: Text('详情')),
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+    
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (!didPop) {
+          context.go('/');
+        }
+      },
+      child: CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: Text(
+          '详情',
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        leading: CupertinoButton(
+          padding: EdgeInsets.zero,
+          child: Icon(
+            CupertinoIcons.back,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+          onPressed: () => context.go('/'),
+        ),
+        backgroundColor: CupertinoColors.systemBackground,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.1),
+            width: 0.5,
+          ),
+        ),
+      ),
       child: SafeArea(
         child: item.when(
           data: (data) {
@@ -58,18 +91,20 @@ class ItemDetailPage extends ConsumerWidget {
                 const SizedBox(height: 16),
                 if ((data.overview ?? '').isNotEmpty) Text(data.overview!),
                 const SizedBox(height: 16),
-                Row(children: [
-                  Expanded(
-                      child: CupertinoButton.filled(
-                          onPressed: () => context.go('/player/${data.id}'),
-                          child: const Text('播放'))),
-                ]),
+                if (data.id != null && data.id!.isNotEmpty)
+                  Row(children: [
+                    Expanded(
+                        child: CupertinoButton.filled(
+                            onPressed: () => context.go('/player/${data.id}'),
+                            child: const Text('播放'))),
+                  ]),
               ],
             );
           },
           loading: () => const Center(child: CupertinoActivityIndicator()),
           error: (e, _) => Center(child: Text('加载失败: $e')),
         ),
+      ),
       ),
     );
   }
@@ -85,18 +120,38 @@ class ItemDetailPage extends ConsumerWidget {
 
 class _Poster extends ConsumerWidget {
   const _Poster({required this.itemId});
-  final String itemId;
+  final String? itemId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (itemId == null || itemId!.isEmpty) {
+      return Container(
+        width: 120,
+        height: 180,
+        color: CupertinoColors.systemGrey4,
+        child: const Icon(CupertinoIcons.film, size: 48),
+      );
+    }
+    
     return FutureBuilder(
       future: EmbyApi.create(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const SizedBox(width: 120, height: 180);
         }
-        final url = snapshot.data!.buildImageUrl(itemId: itemId, maxWidth: 360);
-        return Image.network(url, width: 120, height: 180, fit: BoxFit.cover);
+        final url = snapshot.data!.buildImageUrl(itemId: itemId!, maxWidth: 360);
+        return Image.network(
+          url,
+          width: 120,
+          height: 180,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            width: 120,
+            height: 180,
+            color: CupertinoColors.systemGrey4,
+            child: const Icon(CupertinoIcons.film, size: 48),
+          ),
+        );
       },
     );
   }

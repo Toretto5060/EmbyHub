@@ -142,10 +142,6 @@ class SettingsPage extends ConsumerWidget {
     final serverUrl = '${server.protocol}://${server.host}:${server.port}';
     final auth = ref.read(authStateProvider).value;
     final currentUsername = auth?.userName;
-    final accounts = ref
-        .read(accountHistoryProvider)
-        .where((a) => a.serverUrl == serverUrl)
-        .toList();
 
     await showModalBottomSheet(
       context: context,
@@ -153,51 +149,62 @@ class SettingsPage extends ConsumerWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.5,
-        minChildSize: 0.3,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) => Column(
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  const Text(
-                    '切换账号',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+      builder: (modalContext) => Consumer(
+        builder: (context, ref, child) {
+          // Get fresh data inside the modal
+          final allAccounts = ref.watch(accountHistoryProvider);
+          final freshAccounts = allAccounts
+              .where((a) => a.serverUrl == serverUrl)
+              .toList();
+          
+          print('Modal: Found ${freshAccounts.length} accounts for $serverUrl');
+          print('Total accounts: ${allAccounts.length}');
+          
+          return DraggableScrollableSheet(
+            initialChildSize: 0.5,
+            minChildSize: 0.3,
+            maxChildSize: 0.9,
+            expand: false,
+            builder: (context, scrollController) => Column(
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
                   ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                controller: scrollController,
-                children: [
-                  if (accounts.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(32),
-                      child: Center(
-                        child: Text('暂无历史账号',
-                            style: TextStyle(color: Colors.grey)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      const Text(
+                        '切换账号',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
-                    ),
-                  ...accounts.map((account) {
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView(
+                    controller: scrollController,
+                    children: [
+                      if (freshAccounts.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Center(
+                            child: Text('暂无历史账号',
+                                style: TextStyle(color: Colors.grey)),
+                          ),
+                        ),
+                      ...freshAccounts.map((account) {
                     final isCurrent = account.username == currentUsername;
                     return ListTile(
                       leading: CircleAvatar(
@@ -239,7 +246,7 @@ class SettingsPage extends ConsumerWidget {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (accounts.length > 1)
+                          if (freshAccounts.length > 1)
                             IconButton(
                               icon: const Icon(Icons.delete_outline, size: 20),
                               color: Colors.red,
@@ -282,8 +289,11 @@ class SettingsPage extends ConsumerWidget {
                       onTap: isCurrent
                           ? null
                           : () async {
-                              Navigator.pop(context);
-                              await _switchToAccount(context, ref, account);
+                              Navigator.of(context).pop();
+                              await Future.delayed(const Duration(milliseconds: 400));
+                              if (context.mounted) {
+                                await _switchToAccount(context, ref, account);
+                              }
                             },
                     );
                   }),
@@ -295,9 +305,14 @@ class SettingsPage extends ConsumerWidget {
                     ),
                     title: const Text('添加新账号'),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _addNewAccount(context, ref);
+                    onTap: () async {
+                      Navigator.of(context).pop();
+                      // Wait for bottom sheet animation to complete
+                      await Future.delayed(const Duration(milliseconds: 400));
+                      if (context.mounted) {
+                        print('Navigating to login page...');
+                        context.go('/connect?startAtLogin=true');
+                      }
                     },
                   ),
                 ],
@@ -305,6 +320,8 @@ class SettingsPage extends ConsumerWidget {
             ),
           ],
         ),
+        );
+        },
       ),
     );
   }
@@ -410,12 +427,6 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  void _addNewAccount(BuildContext context, WidgetRef ref) {
-    // TODO: Show login dialog or navigate to login page
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('请在连接页登录新账号')),
-    );
-  }
 
   Future<void> _showServerSwitcher(BuildContext context, WidgetRef ref) async {
     final serverSettingsAsync = ref.read(serverSettingsProvider);
@@ -423,11 +434,6 @@ class SettingsPage extends ConsumerWidget {
     if (serverSettings == null) return;
     final currentServerUrl =
         '${serverSettings.protocol}://${serverSettings.host}:${serverSettings.port}';
-    final servers = ref
-        .read(accountHistoryProvider)
-        .map((a) => a.serverUrl)
-        .toSet()
-        .toList();
 
     await showModalBottomSheet(
       context: context,
@@ -435,56 +441,67 @@ class SettingsPage extends ConsumerWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.5,
-        minChildSize: 0.3,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) => Column(
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  const Text(
-                    '切换服务器',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+      builder: (modalContext) => Consumer(
+        builder: (context, ref, child) {
+          // Get fresh data inside the modal
+          final freshAllAccounts = ref.watch(accountHistoryProvider);
+          final freshServers = freshAllAccounts
+              .map((a) => a.serverUrl)
+              .toSet()
+              .toList();
+          
+          print('Modal: Found ${freshServers.length} servers');
+          print('Total accounts: ${freshAllAccounts.length}');
+          
+          return DraggableScrollableSheet(
+            initialChildSize: 0.5,
+            minChildSize: 0.3,
+            maxChildSize: 0.9,
+            expand: false,
+            builder: (context, scrollController) => Column(
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
                   ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                controller: scrollController,
-                children: [
-                  if (servers.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(32),
-                      child: Center(
-                        child: Text('暂无历史服务器',
-                            style: TextStyle(color: Colors.grey)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      const Text(
+                        '切换服务器',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
-                    ),
-                  ...servers.map((serverUrl) {
-                    final isCurrent = serverUrl == currentServerUrl;
-                    final accounts = ref
-                        .read(accountHistoryProvider)
-                        .where((a) => a.serverUrl == serverUrl)
-                        .toList();
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView(
+                    controller: scrollController,
+                    children: [
+                      if (freshServers.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Center(
+                            child: Text('暂无历史服务器',
+                                style: TextStyle(color: Colors.grey)),
+                          ),
+                        ),
+                      ...freshServers.map((serverUrl) {
+                        final isCurrent = serverUrl == currentServerUrl;
+                        final accounts = freshAllAccounts
+                            .where((a) => a.serverUrl == serverUrl)
+                            .toList();
                     return ListTile(
                       leading: CircleAvatar(
                         backgroundColor: isCurrent
@@ -518,11 +535,11 @@ class SettingsPage extends ConsumerWidget {
                             ),
                         ],
                       ),
-                      subtitle: Text('${accounts.length} 个账号'),
+                      subtitle: Text('${freshAllAccounts.where((a) => a.serverUrl == serverUrl).length} 个账号'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (servers.length > 1)
+                          if (freshServers.length > 1)
                             IconButton(
                               icon: const Icon(Icons.delete_outline, size: 20),
                               color: Colors.red,
@@ -550,7 +567,10 @@ class SettingsPage extends ConsumerWidget {
                                   ),
                                 );
                                 if (confirm == true) {
-                                  for (final account in accounts) {
+                                  final accountsToDelete = freshAllAccounts
+                                      .where((a) => a.serverUrl == serverUrl)
+                                      .toList();
+                                  for (final account in accountsToDelete) {
                                     await ref
                                         .read(accountHistoryProvider.notifier)
                                         .removeAccount(
@@ -566,10 +586,16 @@ class SettingsPage extends ConsumerWidget {
                       ),
                       onTap: isCurrent
                           ? null
-                          : () {
-                              Navigator.pop(context);
-                              _switchToServer(
-                                  context, ref, serverUrl, accounts);
+                          : () async {
+                              Navigator.of(context).pop();
+                              await Future.delayed(const Duration(milliseconds: 400));
+                              if (context.mounted) {
+                                final accountsForServer = freshAllAccounts
+                                    .where((a) => a.serverUrl == serverUrl)
+                                    .toList();
+                                _switchToServer(
+                                    context, ref, serverUrl, accountsForServer);
+                              }
                             },
                     );
                   }),
@@ -581,9 +607,14 @@ class SettingsPage extends ConsumerWidget {
                     ),
                     title: const Text('添加新服务器'),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                    onTap: () {
-                      Navigator.pop(context);
-                      context.go('/connect');
+                    onTap: () async {
+                      Navigator.of(context).pop();
+                      // Wait for bottom sheet animation to complete
+                      await Future.delayed(const Duration(milliseconds: 400));
+                      if (context.mounted) {
+                        print('Navigating to connect page...');
+                        context.go('/connect');
+                      }
                     },
                   ),
                 ],
@@ -591,6 +622,8 @@ class SettingsPage extends ConsumerWidget {
             ),
           ],
         ),
+        );
+        },
       ),
     );
   }
@@ -695,14 +728,14 @@ class SettingsPage extends ConsumerWidget {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(16),
       ),
       child: ListTile(
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon, color: color, size: 24),
@@ -733,14 +766,14 @@ class SettingsPage extends ConsumerWidget {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(16),
       ),
       child: ListTile(
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon, color: color, size: 24),
@@ -759,7 +792,7 @@ class SettingsPage extends ConsumerWidget {
           onPressed: onTap,
           style: OutlinedButton.styleFrom(
             foregroundColor: color,
-            side: BorderSide(color: color.withOpacity(0.5)),
+            side: BorderSide(color: color.withValues(alpha: 0.5)),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           ),
           child: Text(actionLabel),

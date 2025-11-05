@@ -9,7 +9,9 @@ import '../../providers/account_history_provider.dart';
 import '../../providers/settings_provider.dart';
 
 class ModernConnectPage extends ConsumerStatefulWidget {
-  const ModernConnectPage({super.key});
+  const ModernConnectPage({super.key, this.startAtLogin = false});
+  
+  final bool startAtLogin;
 
   @override
   ConsumerState<ModernConnectPage> createState() => _ModernConnectPageState();
@@ -58,6 +60,11 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
         _protocol = value.protocol;
         _host.text = value.host;
         _port.text = value.port;
+        // If startAtLogin is true and we have server settings, go directly to login
+        if (widget.startAtLogin && value.host.isNotEmpty) {
+          _serverConnected = true;
+          _serverName = '${value.protocol}://${value.host}:${value.port}';
+        }
       });
     });
   }
@@ -87,25 +94,49 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
       setState(() {
         _serverConnected = true;
         _serverName = info['ServerName'] as String? ?? 'Emby Server';
+        _loading = false;
       });
     } on dio.DioException catch (e) {
-      setState(() {
-        _error = e.response?.statusMessage ?? e.message ?? '连接失败';
-      });
-    } catch (e) {
-      setState(() {
-        _error = '$e';
-      });
-    } finally {
+      final errorMsg = e.response?.statusMessage ?? e.message ?? '连接失败';
       if (mounted) {
         setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMsg),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$e'),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
       }
     }
   }
 
   Future<void> _login() async {
     if (_user.text.trim().isEmpty || _pwd.text.isEmpty) {
-      setState(() => _error = '请输入用户名和密码');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('请输入用户名和密码'),
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
       return;
     }
     setState(() {
@@ -140,16 +171,30 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
       } else {
         errorMsg = e.message ?? errorMsg;
       }
-      setState(() {
-        _error = errorMsg;
-      });
-    } catch (e) {
-      setState(() {
-        _error = '登录失败：$e';
-      });
-    } finally {
       if (mounted) {
         setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMsg),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('登录失败：$e'),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
       }
     }
   }
@@ -176,22 +221,6 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
     return Scaffold(
       extendBodyBehindAppBar: true,
       extendBody: true,
-      appBar: !_serverConnected
-          ? AppBar(
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              actions: [
-                TextButton.icon(
-                  onPressed: () => context.go('/'),
-                  icon: const Icon(Icons.home_rounded, color: Colors.white),
-                  label: const Text('跳过', style: TextStyle(color: Colors.white)),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                  ),
-                ),
-              ],
-            )
-          : null,
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -204,29 +233,52 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
             ],
           ),
         ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-              child: FadeTransition(
-                opacity: _fadeAnim,
-                child: SlideTransition(
-                  position: _slideAnim,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildLogo(),
-                      const SizedBox(height: 60),
-                      if (!_serverConnected)
-                        _buildServerCard()
-                      else
-                        _buildLoginCard(),
-                    ],
+        child: Stack(
+          children: [
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+                  child: FadeTransition(
+                    opacity: _fadeAnim,
+                    child: SlideTransition(
+                      position: _slideAnim,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildLogo(),
+                          const SizedBox(height: 40),
+                          if (!_serverConnected)
+                            _buildServerCard()
+                          else
+                            _buildLoginCard(),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
+            if (!_serverConnected)
+              Positioned(
+                top: 50,
+                right: 20,
+                child: SafeArea(
+                  child: TextButton.icon(
+                    onPressed: () => context.go('/'),
+                    icon: const Icon(Icons.home_rounded, color: Colors.white, size: 20),
+                    label: const Text('跳过', style: TextStyle(color: Colors.white, fontSize: 14)),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -236,13 +288,13 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
     return Column(
       children: [
         Container(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.15),
+            color: Colors.white.withValues(alpha: 0.15),
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.2),
+                color: Colors.black.withValues(alpha: 0.2),
                 blurRadius: 30,
                 offset: const Offset(0, 10),
               ),
@@ -250,26 +302,26 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
           ),
           child: const Icon(
             Icons.movie_filter_rounded,
-            size: 64,
+            size: 56,
             color: Colors.white,
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         const Text(
           'EmbyHub',
           style: TextStyle(
-            fontSize: 48,
+            fontSize: 42,
             fontWeight: FontWeight.w300,
             color: Colors.white,
             letterSpacing: 2,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Text(
           '让娱乐触手可及',
           style: TextStyle(
-            fontSize: 16,
-            color: Colors.white.withOpacity(0.8),
+            fontSize: 14,
+            color: Colors.white.withValues(alpha: 0.8),
             letterSpacing: 1,
           ),
         ),
@@ -282,7 +334,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
       constraints: const BoxConstraints(maxWidth: 400),
       child: Card(
         elevation: 24,
-        shadowColor: Colors.black.withOpacity(0.4),
+        shadowColor: Colors.black.withValues(alpha: 0.4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Container(
           padding: const EdgeInsets.all(32),
@@ -326,6 +378,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                   style: SegmentedButton.styleFrom(
                     selectedBackgroundColor: Colors.deepPurple,
                     selectedForegroundColor: Colors.white,
+                    foregroundColor: Colors.grey.shade800,
                   ),
                   segments: const [
                     ButtonSegment(
@@ -348,10 +401,11 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
               const SizedBox(height: 20),
               TextField(
                 controller: _host,
-                style: const TextStyle(fontSize: 16),
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
                 decoration: InputDecoration(
                   labelText: '服务器地址',
                   hintText: 'example.com 或 192.168.1.100',
+                  hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 16),
                   prefixIcon: const Icon(Icons.dns_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,
@@ -373,10 +427,11 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
               const SizedBox(height: 20),
               TextField(
                 controller: _port,
-                style: const TextStyle(fontSize: 16),
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
                 decoration: InputDecoration(
                   labelText: '端口',
                   hintText: '默认 8096',
+                  hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 16),
                   prefixIcon: const Icon(Icons.settings_ethernet_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,
@@ -396,34 +451,6 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 ),
                 keyboardType: TextInputType.number,
               ),
-              if (_error != null) ...[
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red.shade200, width: 1.5),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline_rounded,
-                          color: Colors.red.shade700, size: 24),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _error!,
-                          style: TextStyle(
-                            color: Colors.red.shade900,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               const SizedBox(height: 32),
               FilledButton(
                 onPressed: _loading ? null : _testConnection,
@@ -463,7 +490,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
       constraints: const BoxConstraints(maxWidth: 400),
       child: Card(
         elevation: 24,
-        shadowColor: Colors.black.withOpacity(0.4),
+        shadowColor: Colors.black.withValues(alpha: 0.4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Container(
           padding: const EdgeInsets.all(32),
@@ -520,9 +547,11 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
               TextField(
                 controller: _user,
                 autofocus: true,
-                style: const TextStyle(fontSize: 16),
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
                 decoration: InputDecoration(
                   labelText: '用户名',
+                  hintText: '输入用户名',
+                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 16),
                   prefixIcon: const Icon(Icons.person_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,
@@ -545,9 +574,11 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
               TextField(
                 controller: _pwd,
                 obscureText: true,
-                style: const TextStyle(fontSize: 16),
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
                 decoration: InputDecoration(
                   labelText: '密码',
+                  hintText: '输入密码',
+                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 16),
                   prefixIcon: const Icon(Icons.lock_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,
@@ -567,34 +598,6 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 ),
                 onSubmitted: (_) => _login(),
               ),
-              if (_error != null) ...[
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red.shade200, width: 1.5),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline_rounded,
-                          color: Colors.red.shade700, size: 24),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _error!,
-                          style: TextStyle(
-                            color: Colors.red.shade900,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               const SizedBox(height: 32),
               FilledButton(
                 onPressed: _loading ? null : _login,

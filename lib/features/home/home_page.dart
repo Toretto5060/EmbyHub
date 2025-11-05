@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -51,20 +53,20 @@ class _PlaceholderPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
     ));
 
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        middle: Text(title),
-        backgroundColor: const Color(0x00000000),
-        border: null,
-      ),
       child: SafeArea(
-        top: false,
-        child: const Center(child: Text('开发中…')),
+        top: true,
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: const Center(child: Text('开发中…')),
+        ),
       ),
     );
   }
