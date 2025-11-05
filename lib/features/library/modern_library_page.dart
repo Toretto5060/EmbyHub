@@ -99,7 +99,7 @@ class ModernLibraryPage extends ConsumerWidget {
               },
               child: ListView(
                 padding: EdgeInsets.zero,
-                children: [
+              children: [
                   // Server name header
                   Container(
                     width: double.infinity,
@@ -167,29 +167,29 @@ class ModernLibraryPage extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  // Continue Watching Section
-                  resumeItems.when(
-                    data: (items) {
-                      if (items.isEmpty) return const SizedBox.shrink();
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
+                // Continue Watching Section
+                resumeItems.when(
+                  data: (items) {
+                    if (items.isEmpty) return const SizedBox.shrink();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                           _buildSectionHeader(context, '继续观看'),
-                          _buildResumeList(context, ref, items),
+                        _buildResumeList(context, ref, items),
                           const SizedBox(height: 32),
-                        ],
-                      );
-                    },
-                    loading: () => const SizedBox.shrink(),
-                    error: (_, __) => const SizedBox.shrink(),
-                  ),
+                      ],
+                    );
+                  },
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, __) => const SizedBox.shrink(),
+                ),
                   // My Libraries Section
-                  views.when(
-                    data: (viewList) {
-                      if (viewList.isEmpty) {
-                        return _buildEmptyState(context, isLoggedIn: true);
-                      }
-                      return Column(
+                views.when(
+                  data: (viewList) {
+                    if (viewList.isEmpty) {
+                      return _buildEmptyState(context, isLoggedIn: true);
+                    }
+                    return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _buildSectionHeader(context, '我的媒体'),
@@ -197,17 +197,17 @@ class ModernLibraryPage extends ConsumerWidget {
                           _buildLibraryGrid(context, viewList),
                           const SizedBox(height: 16),
                         ],
-                      );
-                    },
-                    loading: () => const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(32),
-                        child: CupertinoActivityIndicator(),
-                      ),
+                    );
+                  },
+                  loading: () => const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32),
+                      child: CupertinoActivityIndicator(),
                     ),
-                    error: (e, _) => Center(child: Text('加载失败: $e')),
                   ),
-                ],
+                  error: (e, _) => Center(child: Text('加载失败: $e')),
+                ),
+              ],
               ),
             );
           },
@@ -227,7 +227,7 @@ class ModernLibraryPage extends ConsumerWidget {
       child: DefaultTextStyle(
         style: TextStyle(
           fontSize: 20,
-          fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.bold,
           color: isDark ? Colors.white : Colors.black87,
         ),
         child: Text(title),
@@ -258,14 +258,14 @@ class ModernLibraryPage extends ConsumerWidget {
       width: 150,
       margin: const EdgeInsets.only(right: 12),
       child: CupertinoButton(
-        padding: EdgeInsets.zero,
+              padding: EdgeInsets.zero,
         onPressed: view.id != null && view.id!.isNotEmpty
             ? () => context.go('/library/${view.id}?name=${Uri.encodeComponent(view.name)}')
             : null,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: Stack(
-            children: [
+                children: [
               // Background image from Emby - try Primary type for library views
               if (view.id != null && view.id!.isNotEmpty)
                 FutureBuilder<EmbyApi>(
@@ -291,7 +291,7 @@ class ModernLibraryPage extends ConsumerWidget {
                     final imageUrl = snapshot.data!.buildImageUrl(
                       itemId: view.id!,
                       type: 'Primary',
-                      maxWidth: 300,
+                      maxWidth: 240,
                     );
                     print('Image URL: $imageUrl');
                     return Image.network(
@@ -313,7 +313,7 @@ class ModernLibraryPage extends ConsumerWidget {
                         print('Error loading image for ${view.name}: $error');
                         // Fallback to gradient background
                         return Container(
-                          height: 100,
+                          height: 80,
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topLeft,
@@ -331,7 +331,7 @@ class ModernLibraryPage extends ConsumerWidget {
                 )
               else
                 Container(
-                  height: 100,
+                  height: 80,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
@@ -359,12 +359,12 @@ class ModernLibraryPage extends ConsumerWidget {
               ),
               // Title
               Positioned(
-                bottom: 8,
-                left: 8,
-                right: 8,
+                bottom: 6,
+                left: 6,
+                right: 6,
                 child: DefaultTextStyle(
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
                     shadows: [
@@ -376,12 +376,13 @@ class ModernLibraryPage extends ConsumerWidget {
                   ),
                   child: Text(
                     view.name,
+                    textAlign: TextAlign.center,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                ),
               ),
-            ],
+            ),
+        ],
           ),
         ),
       ),
@@ -526,7 +527,7 @@ class ModernLibraryPage extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-              ),
+            ),
           ],
         ),
       ),

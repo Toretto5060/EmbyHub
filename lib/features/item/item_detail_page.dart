@@ -26,28 +26,17 @@ class ItemDetailPage extends ConsumerWidget {
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
     
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (bool didPop, dynamic result) {
-        if (!didPop) {
-          context.go('/');
-        }
-      },
-      child: CupertinoPageScaffold(
+    return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
+        leading: CupertinoNavigationBarBackButton(
+          color: isDark ? Colors.white : Colors.black87,
+          onPressed: () => context.pop(),
+        ),
         middle: Text(
           '详情',
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black87,
           ),
-        ),
-        leading: CupertinoButton(
-          padding: EdgeInsets.zero,
-          child: Icon(
-            CupertinoIcons.back,
-            color: isDark ? Colors.white : Colors.black87,
-          ),
-          onPressed: () => context.go('/'),
         ),
         backgroundColor: CupertinoColors.systemBackground,
         border: Border(
@@ -104,7 +93,6 @@ class ItemDetailPage extends ConsumerWidget {
           loading: () => const Center(child: CupertinoActivityIndicator()),
           error: (e, _) => Center(child: Text('加载失败: $e')),
         ),
-      ),
       ),
     );
   }

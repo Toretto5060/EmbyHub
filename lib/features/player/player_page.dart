@@ -10,7 +10,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/emby_api.dart';
-import '../../providers/settings_provider.dart';
 
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({required this.itemId, super.key});
@@ -77,28 +76,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
     
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (bool didPop, dynamic result) {
-        if (!didPop) {
-          context.go('/');
-        }
-      },
-      child: CupertinoPageScaffold(
+    return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
+        leading: CupertinoNavigationBarBackButton(
+          color: isDark ? Colors.white : Colors.black87,
+          onPressed: () => context.pop(),
+        ),
         middle: Text(
           '播放器',
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black87,
           ),
-        ),
-        leading: CupertinoButton(
-          padding: EdgeInsets.zero,
-          child: Icon(
-            CupertinoIcons.back,
-            color: isDark ? Colors.white : Colors.black87,
-          ),
-          onPressed: () => context.go('/'),
         ),
         backgroundColor: CupertinoColors.systemBackground,
         border: Border(
@@ -136,7 +124,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 ],
               )
             : const Center(child: CupertinoActivityIndicator()),
-      ),
       ),
     );
   }

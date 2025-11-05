@@ -11,7 +11,12 @@ final itemsProvider =
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
   final api = await EmbyApi.create();
-  return api.getItemsByParent(userId: auth.userId!, parentId: viewId);
+  // 对于电视剧库，只获取 Series，不获取单集
+  return api.getItemsByParent(
+    userId: auth.userId!, 
+    parentId: viewId,
+    includeItemTypes: 'Movie,Series,BoxSet,Video', // 不包含 Episode
+  );
 });
 
 class LibraryItemsPage extends ConsumerWidget {
@@ -30,28 +35,17 @@ class LibraryItemsPage extends ConsumerWidget {
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
     
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (bool didPop, dynamic result) {
-        if (!didPop) {
-          context.go('/');
-        }
-      },
-      child: CupertinoPageScaffold(
+    return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
+        leading: CupertinoNavigationBarBackButton(
+          color: isDark ? Colors.white : Colors.black87,
+          onPressed: () => context.pop(),
+        ),
         middle: Text(
           viewName,
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black87,
           ),
-        ),
-        leading: CupertinoButton(
-          padding: EdgeInsets.zero,
-          child: Icon(
-            CupertinoIcons.back,
-            color: isDark ? Colors.white : Colors.black87,
-          ),
-          onPressed: () => context.go('/'),
         ),
         backgroundColor: CupertinoColors.systemBackground,
         border: Border(
@@ -91,7 +85,6 @@ class LibraryItemsPage extends ConsumerWidget {
           error: (e, _) => Center(child: Text('加载失败: $e')),
         ),
       ),
-      ),
     );
   }
 }
@@ -105,7 +98,14 @@ class _ItemTile extends ConsumerWidget {
     return CupertinoButton(
       padding: EdgeInsets.zero,
       onPressed: item.id != null && item.id!.isNotEmpty 
-          ? () => context.go('/item/${item.id}')
+          ? () {
+              // Series 类型跳转到剧集详情页，其他类型跳转到普通详情页
+              if (item.type == 'Series') {
+                context.go('/series/${item.id}?name=${Uri.encodeComponent(item.name)}');
+              } else {
+                context.go('/item/${item.id}');
+              }
+            }
           : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -113,7 +113,7 @@ class _ItemTile extends ConsumerWidget {
           Expanded(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: _Poster(itemId: item.id),
+              child: _Poster(itemId: item.id, itemType: item.type),
             ),
           ),
           const SizedBox(height: 6),
@@ -130,8 +130,9 @@ class _ItemTile extends ConsumerWidget {
 }
 
 class _Poster extends ConsumerWidget {
-  const _Poster({required this.itemId});
+  const _Poster({required this.itemId, this.itemType});
   final String? itemId;
+  final String? itemType;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -150,14 +151,22 @@ class _Poster extends ConsumerWidget {
         if (!snapshot.hasData) {
           return const ColoredBox(color: CupertinoColors.systemGrey4);
         }
-        final url = snapshot.data!.buildImageUrl(itemId: itemId!);
+        
+        // 使用 Primary 类型获取海报
+        final url = snapshot.data!.buildImageUrl(itemId: itemId!, type: 'Primary');
+        
         return Image.network(
           url,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Container(
             color: CupertinoColors.systemGrey4,
-            child: const Center(
-              child: Icon(CupertinoIcons.film, size: 48),
+            child: Center(
+              child: Icon(
+                itemType == 'Series' || itemType == 'Episode' 
+                    ? CupertinoIcons.tv 
+                    : CupertinoIcons.film, 
+                size: 48,
+              ),
             ),
           ),
         );

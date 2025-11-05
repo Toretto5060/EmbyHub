@@ -176,17 +176,106 @@ class EmbyApi {
       {required String userId,
       required String parentId,
       int startIndex = 0,
-      int limit = 60}) async {
-    final res = await _dio.get('/Users/$userId/Items', queryParameters: {
+      int limit = 60,
+      String? includeItemTypes}) async {
+    final queryParams = {
       'ParentId': parentId,
       'StartIndex': startIndex,
       'Limit': limit,
       'Recursive': true,
-      'IncludeItemTypes': 'Movie,Series,Episode,BoxSet,Video',
       'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview',
-    });
+    };
+    
+    // 如果指定了类型，使用指定的；否则使用默认的
+    if (includeItemTypes != null) {
+      queryParams['IncludeItemTypes'] = includeItemTypes;
+    } else {
+      queryParams['IncludeItemTypes'] = 'Movie,Series,BoxSet,Video';
+    }
+    
+    final res = await _dio.get('/Users/$userId/Items', queryParameters: queryParams);
     final list = (res.data['Items'] as List).cast<Map<String, dynamic>>();
     return list.map((e) => ItemInfo.fromJson(e)).toList();
+  }
+  
+  // 获取某个剧集的季列表
+  Future<List<ItemInfo>> getSeasons({
+    required String userId,
+    required String seriesId,
+  }) async {
+    try {
+      print('getSeasons: userId=$userId, seriesId=$seriesId');
+      final res = await _dio.get('/Shows/$seriesId/Seasons', queryParameters: {
+        'UserId': userId,
+        'Fields': 'PrimaryImageAspectRatio,Overview',
+      });
+      print('getSeasons response: ${res.data}');
+      
+      if (res.data is! Map<String, dynamic>) {
+        print('getSeasons: Response is not a Map');
+        return [];
+      }
+      
+      final items = res.data['Items'];
+      if (items == null) {
+        print('getSeasons: No Items field in response');
+        return [];
+      }
+      
+      if (items is! List) {
+        print('getSeasons: Items is not a List');
+        return [];
+      }
+      
+      final list = items.cast<Map<String, dynamic>>();
+      print('getSeasons: Found ${list.length} seasons');
+      return list.map((e) => ItemInfo.fromJson(e)).toList();
+    } catch (e, stack) {
+      print('getSeasons error: $e');
+      print('Stack trace: $stack');
+      rethrow;
+    }
+  }
+  
+  // 获取某一季的所有集
+  Future<List<ItemInfo>> getEpisodes({
+    required String userId,
+    required String seriesId,
+    required String seasonId,
+  }) async {
+    try {
+      print('getEpisodes: userId=$userId, seriesId=$seriesId, seasonId=$seasonId');
+      final res = await _dio.get('/Shows/$seriesId/Episodes', queryParameters: {
+        'UserId': userId,
+        'SeasonId': seasonId,
+        'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview',
+      });
+      print('getEpisodes response: ${res.data}');
+      
+      if (res.data is! Map<String, dynamic>) {
+        print('getEpisodes: Response is not a Map');
+        return [];
+      }
+      
+      final items = res.data['Items'];
+      if (items == null) {
+        print('getEpisodes: No Items field in response');
+        return [];
+      }
+      
+      if (items is! List) {
+        print('getEpisodes: Items is not a List');
+        return [];
+      }
+      
+      final list = items.cast<Map<String, dynamic>>();
+      print('getEpisodes: Found ${list.length} episodes');
+      return list.map((e) => ItemInfo.fromJson(e)).toList();
+    } catch (e, stack) {
+      print('getEpisodes error: $e');
+      print('Stack trace: $stack');
+      rethrow;
+    }
   }
 
   Future<ItemInfo> getItem(String userId, String itemId) async {

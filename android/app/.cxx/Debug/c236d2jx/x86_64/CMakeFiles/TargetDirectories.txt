@@ -1,0 +1,2 @@
+/Users/toretto/Documents/code/embyhub/android/app/.cxx/Debug/c236d2jx/x86_64/CMakeFiles/edit_cache.dir
+/Users/toretto/Documents/code/embyhub/android/app/.cxx/Debug/c236d2jx/x86_64/CMakeFiles/rebuild_cache.dir

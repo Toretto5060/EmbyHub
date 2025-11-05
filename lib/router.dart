@@ -7,7 +7,13 @@ import 'features/connect/modern_connect_page.dart';
 import 'features/home/home_page.dart';
 import 'features/item/item_detail_page.dart';
 import 'features/library/library_items_page.dart';
+import 'features/library/series_detail_page.dart';
+import 'features/library/season_episodes_page.dart';
 import 'features/player/player_page.dart';
+
+// 用于全局访问 navigator key
+final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
+final GlobalKey<NavigatorState> _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
 // Cupertino style page transition
 CupertinoPage<T> buildCupertinoPage<T>({
@@ -22,6 +28,7 @@ CupertinoPage<T> buildCupertinoPage<T>({
 
 GoRouter createRouter() {
   return GoRouter(
+    navigatorKey: _rootNavigatorKey,
     initialLocation: '/',
     redirect: (context, state) async {
       final prefs = await sp.SharedPreferences.getInstance();
@@ -44,6 +51,9 @@ GoRouter createRouter() {
       if (!hasToken && state.matchedLocation.startsWith('/player/')) {
         return '/';
       }
+      if (!hasToken && state.matchedLocation.startsWith('/series/')) {
+        return '/';
+      }
       return null;
     },
     routes: [
@@ -57,35 +67,79 @@ GoRouter createRouter() {
           );
         },
       ),
-      GoRoute(
-        path: '/',
-        pageBuilder: (context, state) => buildCupertinoPage(
-          child: const HomePage(),
-          state: state,
-        ),
-      ),
-      GoRoute(
-        path: '/library/:viewId',
-        pageBuilder: (context, state) {
-          final viewId = state.pathParameters['viewId'] ?? '';
-          final viewName = state.uri.queryParameters['name'] ?? '媒体库';
-          return buildCupertinoPage(
-            child: LibraryItemsPage(
-              viewId: viewId,
-              viewName: viewName,
-            ),
-            state: state,
+      // Shell Route - 包含底部导航的主页面
+      ShellRoute(
+        navigatorKey: _shellNavigatorKey,
+        pageBuilder: (context, state, child) {
+          return NoTransitionPage(
+            child: HomePage(child: child),
           );
         },
+        routes: [
+          GoRoute(
+            path: '/',
+            pageBuilder: (context, state) => const NoTransitionPage(
+              child: SizedBox.shrink(), // 首页内容在 HomePage 中显示
+            ),
+          ),
+          GoRoute(
+            path: '/library/:viewId',
+            pageBuilder: (context, state) {
+              final viewId = state.pathParameters['viewId'] ?? '';
+              final viewName = state.uri.queryParameters['name'] ?? '媒体库';
+              return buildCupertinoPage(
+                child: LibraryItemsPage(
+                  viewId: viewId,
+                  viewName: viewName,
+                ),
+                state: state,
+              );
+            },
+          ),
+          GoRoute(
+            path: '/series/:seriesId',
+            pageBuilder: (context, state) {
+              final seriesId = state.pathParameters['seriesId'] ?? '';
+              final seriesName = state.uri.queryParameters['name'] ?? '剧集详情';
+              return buildCupertinoPage(
+                child: SeriesDetailPage(
+                  seriesId: seriesId,
+                  seriesName: seriesName,
+                ),
+                state: state,
+              );
+            },
+          ),
+          GoRoute(
+            path: '/series/:seriesId/season/:seasonId',
+            pageBuilder: (context, state) {
+              final seriesId = state.pathParameters['seriesId'] ?? '';
+              final seasonId = state.pathParameters['seasonId'] ?? '';
+              final seriesName = state.uri.queryParameters['seriesName'] ?? '剧集';
+              final seasonName = state.uri.queryParameters['seasonName'] ?? '第一季';
+              return buildCupertinoPage(
+                child: SeasonEpisodesPage(
+                  seriesId: seriesId,
+                  seasonId: seasonId,
+                  seriesName: seriesName,
+                  seasonName: seasonName,
+                ),
+                state: state,
+              );
+            },
+          ),
+          GoRoute(
+            path: '/item/:itemId',
+            pageBuilder: (context, state) => buildCupertinoPage(
+              child: ItemDetailPage(itemId: state.pathParameters['itemId'] ?? ''),
+              state: state,
+            ),
+          ),
+        ],
       ),
+      // 全屏页面（隐藏底部导航）
       GoRoute(
-        path: '/item/:itemId',
-        pageBuilder: (context, state) => buildCupertinoPage(
-          child: ItemDetailPage(itemId: state.pathParameters['itemId'] ?? ''),
-          state: state,
-        ),
-      ),
-      GoRoute(
+        parentNavigatorKey: _rootNavigatorKey,
         path: '/player/:itemId',
         pageBuilder: (context, state) => buildCupertinoPage(
           child: PlayerPage(itemId: state.pathParameters['itemId'] ?? ''),
