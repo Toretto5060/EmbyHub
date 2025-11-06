@@ -13,6 +13,7 @@ import 'features/library/music_page.dart';
 import 'features/library/series_detail_page.dart';
 import 'features/library/season_episodes_page.dart';
 import 'features/player/player_page.dart';
+import 'features/splash/splash_page.dart';
 
 // 用于全局访问 navigator key
 final GlobalKey<NavigatorState> _rootNavigatorKey =
@@ -34,34 +35,16 @@ CupertinoPage<T> buildCupertinoPage<T>({
 GoRouter createRouter() {
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: '/',
-    redirect: (context, state) async {
-      final prefs = await sp.SharedPreferences.getInstance();
-      final token = prefs.getString('emby_token');
-      final hasToken = token != null && token.isNotEmpty;
-
-      // Allow access to home page always
-      // If logged in and on connect page, go to home
-      if (hasToken && state.matchedLocation == '/connect') {
-        return '/';
-      }
-
-      // Redirect to connect page only for protected routes when not logged in
-      if (!hasToken && state.matchedLocation.startsWith('/library/')) {
-        return '/';
-      }
-      if (!hasToken && state.matchedLocation.startsWith('/item/')) {
-        return '/';
-      }
-      if (!hasToken && state.matchedLocation.startsWith('/player/')) {
-        return '/';
-      }
-      if (!hasToken && state.matchedLocation.startsWith('/series/')) {
-        return '/';
-      }
-      return null;
-    },
+    initialLocation: '/splash',
     routes: [
+      // 启动页
+      GoRoute(
+        path: '/splash',
+        pageBuilder: (context, state) => buildCupertinoPage(
+          child: const SplashPage(),
+          state: state,
+        ),
+      ),
       GoRoute(
         path: '/connect',
         pageBuilder: (context, state) {
@@ -84,8 +67,9 @@ GoRouter createRouter() {
         routes: [
           GoRoute(
             path: '/',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: HomePage(),
+            pageBuilder: (context, state) => buildCupertinoPage(
+              child: const HomePage(),
+              state: state,
             ),
           ),
           GoRoute(

@@ -19,8 +19,11 @@ class EmbyApi {
     final baseUrl = _buildBaseUrl(protocol, host, port);
     final dioClient = dio.Dio(dio.BaseOptions(
         baseUrl: baseUrl,
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 30)));
+        connectTimeout: const Duration(seconds: 30),  // 增加到30秒
+        receiveTimeout: const Duration(seconds: 60),  // 增加到60秒
+        sendTimeout: const Duration(seconds: 60)));   // 增加发送超时
+    
+    // 添加请求头拦截器
     dioClient.interceptors
         .add(dio.InterceptorsWrapper(onRequest: (options, handler) async {
       final token = prefs.getString('emby_token');
@@ -33,7 +36,55 @@ class EmbyApi {
       }
       handler.next(options);
     }));
+    
+    // 添加重试拦截器（仅对非登录接口，最多重试2次）
+    dioClient.interceptors.add(
+      dio.InterceptorsWrapper(
+        onError: (error, handler) async {
+          final retryCount = error.requestOptions.extra['retryCount'] as int? ?? 0;
+          
+          // 对于网络错误进行重试（除了登录接口，最多重试2次）
+          if (_shouldRetry(error) && retryCount < 2) {
+            print('🔄 Retry ${retryCount + 1}/2 for: ${error.requestOptions.uri}');
+            
+            // 等待一段时间后重试
+            await Future.delayed(Duration(milliseconds: 500 * (retryCount + 1)));
+            
+            try {
+              // 更新重试计数
+              error.requestOptions.extra['retryCount'] = retryCount + 1;
+              final response = await dioClient.fetch(error.requestOptions);
+              print('✅ Retry successful for: ${error.requestOptions.uri}');
+              handler.resolve(response);
+            } catch (e) {
+              print('❌ Retry ${retryCount + 1} failed: $e');
+              handler.next(error);
+            }
+          } else {
+            if (retryCount >= 2) {
+              print('❌ Max retries (2) reached for: ${error.requestOptions.uri}');
+            }
+            handler.next(error);
+          }
+        },
+      ),
+    );
+    
     return EmbyApi(dioClient);
+  }
+  
+  // 判断是否应该重试
+  static bool _shouldRetry(dio.DioException error) {
+    // 登录接口不重试
+    if (error.requestOptions.path.contains('AuthenticateByName')) {
+      return false;
+    }
+    
+    // 只对网络错误和超时错误重试
+    return error.type == dio.DioExceptionType.connectionTimeout ||
+        error.type == dio.DioExceptionType.receiveTimeout ||
+        error.type == dio.DioExceptionType.sendTimeout ||
+        error.type == dio.DioExceptionType.connectionError;
   }
 
   static String _buildBaseUrl(String protocol, String host, String port) {
@@ -82,13 +133,7 @@ class EmbyApi {
     await prefs.setString(
         'emby_user_name', user['Name'] as String? ?? username);
 
-    // Save account to history
-    final protocol = prefs.getString('server_protocol') ?? 'http';
-    final host = prefs.getString('server_host') ?? '';
-    final port = prefs.getString('server_port') ?? '';
-    final serverUrl = _buildBaseUrl(protocol, host, port);
-    // Note: This would need to be called from the provider layer
-    // For now, we'll handle this in the connect page
+    // Note: Account history is handled in the connect page
 
     return LoginResult(
         token: token,
@@ -122,9 +167,8 @@ class EmbyApi {
       final list = items.cast<Map<String, dynamic>>();
       print('getUserViews: Found ${list.length} views');
       return list.map((e) => ViewInfo.fromJson(e)).toList();
-    } catch (e, stack) {
+    } catch (e) {
       print('getUserViews error: $e');
-      print('Stack trace: $stack');
       rethrow;
     }
   }
@@ -146,7 +190,8 @@ class EmbyApi {
       final list =
           (res.data['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
       return list.map((e) => ItemInfo.fromJson(e)).toList();
-    } catch (e, stack) {
+    } catch (e) {
+      print('getResumeItems error: $e');
       return [];
     }
   }
@@ -171,7 +216,8 @@ class EmbyApi {
         return list.map((e) => ItemInfo.fromJson(e)).toList();
       }
       return [];
-    } catch (e, stack) {
+    } catch (e) {
+      print('getLatestItems error: $e');
       return [];
     }
   }

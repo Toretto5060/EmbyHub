@@ -4,72 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
+import '../../providers/library_provider.dart';
 import '../../widgets/home_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
-
-final _resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
-  // Watch authStateProvider so this provider rebuilds when auth changes
-  final authAsync = ref.watch(authStateProvider);
-  final auth = authAsync.value;
-
-  print('=== _resumeProvider 调试 ===');
-  print('authAsync.hasValue: ${authAsync.hasValue}');
-  print('auth: $auth');
-  print('auth?.isLoggedIn: ${auth?.isLoggedIn}');
-
-  if (auth == null || !auth.isLoggedIn) {
-    print('_resumeProvider: Not logged in, returning empty list');
-    return <ItemInfo>[];
-  }
-
-  print('_resumeProvider: Fetching resume items for userId=${auth.userId}');
-  final api = await EmbyApi.create();
-  final items = await api.getResumeItems(auth.userId!);
-  print('_resumeProvider: Got ${items.length} resume items');
-  for (var i = 0; i < items.length && i < 3; i++) {
-    print('  - ${items[i].name} (${items[i].type})');
-  }
-  return items;
-});
-
-final _viewsProvider = FutureProvider.autoDispose<List<ViewInfo>>((ref) async {
-  // Watch authStateProvider so this provider rebuilds when auth changes
-  final authAsync = ref.watch(authStateProvider);
-  final auth = authAsync.value;
-
-  if (auth == null || !auth.isLoggedIn) {
-    print('_viewsProvider: Not logged in');
-    return <ViewInfo>[];
-  }
-
-  final api = await EmbyApi.create();
-  final views = await api.getUserViews(auth.userId!);
-  // for (final view in views) {
-  //   print(
-  //       '  View: id=${view.id}, name=${view.name}, type=${view.collectionType}');
-  // }
-  return views;
-});
-
-final _latestByViewProvider = FutureProvider.autoDispose
-    .family<List<ItemInfo>, String>((ref, viewId) async {
-  // Watch authStateProvider so this provider rebuilds when auth changes
-  final authAsync = ref.watch(authStateProvider);
-  final auth = authAsync.value;
-
-  if (auth == null || !auth.isLoggedIn) {
-    print('_latestByViewProvider: Not logged in for viewId=$viewId');
-    return <ItemInfo>[];
-  }
-
-  print('_latestByViewProvider: Fetching latest items for viewId=$viewId');
-  final api = await EmbyApi.create();
-  final items = await api.getLatestItems(auth.userId!, parentId: viewId);
-  print('_latestByViewProvider: Got ${items.length} items for viewId=$viewId');
-  return items;
-});
 
 class ModernLibraryPage extends ConsumerStatefulWidget {
   const ModernLibraryPage({super.key});
@@ -80,10 +21,105 @@ class ModernLibraryPage extends ConsumerStatefulWidget {
 
 class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
   final _scrollController = ScrollController();
+  bool _isRefreshing = false;  // ✅ 独立的刷新状态
 
   // 统一管理间距
   static const double _sectionTitleToContentSpacing = 5.0; // 模块标题距离下方卡片的高度
   static const double _sectionSpacing = 5.0; // 模块之间的距离
+
+  // ✅ 获取服务器名称（优先从缓存）
+  Future<String> _getServerName(String fallback) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedName = prefs.getString('server_name');
+      if (savedName != null && savedName.isNotEmpty) {
+        return savedName;
+      }
+      
+      // 缓存未命中，请求获取
+      final api = await EmbyApi.create();
+      final info = await api.systemInfo();
+      final serverName = info['ServerName'] as String?;
+      
+      if (serverName != null && serverName.isNotEmpty) {
+        await prefs.setString('server_name', serverName);
+        return serverName;
+      }
+    } catch (e) {
+      print('获取服务器名称失败: $e');
+    }
+    
+    return fallback;
+  }
+
+  // ✅ 构建带 loading 的标题（标题固定居中，loading紧贴右侧）
+  Widget _buildTitleWithLoading(String title, bool isLoading) {
+    final titleWidget = buildHomeTitle(title);
+    
+    return Center(
+      child: IntrinsicWidth(
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // 标题
+            titleWidget,
+            // loading 定位在标题右侧（使用 Positioned.fill 的技巧）
+            if (isLoading)
+              Positioned(
+                left: null,  // 不限制左侧
+                right: -24,  // 相对于标题右边缘向右24px（8px间距 + 16px loading）
+                top: 0,
+                bottom: 0,
+                child: const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: EdgeInsets.only(left: 8),
+                    child: CupertinoActivityIndicator(radius: 8),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ✅ 等待所有刷新请求完成（后台执行）
+  Future<void> _waitForAllRefreshComplete(List<ViewInfo>? viewList) async {
+    try {
+      final futures = <Future>[
+        ref.read(resumeProvider.future),
+        ref.read(viewsProvider.future),
+      ];
+      
+      if (viewList != null) {
+        for (final view in viewList) {
+          if (view.collectionType != 'livetv' && 
+              view.collectionType != 'music' && 
+              view.id != null) {
+            futures.add(ref.read(latestByViewProvider(view.id!).future));
+          }
+        }
+      }
+      
+      print('🔄 后台等待 ${futures.length} 个请求完成...');
+      await Future.wait(futures);
+      print('✅ 所有刷新请求已完成');
+      
+      if (mounted) {
+        setState(() {
+          _isRefreshing = false;
+        });
+      }
+    } catch (e) {
+      print('❌ 刷新请求出错: $e');
+      if (mounted) {
+        setState(() {
+          _isRefreshing = false;
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -104,36 +140,61 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
 
     final auth = ref.watch(authStateProvider);
     final server = ref.watch(serverSettingsProvider);
-    print('build: 开始 watch _resumeProvider');
-    final resumeItems = ref.watch(_resumeProvider);
-    print('build: resumeItems 状态: ${resumeItems.runtimeType}');
-    final views = ref.watch(_viewsProvider);
+    
+    // ✅ 从缓存读取（启动页已预加载）
+    print('build: 📖 读取缓存数据: resumeProvider + viewsProvider');
+    final resumeItems = ref.watch(resumeProvider);
+    final views = ref.watch(viewsProvider);
+    
+    // ✅ 检测是否有任何请求正在加载（不包括下拉刷新）
+    final isAnyLoading = !_isRefreshing && (
+      resumeItems.isLoading || 
+      views.isLoading
+    );
+    
+    // ✅ 第二波并行请求：预加载所有媒体库的最新内容
+    // 当 views 有数据后，立即触发所有 latest 请求（不等待渲染）
+    final viewIds = views.whenData((viewList) {
+      return viewList
+          .where((v) => v.collectionType != 'livetv' && 
+                        v.collectionType != 'music' && 
+                        v.id != null)
+          .map((v) => v.id!)
+          .toList();
+    }).value ?? [];
+    
+    // 立即触发所有媒体库的最新内容请求（并行）
+    final latestProviders = <AsyncValue<List<ItemInfo>>>[];
+    if (viewIds.isNotEmpty) {
+      print('build: 🚀 并行请求所有媒体库最新内容: ${viewIds.length} 个');
+      for (final viewId in viewIds) {
+        final latestAsync = ref.watch(latestByViewProvider(viewId));
+        latestProviders.add(latestAsync);
+      }
+    }
+    
+    // ✅ 检测是否有最新内容正在加载
+    final isLatestLoading = latestProviders.any((p) => p.isLoading);
+    
+    // ✅ 综合加载状态（任何数据正在加载都显示 loading）
+    final shouldShowLoading = _isRefreshing || isAnyLoading || isLatestLoading;
 
     return CupertinoPageScaffold(
       navigationBar: HomeNavigationBar(
         scrollController: _scrollController,
         title: server.when(
           data: (serverData) {
-            return FutureBuilder<EmbyApi>(
-              future: EmbyApi.create(),
+            // ✅ 优先从 SharedPreferences 读取服务器名称（启动页已保存）
+            return FutureBuilder<String>(
+              future: _getServerName(serverData.host),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return buildHomeTitle('EmbyHub');
-                }
-                return FutureBuilder<Map<String, dynamic>>(
-                  future: snapshot.data!.systemInfo(),
-                  builder: (context, infoSnapshot) {
-                    final serverName =
-                        (infoSnapshot.data?['ServerName'] as String?) ??
-                            serverData.host;
-                    return buildHomeTitle(serverName);
-                  },
-                );
+                final serverName = snapshot.data ?? serverData.host;
+                return _buildTitleWithLoading(serverName, shouldShowLoading);
               },
             );
           },
-          loading: () => buildHomeTitle('EmbyHub'),
-          error: (_, __) => buildHomeTitle('EmbyHub'),
+          loading: () => _buildTitleWithLoading('EmbyHub', shouldShowLoading),
+          error: (_, __) => _buildTitleWithLoading('EmbyHub', shouldShowLoading),
         ),
         // trailing 预留给将来的功能，如搜索、设置等
         trailing: null,
@@ -146,12 +207,38 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
           return RefreshIndicator(
             displacement: 20,
             edgeOffset: MediaQuery.of(context).padding.top + 44,
-            onRefresh: () async {
-              // Invalidate providers to refresh data
-              ref.invalidate(_resumeProvider);
-              ref.invalidate(_viewsProvider);
-              // Wait a bit for the refresh to complete
-              await Future.delayed(const Duration(milliseconds: 500));
+              onRefresh: () async {
+              print('🔄 下拉刷新：开始刷新所有数据');
+              
+              setState(() {
+                _isRefreshing = true;
+              });
+              
+              // ✅ 获取当前的媒体库列表（用于刷新最新内容）
+              final currentViewList = ref.read(viewsProvider).value;
+              
+              // ✅ 刷新继续观看和媒体库列表
+              ref.invalidate(resumeProvider);
+              ref.invalidate(viewsProvider);
+              
+              // ✅ 刷新所有媒体库的最新内容（并行）
+              if (currentViewList != null) {
+                for (final view in currentViewList) {
+                  if (view.collectionType != 'livetv' && 
+                      view.collectionType != 'music' && 
+                      view.id != null) {
+                    ref.invalidate(latestByViewProvider(view.id!));
+                    print('  - 刷新: ${view.name}');
+                  }
+                }
+              }
+              
+              // ✅ 固定时间后结束下拉动画
+              await Future.delayed(const Duration(milliseconds: 1000));
+              print('✅ 下拉刷新：动画结束（后台继续加载）');
+              
+              // ✅ 在后台继续等待所有请求完成
+              _waitForAllRefreshComplete(currentViewList);
             },
             child: ListView(
               controller: _scrollController,
@@ -205,7 +292,43 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                       child: CupertinoActivityIndicator(),
                     ),
                   ),
-                  error: (e, _) => const Center(child: Text('加载失败')),
+                  error: (e, st) {
+                    // 网络错误时显示错误提示和重试按钮
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32.0),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              CupertinoIcons.wifi_exclamationmark,
+                              size: 64,
+                              color: Colors.grey.shade400,
+                            ),
+                            const SizedBox(height: 16),
+                            DefaultTextStyle(
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: isDark ? Colors.white.withValues(alpha: 0.7) : Colors.black.withValues(alpha: 0.7),
+                              ),
+                              child: const Text(
+                                '加载媒体库失败\n请检查网络连接',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            CupertinoButton.filled(
+                              onPressed: () {
+                                ref.invalidate(viewsProvider);
+                                ref.invalidate(resumeProvider);
+                              },
+                              child: const Text('重试'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -424,7 +547,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
 
   Widget _buildLatestSection(
       BuildContext context, WidgetRef ref, ViewInfo view) {
-    final latestItems = ref.watch(_latestByViewProvider(view.id ?? ''));
+    final latestItems = ref.watch(latestByViewProvider(view.id ?? ''));
 
     return latestItems.when(
       data: (items) {
