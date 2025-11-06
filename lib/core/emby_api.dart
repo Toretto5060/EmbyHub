@@ -345,6 +345,11 @@ class EmbyApi {
         '/Items/$itemId/Images/$type?maxWidth=$maxWidth';
   }
 
+  // ✅ 获取用户头像URL
+  String buildUserImageUrl(String userId) {
+    return _dio.options.baseUrl + '/Users/$userId/Images/Primary';
+  }
+
   // Prefer HLS master for adaptive bitrate
   MediaSourceUrl buildHlsUrl(String itemId) {
     final uri = _dio.options.baseUrl + '/Videos/$itemId/master.m3u8';

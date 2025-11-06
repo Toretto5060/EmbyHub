@@ -7,6 +7,7 @@ import '../../core/emby_api.dart';
 import '../../providers/account_history_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/fade_in_image.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -42,6 +43,13 @@ class SettingsPage extends ConsumerWidget {
                       actionLabel: '切换',
                       onTap: () =>
                           _showAccountSwitcher(context, ref, serverData),
+                      leadingWidget: authData.userId != null
+                          ? _UserAvatarRounded(
+                              userId: authData.userId,
+                              username: authData.userName ?? 'U',
+                              color: Colors.blue,
+                            )
+                          : null,
                     ),
                   ],
                 ),
@@ -152,6 +160,10 @@ class SettingsPage extends ConsumerWidget {
     final serverUrl = '${server.protocol}://${server.host}:${server.port}';
     final auth = ref.read(authStateProvider).value;
     final currentUsername = auth?.userName;
+    
+    // ✅ 保存外层 context 和 ref
+    final outerContext = context;
+    final outerRef = ref;
 
     await showModalBottomSheet(
       context: context,
@@ -170,7 +182,11 @@ class SettingsPage extends ConsumerWidget {
           print('Modal: Found ${freshAccounts.length} accounts for $serverUrl');
           print('Total accounts: ${allAccounts.length}');
           
-          return DraggableScrollableSheet(
+          String? loadingAccount;  // ✅ 当前正在切换的账号（放在外面作为闭包变量）
+          
+          return StatefulBuilder(
+            builder: (context, setModalState) {
+              return DraggableScrollableSheet(
             initialChildSize: 0.5,
             minChildSize: 0.3,
             maxChildSize: 0.9,
@@ -197,7 +213,9 @@ class SettingsPage extends ConsumerWidget {
                       const Spacer(),
                       IconButton(
                         icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: loadingAccount == null
+                            ? () => Navigator.pop(context)
+                            : null,  // ✅ 切换中禁用关闭按钮
                       ),
                     ],
                   ),
@@ -217,23 +235,17 @@ class SettingsPage extends ConsumerWidget {
                       ...freshAccounts.map((account) {
                     final isCurrent = account.username == currentUsername;
                     return ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: isCurrent
-                            ? Colors.green.shade100
-                            : Colors.blue.shade100,
-                        child: Text(
-                          account.username[0].toUpperCase(),
-                          style: TextStyle(
-                            color: isCurrent
-                                ? Colors.green.shade700
-                                : Colors.blue.shade700,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                      leading: _UserAvatar(
+                        userId: account.userId,
+                        username: account.username,
+                        isCurrent: isCurrent,
                       ),
-                      title: Row(
+                      title: Text(account.username),
+                      subtitle: Text(isCurrent ? '当前登录账号' : loadingAccount == account.username ? '正在切换...' : '点击切换'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Expanded(child: Text(account.username)),
+                          // ✅ "当前"标识 - 垂直居中，靠右
                           if (isCurrent)
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -250,13 +262,16 @@ class SettingsPage extends ConsumerWidget {
                                 ),
                               ),
                             ),
-                        ],
-                      ),
-                      subtitle: Text(isCurrent ? '当前登录账号' : '点击登录'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (freshAccounts.length > 1)
+                          // ✅ loading圈或删除按钮
+                          if (loadingAccount == account.username) ...[
+                            const SizedBox(width: 8),
+                            const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ] else if (freshAccounts.length > 1 && !isCurrent) ...[
+                            const SizedBox(width: 8),
                             IconButton(
                               icon: const Icon(Icons.delete_outline, size: 20),
                               color: Colors.red,
@@ -292,17 +307,49 @@ class SettingsPage extends ConsumerWidget {
                                 }
                               },
                             ),
-                          if (!isCurrent)
+                          ] else if (!isCurrent) ...[
+                            const SizedBox(width: 8),
                             const Icon(Icons.arrow_forward_ios, size: 16),
+                          ],
                         ],
                       ),
-                      onTap: isCurrent
-                          ? null
+                      onTap: isCurrent || loadingAccount != null
+                          ? null  // ✅ 当前账号或正在切换时禁用
                           : () async {
-                              Navigator.of(context).pop();
-                              await Future.delayed(const Duration(milliseconds: 400));
-                              if (context.mounted) {
-                                await _switchToAccount(context, ref, account);
+                              print('👆 Account tile tapped: ${account.username}');
+                              
+                              // ✅ 显示loading状态
+                              setModalState(() {
+                                loadingAccount = account.username;
+                              });
+                              
+                              // 调用切换账号方法
+                              print('👆 Calling _switchToAccount for ${account.username}');
+                              final result = await _switchToAccount(outerContext, outerRef, account);
+                              
+                              // ✅ 切换成功
+                              if (result['success'] == true) {
+                                print('✅ Switch successful, closing sheet and navigating to home');
+                                
+                                // 关闭账号切换弹窗
+                                if (context.mounted) {
+                                  Navigator.of(context).pop();
+                                }
+                                
+                                // 等待弹窗完全关闭
+                                await Future.delayed(const Duration(milliseconds: 500));
+                                
+                                // 直接跳转到首页（不再显示成功对话框）
+                                if (outerContext.mounted) {
+                                  print('🏠 Navigating to home page');
+                                  outerContext.go('/');
+                                }
+                              } else {
+                                // 失败或取消，重置loading状态
+                                print('❌ Switch failed or cancelled, resetting loading state');
+                                setModalState(() {
+                                  loadingAccount = null;
+                                });
                               }
                             },
                     );
@@ -329,17 +376,17 @@ class SettingsPage extends ConsumerWidget {
               ),
             ),
           ],
-        ),
-        );
-        },
-      ),
-    );
+        ),  // Column
+              );  // DraggableScrollableSheet builder
+            },  // StatefulBuilder builder
+          );  // StatefulBuilder
+        },  // Consumer builder
+      ),  // Consumer
+    );  // showModalBottomSheet
   }
 
-  Future<void> _switchToAccount(
+  Future<Map<String, dynamic>> _switchToAccount(
       BuildContext context, WidgetRef ref, AccountRecord account) async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
     print('🔄 [Switch] Starting switch to account: ${account.username}');
     print('🔄 [Switch] Server URL: ${account.serverUrl}');
     print('🔄 [Switch] Saved token: ${account.lastToken != null ? "exists" : "null"}');
@@ -350,11 +397,6 @@ class SettingsPage extends ConsumerWidget {
       if (account.lastToken != null && account.lastToken!.isNotEmpty &&
           account.userId != null && account.userId!.isNotEmpty) {
         print('🔑 [Switch] Trying saved token and userId for ${account.username}');
-        
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(
-              content: Text('正在切换账号...'), duration: Duration(seconds: 3)),
-        );
         
         final prefs = await SharedPreferences.getInstance();
         
@@ -383,6 +425,9 @@ class SettingsPage extends ConsumerWidget {
           print('🔄 [Switch] Reloading authStateProvider...');
           await ref.read(authStateProvider.notifier).load();
           
+          // 等待状态更新完成
+          await Future.delayed(const Duration(milliseconds: 300));
+          
           // 验证 authStateProvider 的状态
           final authState = ref.read(authStateProvider).value;
           print('✅ [Switch] AuthStateProvider reloaded:');
@@ -390,14 +435,7 @@ class SettingsPage extends ConsumerWidget {
           print('✅ [Switch]   userName: ${authState?.userName}');
           print('✅ [Switch]   isLoggedIn: ${authState?.isLoggedIn}');
           
-          scaffoldMessenger.hideCurrentSnackBar();
-          scaffoldMessenger.showSnackBar(
-            SnackBar(
-              content: Text('已切换到 ${account.username}'),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-          return;
+          return {'success': true, 'username': account.username};  // ✅ 返回成功
         } catch (e) {
           print('❌ [Switch] Token invalid or expired: $e');
           print('🔐 [Switch] Will require password login');
@@ -408,8 +446,6 @@ class SettingsPage extends ConsumerWidget {
       }
 
       // ✅ Token 失效或不存在，要求输入密码
-      scaffoldMessenger.hideCurrentSnackBar();
-      
       if (context.mounted) {
         print('🔐 [Switch] Showing password dialog for ${account.username}');
         final password = await _showPasswordDialog(context, account.username);
@@ -418,17 +454,10 @@ class SettingsPage extends ConsumerWidget {
         
         if (password == null || password.isEmpty) {
           print('❌ [Switch] User cancelled password input');
-          scaffoldMessenger.showSnackBar(
-            const SnackBar(content: Text('已取消切换账号')),
-          );
-          return;
+          return {'success': false, 'username': account.username};  // ✅ 返回失败（用户取消）
         }
         
         print('📡 [Switch] Calling api.authenticate() with username: ${account.username}');
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(
-              content: Text('正在登录...'), duration: Duration(seconds: 5)),
-        );
         
         final api = await EmbyApi.create();
         final loginResult = await api.authenticate(
@@ -442,7 +471,7 @@ class SettingsPage extends ConsumerWidget {
         // ✅ 更新账号历史中的 token 和 userId
         await ref.read(accountHistoryProvider.notifier).addAccount(
           account.serverUrl,
-          account.username,
+          loginResult.userName,
           loginResult.token,
           userId: loginResult.userId,
         );
@@ -458,6 +487,9 @@ class SettingsPage extends ConsumerWidget {
         print('🔄 [Switch] Reloading authStateProvider...');
         await ref.read(authStateProvider.notifier).load();
         
+        // 等待状态更新完成
+        await Future.delayed(const Duration(milliseconds: 300));
+        
         // 验证 authStateProvider 的状态
         final authState = ref.read(authStateProvider).value;
         print('✅ [Switch] AuthStateProvider reloaded:');
@@ -465,25 +497,33 @@ class SettingsPage extends ConsumerWidget {
         print('✅ [Switch]   userName: ${authState?.userName}');
         print('✅ [Switch]   isLoggedIn: ${authState?.isLoggedIn}');
         
-        scaffoldMessenger.hideCurrentSnackBar();
-        scaffoldMessenger.showSnackBar(
-          SnackBar(
-            content: Text('已切换到 ${loginResult.userName}'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        return {'success': true, 'username': loginResult.userName};  // ✅ 返回成功
       }
+      
+      // ✅ context not mounted
+      return {'success': false, 'username': account.username};
     } catch (e, stackTrace) {
       print('❌ [Switch] Switch account failed: $e');
       print('❌ [Switch] Stack trace: $stackTrace');
-      scaffoldMessenger.hideCurrentSnackBar();
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('切换失败: ${e.toString()}'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      
+      // ✅ 显示居中错误提示
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('切换失败'),
+            content: Text(e.toString()),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        );
+      }
+      
+      return {'success': false, 'username': account.username};  // ✅ 返回失败
     }
   }
 
@@ -868,6 +908,7 @@ class SettingsPage extends ConsumerWidget {
     required Color color,
     required String actionLabel,
     required VoidCallback onTap,
+    Widget? leadingWidget,  // ✅ 可选的自定义 leading widget
   }) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -876,7 +917,7 @@ class SettingsPage extends ConsumerWidget {
         borderRadius: BorderRadius.circular(16),
       ),
       child: ListTile(
-        leading: Container(
+        leading: leadingWidget ?? Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: color.withOpacity( 0.1),
@@ -904,6 +945,131 @@ class SettingsPage extends ConsumerWidget {
           child: Text(actionLabel),
         ),
       ),
+    );
+  }
+}
+
+// ✅ 用户头像组件 - 圆形（用于账号切换列表）
+class _UserAvatar extends StatelessWidget {
+  const _UserAvatar({
+    required this.username,
+    required this.isCurrent,
+    this.userId,
+  });
+
+  final String? userId;
+  final String username;
+  final bool isCurrent;
+
+  @override
+  Widget build(BuildContext context) {
+    // 如果没有 userId，直接显示默认头像
+    if (userId == null || userId!.isEmpty) {
+      return _buildDefaultAvatar();
+    }
+
+    return FutureBuilder<EmbyApi>(
+      future: EmbyApi.create(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return _buildDefaultAvatar();
+        }
+
+        final api = snapshot.data!;
+        final avatarUrl = api.buildUserImageUrl(userId!);
+
+        return ClipOval(
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: EmbyFadeInImage(
+              imageUrl: avatarUrl,
+              fit: BoxFit.cover,
+              placeholder: _buildDefaultAvatar(),
+              fadeDuration: const Duration(milliseconds: 300),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDefaultAvatar() {
+    return CircleAvatar(
+      backgroundColor: isCurrent
+          ? Colors.green.shade100
+          : Colors.blue.shade100,
+      child: Text(
+        username[0].toUpperCase(),
+        style: TextStyle(
+          color: isCurrent
+              ? Colors.green.shade700
+              : Colors.blue.shade700,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+// ✅ 用户头像组件 - 圆角矩形（用于设置页"当前用户"）
+class _UserAvatarRounded extends StatelessWidget {
+  const _UserAvatarRounded({
+    required this.username,
+    required this.color,
+    this.userId,
+  });
+
+  final String? userId;
+  final String username;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    // 如果没有 userId，直接显示默认图标
+    if (userId == null || userId!.isEmpty) {
+      return _buildDefaultIcon();
+    }
+
+    return FutureBuilder<EmbyApi>(
+      future: EmbyApi.create(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return _buildDefaultIcon();
+        }
+
+        final api = snapshot.data!;
+        final avatarUrl = api.buildUserImageUrl(userId!);
+
+        return Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: EmbyFadeInImage(
+              imageUrl: avatarUrl,
+              fit: BoxFit.cover,
+              placeholder: _buildDefaultIcon(),
+              fadeDuration: const Duration(milliseconds: 300),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDefaultIcon() {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(Icons.person_rounded, color: color, size: 24),
     );
   }
 }

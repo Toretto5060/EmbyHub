@@ -33,6 +33,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
   bool _loading = false;
   String? _error;
   String? _serverName;
+  bool _rememberMe = false;  // ✅ 记住我选项，默认勾选
 
   @override
   void initState() {
@@ -155,17 +156,22 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
       final api = await EmbyApi.create();
       final result = await api.authenticate(username: _user.text.trim(), password: _pwd.text);
       
-      // Save to account history
-      final serverSettingsAsync = ref.read(serverSettingsProvider);
-      final serverSettings = serverSettingsAsync.value;
-      if (serverSettings != null) {
-        final serverUrl = '${serverSettings.protocol}://${serverSettings.host}:${serverSettings.port}';
-        await ref.read(accountHistoryProvider.notifier).addAccount(
-          serverUrl,
-          result.userName,
-          result.token,
-          userId: result.userId,
-        );
+      // ✅ 只有勾选了"记住我"才保存到账号历史
+      if (_rememberMe) {
+        final serverSettingsAsync = ref.read(serverSettingsProvider);
+        final serverSettings = serverSettingsAsync.value;
+        if (serverSettings != null) {
+          final serverUrl = '${serverSettings.protocol}://${serverSettings.host}:${serverSettings.port}';
+          await ref.read(accountHistoryProvider.notifier).addAccount(
+            serverUrl,
+            result.userName,
+            result.token,
+            userId: result.userId,
+          );
+          print('💾 Saved account to history: ${result.userName}');
+        }
+      } else {
+        print('⚠️ Remember me not checked, skipping account history');
       }
       
       await ref.read(authStateProvider.notifier).load();
@@ -607,7 +613,38 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 ),
                 onSubmitted: (_) => _login(),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 16),
+              // ✅ 记住我选项
+              Row(
+                children: [
+                  Checkbox(
+                    value: _rememberMe,
+                    onChanged: (value) {
+                      setState(() {
+                        _rememberMe = value ?? true;
+                      });
+                    },
+                    activeColor: Colors.deepPurple,
+                  ),
+                  const Text(
+                    '记住我',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Tooltip(
+                    message: '勾选后，账号信息将被保存，下次可快速切换',
+                    child: Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
               FilledButton(
                 onPressed: _loading ? null : _login,
                 style: FilledButton.styleFrom(
