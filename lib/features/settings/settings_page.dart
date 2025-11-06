@@ -403,12 +403,13 @@ class SettingsPage extends ConsumerWidget {
                     title: const Text('添加新账号'),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                     onTap: () async {
-                      Navigator.of(context).pop();
+                      Navigator.of(context).pop();  // 关闭 bottom sheet
                       // Wait for bottom sheet animation to complete
                       await Future.delayed(const Duration(milliseconds: 400));
-                      if (context.mounted) {
+                      // ✅ 使用 outerContext 导航，因为 bottom sheet 关闭后 context 可能失效
+                      if (outerContext.mounted) {
                         print('Navigating to login page...');
-                        context.go('/connect?startAtLogin=true');
+                        outerContext.go('/connect?startAtLogin=true');
                       }
                     },
                   ),
@@ -620,6 +621,9 @@ class SettingsPage extends ConsumerWidget {
     if (serverSettings == null) return;
     final currentServerUrl =
         '${serverSettings.protocol}://${serverSettings.host}:${serverSettings.port}';
+    
+    // ✅ 保存外层 context
+    final outerContext = context;
 
     await showModalBottomSheet(
       context: context,
@@ -794,12 +798,13 @@ class SettingsPage extends ConsumerWidget {
                     title: const Text('添加新服务器'),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                     onTap: () async {
-                      Navigator.of(context).pop();
+                      Navigator.of(context).pop();  // 关闭 bottom sheet
                       // Wait for bottom sheet animation to complete
                       await Future.delayed(const Duration(milliseconds: 400));
-                      if (context.mounted) {
+                      // ✅ 使用 outerContext 导航，因为 bottom sheet 关闭后 context 可能失效
+                      if (outerContext.mounted) {
                         print('Navigating to connect page...');
-                        context.go('/connect');
+                        outerContext.go('/connect');
                       }
                     },
                   ),
