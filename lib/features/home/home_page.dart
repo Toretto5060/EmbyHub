@@ -14,16 +14,13 @@ class HomePage extends StatelessWidget {
     // 使用 BottomNavProvider 获取当前标签索引
     final currentIndex = BottomNavProvider.of(context)?.currentIndex ?? 0;
 
-    return PopScope(
-      canPop: true, // 首页允许退出 APP
-      child: IndexedStack(
+    return IndexedStack(
         index: currentIndex,
         children: const [
           ModernLibraryPage(),
           _PlaceholderPage(title: '收藏/下载'),
           SettingsPage(),
         ],
-      ),
     );
   }
 }

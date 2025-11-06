@@ -8,14 +8,29 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity: FlutterActivity() {
-    private val channelName = "app.pip"
+    private val pipChannelName = "app.pip"
+    private val platformChannelName = "com.embyhub/platform"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
+        
+        // PIP 功能通道
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pipChannelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "enter" -> {
                     enterPip()
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+        
+        // 平台功能通道
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, platformChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "moveToBackground" -> {
+                    // 将应用移到后台（不退出）
+                    moveTaskToBack(true)
                     result.success(true)
                 }
                 else -> result.notImplemented()
