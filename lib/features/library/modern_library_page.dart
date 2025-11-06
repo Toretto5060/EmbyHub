@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/home_navigation_bar.dart';
+import '../../widgets/fade_in_image.dart';
 
 final _resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
   // Watch authStateProvider so this provider rebuilds when auth changes
@@ -340,45 +341,33 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                             ),
                           );
                         }
-                        // Try Primary type first
                         final imageUrl = snapshot.data!.buildImageUrl(
                           itemId: view.id!,
                           type: 'Primary',
-                          maxWidth: 400, // 提高图片清晰度
+                          maxWidth: 400,
                         );
-                        return Image.network(
-                          imageUrl,
+                        if (imageUrl.isEmpty) {
+                          return Container(
+                            height: 100,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  Colors.blue.shade300,
+                                  Colors.purple.shade400,
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+                        return SizedBox(
                           height: 100,
                           width: 150,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) return child;
-                            return Container(
-                              height: 100,
-                              color: CupertinoColors.systemGrey5,
-                              child: const Center(
-                                child: CupertinoActivityIndicator(),
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            print(
-                                'Error loading image for ${view.name}: $error');
-                            // Fallback to gradient background
-                            return Container(
-                              height: 100,
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    Colors.blue.shade300,
-                                    Colors.purple.shade400,
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
+                          child: EmbyFadeInImage(
+                            imageUrl: imageUrl,
+                            fit: BoxFit.cover,
+                          ),
                         );
                       },
                     )
@@ -509,6 +498,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                 if (item.type == 'Series') {
                   context.push(
                       '/series/${item.id}?name=${Uri.encodeComponent(item.name)}');
+                } else if (item.type == 'Movie') {
+                  // 电影类型跳转到详情页
+                  context.push('/item/${item.id}');
                 } else {
                   context.push('/player/${item.id}');
                 }
@@ -706,7 +698,17 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
       margin: const EdgeInsets.only(left: 6, right: 6),
       child: CupertinoButton(
         padding: EdgeInsets.zero,
-        onPressed: () => context.push('/player/${item.id}'),
+        onPressed: item.id != null && item.id!.isNotEmpty
+            ? () {
+                if (item.type == 'Movie') {
+                  // 电影类型跳转到详情页
+                  context.push('/item/${item.id}');
+                } else {
+                  // 其他类型（剧集等）跳转到播放器
+                  context.push('/player/${item.id}');
+                }
+              }
+            : null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -726,17 +728,20 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                                   child: const Icon(CupertinoIcons.film),
                                 );
                               }
-                              return Image.network(
-                                snapshot.data!.buildImageUrl(
-                                  itemId: item.id!,
-                                  type: 'Primary',
-                                  maxWidth: 600,
-                                ),
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
+                              final imageUrl = snapshot.data!.buildImageUrl(
+                                itemId: item.id!,
+                                type: 'Primary',
+                                maxWidth: 600,
+                              );
+                              if (imageUrl.isEmpty) {
+                                return Container(
                                   color: CupertinoColors.systemGrey5,
                                   child: const Icon(CupertinoIcons.film),
-                                ),
+                                );
+                              }
+                              return EmbyFadeInImage(
+                                imageUrl: imageUrl,
+                                fit: BoxFit.cover,
                               );
                             },
                           )
@@ -854,15 +859,15 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
           type: 'Primary',
           maxWidth: 300,
         );
-        return Image.network(
-          url,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
+        if (url.isEmpty) {
+          return Container(
             color: CupertinoColors.systemGrey5,
-            child: const Center(
-              child: Icon(CupertinoIcons.film, size: 48),
-            ),
-          ),
+            child: const Icon(CupertinoIcons.photo, size: 32),
+          );
+        }
+        return EmbyFadeInImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
         );
       },
     );

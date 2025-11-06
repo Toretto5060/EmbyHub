@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/blur_navigation_bar.dart';
+import '../../widgets/fade_in_image.dart';
 
 // Provider 获取某一季的集列表
 final episodesProvider = FutureProvider.family
@@ -332,18 +333,12 @@ class _EpisodeThumbnail extends ConsumerWidget {
         // 使用 Primary 类型获取集的缩略图
         final url = snapshot.data!
             .buildImageUrl(itemId: episodeId!, type: 'Primary', maxWidth: 280);
-        return Image.network(
-          url,
+        return SizedBox(
           width: 140,
           height: 80,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            width: 140,
-            height: 80,
-            color: CupertinoColors.systemGrey4,
-            child: const Center(
-              child: Icon(CupertinoIcons.play_circle, size: 32),
-            ),
+          child: EmbyFadeInImage(
+            imageUrl: url,
+            fit: BoxFit.cover,
           ),
         );
       },

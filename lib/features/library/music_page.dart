@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/blur_navigation_bar.dart';
+import '../../widgets/fade_in_image.dart';
 
 final musicItemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
@@ -188,15 +189,9 @@ class _MusicCover extends ConsumerWidget {
           type: 'Primary',
           maxWidth: 400,
         );
-        return Image.network(
-          url,
+        return EmbyFadeInImage(
+          imageUrl: url,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            color: CupertinoColors.systemGrey5,
-            child: const Center(
-              child: Icon(CupertinoIcons.music_note_2, size: 48),
-            ),
-          ),
         );
       },
     );

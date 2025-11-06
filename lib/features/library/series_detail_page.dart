@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/blur_navigation_bar.dart';
+import '../../widgets/fade_in_image.dart';
 
 // Provider 获取剧集的季列表
 final seasonsProvider =
@@ -290,18 +291,12 @@ class _SeriesPoster extends ConsumerWidget {
         }
         final url =
             snapshot.data!.buildImageUrl(itemId: seriesId, type: 'Primary');
-        return Image.network(
-          url,
+        return SizedBox(
           width: 120,
           height: 180,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            width: 120,
-            height: 180,
-            color: CupertinoColors.systemGrey4,
-            child: const Center(
-              child: Icon(CupertinoIcons.tv, size: 48),
-            ),
+          child: EmbyFadeInImage(
+            imageUrl: url,
+            fit: BoxFit.cover,
           ),
         );
       },
@@ -425,18 +420,12 @@ class _SeasonThumbnail extends ConsumerWidget {
         }
         final url = snapshot.data!
             .buildImageUrl(itemId: seasonId!, type: 'Primary', maxWidth: 160);
-        return Image.network(
-          url,
+        return SizedBox(
           width: 80,
           height: 120,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            width: 80,
-            height: 120,
-            color: CupertinoColors.systemGrey4,
-            child: const Center(
-              child: Icon(CupertinoIcons.tv, size: 32),
-            ),
+          child: EmbyFadeInImage(
+            imageUrl: url,
+            fit: BoxFit.cover,
           ),
         );
       },

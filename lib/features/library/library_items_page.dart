@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/blur_navigation_bar.dart';
+import '../../widgets/fade_in_image.dart';
 
 final itemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
@@ -185,10 +186,10 @@ class _Poster extends ConsumerWidget {
         final url =
             snapshot.data!.buildImageUrl(itemId: itemId!, type: 'Primary');
 
-        return Image.network(
-          url,
+        return EmbyFadeInImage(
+          imageUrl: url,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
+          placeholder: Container(
             color: CupertinoColors.systemGrey4,
             child: Center(
               child: Icon(

@@ -139,7 +139,7 @@ class EmbyApi {
         'SortBy': 'DatePlayed',
         'SortOrder': 'Descending',
         'Fields':
-            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear',
+            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
         'ImageTypeLimit': 1,
         'EnableImageTypes': 'Primary,Backdrop,Thumb',
       });
@@ -187,7 +187,7 @@ class EmbyApi {
       'StartIndex': startIndex,
       'Limit': limit,
       'Recursive': true,
-      'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview',
+      'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
     };
 
     // 如果指定了类型，使用指定的；否则使用默认的
@@ -212,7 +212,7 @@ class EmbyApi {
       print('getSeasons: userId=$userId, seriesId=$seriesId');
       final res = await _dio.get('/Shows/$seriesId/Seasons', queryParameters: {
         'UserId': userId,
-        'Fields': 'PrimaryImageAspectRatio,Overview',
+        'Fields': 'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
       });
       print('getSeasons response: ${res.data}');
 
@@ -254,7 +254,7 @@ class EmbyApi {
       final res = await _dio.get('/Shows/$seriesId/Episodes', queryParameters: {
         'UserId': userId,
         'SeasonId': seasonId,
-        'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview',
+        'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
       });
       print('getEpisodes response: ${res.data}');
 
@@ -287,7 +287,8 @@ class EmbyApi {
   Future<ItemInfo> getItem(String userId, String itemId) async {
     final res =
         await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
-      'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview',
+      'Fields':
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
     });
     return ItemInfo.fromJson(res.data as Map<String, dynamic>);
   }
