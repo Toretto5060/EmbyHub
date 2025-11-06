@@ -351,10 +351,60 @@ class EmbyApi {
   }
 
   // Prefer HLS master for adaptive bitrate
-  MediaSourceUrl buildHlsUrl(String itemId) {
-    final uri = _dio.options.baseUrl + '/Videos/$itemId/master.m3u8';
-    final headers = Map<String, String>.from(
-        _dio.options.headers.map((k, v) => MapEntry(k, '$v')));
+  Future<MediaSourceUrl> buildHlsUrl(String itemId) async {
+    // ✅ 从 SharedPreferences 获取 token（因为 dio headers 是在拦截器中动态设置的）
+    final prefs = await sp.SharedPreferences.getInstance();
+    final token = prefs.getString('emby_token') ?? '';
+    final userId = prefs.getString('emby_user_id') ?? '';
+    
+    if (userId.isEmpty) {
+      throw Exception('User ID is empty');
+    }
+    
+    // ✅ 先获取 item 信息（包含 MediaSources）
+    final res = await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
+      'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+    });
+    final itemJson = res.data as Map<String, dynamic>;
+    final item = ItemInfo.fromJson(itemJson);
+    print('🎬 [API] Item: ${item.name}, Type: ${item.type}');
+    
+    // ✅ 从 MediaSources 获取第一个可用的 MediaSourceId
+    String mediaSourceId = itemId;  // 默认使用 itemId
+    if (itemJson['MediaSources'] != null && itemJson['MediaSources'] is List) {
+      final mediaSources = itemJson['MediaSources'] as List;
+      if (mediaSources.isNotEmpty) {
+        final firstSource = mediaSources[0] as Map<String, dynamic>;
+        mediaSourceId = firstSource['Id'] as String? ?? itemId;
+        print('🎬 [API] MediaSourceId: $mediaSourceId');
+      }
+    }
+    
+    // ✅ 尝试使用最简单的直接下载 URL（最兼容的方式）
+    final uri = _dio.options.baseUrl + 
+        '/Items/$itemId/Download' +
+        '?api_key=$token';
+    
+    print('🎬 [API] Trying direct download URL first: $uri');
+    
+    // 如果直接下载失败，再尝试 HLS
+    // final playSessionId = DateTime.now().millisecondsSinceEpoch.toString();
+    // final hlsUri = _dio.options.baseUrl + 
+    //     '/Videos/$itemId/master.m3u8' +
+    //     '?MediaSourceId=$mediaSourceId' +
+    //     '&PlaySessionId=$playSessionId' +
+    //     '&api_key=$token';
+    
+    final headers = <String, String>{
+      'X-Emby-Token': token,
+    };
+    
+    print('🎬 [API] HLS Master URL: $uri');
+    if (token.isNotEmpty) {
+      print('🎬 [API] Token: ${token.substring(0, token.length > 10 ? 10 : token.length)}...');
+    } else {
+      print('⚠️ [API] Token is empty!');
+    }
     return MediaSourceUrl(uri: uri, headers: headers);
   }
 }
