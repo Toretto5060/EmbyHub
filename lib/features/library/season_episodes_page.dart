@@ -63,8 +63,8 @@ class SeasonEpisodesPage extends ConsumerWidget {
                 style: TextStyle(
                   fontSize: 12,
                   color: isDark
-                      ? Colors.white.withValues(alpha: 0.6)
-                      : Colors.black.withValues(alpha: 0.6),
+                      ? Colors.white.withOpacity( 0.6)
+                      : Colors.black.withOpacity( 0.6),
                 ),
                 child: Text(seasonName),
               ),
@@ -74,8 +74,8 @@ class SeasonEpisodesPage extends ConsumerWidget {
           border: Border(
             bottom: BorderSide(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.1)
-                  : Colors.black.withValues(alpha: 0.1),
+                  ? Colors.white.withOpacity( 0.1)
+                  : Colors.black.withOpacity( 0.1),
               width: 0.5,
             ),
           ),
@@ -122,7 +122,7 @@ class SeasonEpisodesPage extends ConsumerWidget {
                     DefaultTextStyle(
                       style: TextStyle(
                         fontSize: 12,
-                        color: isDark ? Colors.white.withValues(alpha: 0.7) : Colors.black.withValues(alpha: 0.7),
+                        color: isDark ? Colors.white.withOpacity( 0.7) : Colors.black.withOpacity( 0.7),
                       ),
                       child: Text(
                         '错误信息: ${e.toString()}',
@@ -133,7 +133,7 @@ class SeasonEpisodesPage extends ConsumerWidget {
                     DefaultTextStyle(
                       style: TextStyle(
                         fontSize: 10,
-                        color: isDark ? Colors.white.withValues(alpha: 0.5) : Colors.black.withValues(alpha: 0.5),
+                        color: isDark ? Colors.white.withOpacity( 0.5) : Colors.black.withOpacity( 0.5),
                       ),
                       child: Text(
                         'seriesId: $seriesId\nseasonId: $seasonId',
@@ -207,8 +207,8 @@ class _EpisodeTile extends ConsumerWidget {
                         style: TextStyle(
                           fontSize: 12,
                           color: isDark
-                              ? Colors.white.withValues(alpha: 0.5)
-                              : Colors.black.withValues(alpha: 0.5),
+                              ? Colors.white.withOpacity( 0.5)
+                              : Colors.black.withOpacity( 0.5),
                         ),
                         child: Text(episodeNumber),
                       ),
@@ -231,8 +231,8 @@ class _EpisodeTile extends ConsumerWidget {
                         style: TextStyle(
                           fontSize: 13,
                           color: isDark
-                              ? Colors.white.withValues(alpha: 0.6)
-                              : Colors.black.withValues(alpha: 0.6),
+                              ? Colors.white.withOpacity( 0.6)
+                              : Colors.black.withOpacity( 0.6),
                           height: 1.4,
                         ),
                         child: Text(
@@ -248,8 +248,8 @@ class _EpisodeTile extends ConsumerWidget {
                         style: TextStyle(
                           fontSize: 12,
                           color: isDark
-                              ? Colors.white.withValues(alpha: 0.5)
-                              : Colors.black.withValues(alpha: 0.5),
+                              ? Colors.white.withOpacity( 0.5)
+                              : Colors.black.withOpacity( 0.5),
                         ),
                         child: Text(_formatDuration(episode.runTimeTicks!)),
                       ),

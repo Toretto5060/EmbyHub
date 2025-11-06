@@ -270,7 +270,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                     label: const Text('跳过', style: TextStyle(color: Colors.white, fontSize: 14)),
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                backgroundColor: Colors.white.withOpacity(0.2),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
@@ -290,11 +290,11 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.15),
+            color: Colors.white.withOpacity(0.15),
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.2),
+                color: Colors.black.withOpacity(0.2),
                 blurRadius: 30,
                 offset: const Offset(0, 10),
               ),
@@ -321,7 +321,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
           '让娱乐触手可及',
           style: TextStyle(
             fontSize: 14,
-            color: Colors.white.withValues(alpha: 0.8),
+            color: Colors.white.withOpacity(0.8),
             letterSpacing: 1,
           ),
         ),
@@ -334,7 +334,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
       constraints: const BoxConstraints(maxWidth: 400),
       child: Card(
         elevation: 24,
-        shadowColor: Colors.black.withValues(alpha: 0.4),
+        shadowColor: Colors.black.withOpacity(0.4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Container(
           padding: const EdgeInsets.all(32),
@@ -490,7 +490,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
       constraints: const BoxConstraints(maxWidth: 400),
       child: Card(
         elevation: 24,
-        shadowColor: Colors.black.withValues(alpha: 0.4),
+        shadowColor: Colors.black.withOpacity(0.4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Container(
           padding: const EdgeInsets.all(32),

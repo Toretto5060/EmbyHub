@@ -351,8 +351,8 @@ class ModernLibraryPage extends ConsumerWidget {
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      Colors.black.withValues(alpha: 0.2),
-                      Colors.black.withValues(alpha: 0.6),
+                      Colors.black.withOpacity( 0.2),
+                      Colors.black.withOpacity( 0.6),
                     ],
                   ),
                 ),
@@ -469,7 +469,7 @@ class ModernLibraryPage extends ConsumerWidget {
                         end: Alignment.bottomCenter,
                         colors: [
                           Colors.transparent,
-                          Colors.black.withValues(alpha: 0.7),
+                          Colors.black.withOpacity( 0.7),
                         ],
                       ),
                       borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
@@ -483,7 +483,7 @@ class ModernLibraryPage extends ConsumerWidget {
                             child: LinearProgressIndicator(
                               value: progress / 100,
                               minHeight: 4,
-                              backgroundColor: Colors.white.withValues(alpha: 0.3),
+                              backgroundColor: Colors.white.withOpacity( 0.3),
                               valueColor: const AlwaysStoppedAnimation(CupertinoColors.activeBlue),
                             ),
                           ),

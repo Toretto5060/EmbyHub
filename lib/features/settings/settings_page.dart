@@ -728,14 +728,14 @@ class SettingsPage extends ConsumerWidget {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity( 0.3),
         borderRadius: BorderRadius.circular(16),
       ),
       child: ListTile(
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
+            color: color.withOpacity( 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon, color: color, size: 24),
@@ -766,14 +766,14 @@ class SettingsPage extends ConsumerWidget {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity( 0.3),
         borderRadius: BorderRadius.circular(16),
       ),
       child: ListTile(
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
+            color: color.withOpacity( 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon, color: color, size: 24),
@@ -792,7 +792,7 @@ class SettingsPage extends ConsumerWidget {
           onPressed: onTap,
           style: OutlinedButton.styleFrom(
             foregroundColor: color,
-            side: BorderSide(color: color.withValues(alpha: 0.5)),
+            side: BorderSide(color: color.withOpacity( 0.5)),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           ),
           child: Text(actionLabel),

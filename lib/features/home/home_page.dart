@@ -61,13 +61,13 @@ class _HomePageState extends State<HomePage> {
                 child: Container(
                   decoration: BoxDecoration(
                     color: isDark
-                        ? const Color(0xFF1C1C1E).withValues(alpha: 0.85)
-                        : const Color(0xFFF2F2F7).withValues(alpha: 0.85),
+                        ? const Color(0xFF1C1C1E).withOpacity( 0.85)
+                        : const Color(0xFFF2F2F7).withOpacity( 0.85),
                     border: Border(
                       top: BorderSide(
                         color: isDark
-                            ? Colors.white.withValues(alpha: 0.2)
-                            : Colors.black.withValues(alpha: 0.15),
+                            ? Colors.white.withOpacity( 0.2)
+                            : Colors.black.withOpacity( 0.15),
                         width: 0.3,
                       ),
                     ),

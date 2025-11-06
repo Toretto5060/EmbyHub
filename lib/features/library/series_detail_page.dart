@@ -59,8 +59,8 @@ class SeriesDetailPage extends ConsumerWidget {
           border: Border(
             bottom: BorderSide(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.1)
-                  : Colors.black.withValues(alpha: 0.1),
+                  ? Colors.white.withOpacity( 0.1)
+                  : Colors.black.withOpacity( 0.1),
               width: 0.5,
             ),
           ),
@@ -112,7 +112,7 @@ class SeriesDetailPage extends ConsumerWidget {
                               DefaultTextStyle(
                                 style: TextStyle(
                                   fontSize: 16,
-                                  color: isDark ? Colors.white.withValues(alpha: 0.7) : Colors.black.withValues(alpha: 0.7),
+                                  color: isDark ? Colors.white.withOpacity( 0.7) : Colors.black.withOpacity( 0.7),
                                 ),
                                 child: const Text('暂无季信息'),
                               ),
@@ -144,7 +144,7 @@ class SeriesDetailPage extends ConsumerWidget {
                             DefaultTextStyle(
                               style: TextStyle(
                                 fontSize: 14,
-                                color: isDark ? Colors.white.withValues(alpha: 0.7) : Colors.black.withValues(alpha: 0.7),
+                                color: isDark ? Colors.white.withOpacity( 0.7) : Colors.black.withOpacity( 0.7),
                               ),
                               child: const Text('正在加载季列表...'),
                             ),
@@ -172,7 +172,7 @@ class SeriesDetailPage extends ConsumerWidget {
                           DefaultTextStyle(
                             style: TextStyle(
                               fontSize: 12,
-                              color: isDark ? Colors.white.withValues(alpha: 0.7) : Colors.black.withValues(alpha: 0.7),
+                              color: isDark ? Colors.white.withOpacity( 0.7) : Colors.black.withOpacity( 0.7),
                             ),
                             child: Text(
                               '错误信息: ${e.toString()}',
@@ -183,7 +183,7 @@ class SeriesDetailPage extends ConsumerWidget {
                           DefaultTextStyle(
                             style: TextStyle(
                               fontSize: 10,
-                              color: isDark ? Colors.white.withValues(alpha: 0.5) : Colors.black.withValues(alpha: 0.5),
+                              color: isDark ? Colors.white.withOpacity( 0.5) : Colors.black.withOpacity( 0.5),
                             ),
                             child: Text(
                               'seriesId: $seriesId',
@@ -238,8 +238,8 @@ class SeriesDetailPage extends ConsumerWidget {
                   style: TextStyle(
                     fontSize: 14,
                     color: isDark
-                        ? Colors.white.withValues(alpha: 0.7)
-                        : Colors.black.withValues(alpha: 0.7),
+                        ? Colors.white.withOpacity( 0.7)
+                        : Colors.black.withOpacity( 0.7),
                     height: 1.5,
                   ),
                   child: Text(
@@ -354,8 +354,8 @@ class _SeasonTile extends ConsumerWidget {
                       style: TextStyle(
                         fontSize: 12,
                         color: isDark
-                            ? Colors.white.withValues(alpha: 0.6)
-                            : Colors.black.withValues(alpha: 0.6),
+                            ? Colors.white.withOpacity( 0.6)
+                            : Colors.black.withOpacity( 0.6),
                       ),
                       child: Text(
                         season.overview!,
@@ -371,8 +371,8 @@ class _SeasonTile extends ConsumerWidget {
               CupertinoIcons.chevron_forward,
               size: 20,
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.5)
-                  : Colors.black.withValues(alpha: 0.5),
+                  ? Colors.white.withOpacity( 0.5)
+                  : Colors.black.withOpacity( 0.5),
             ),
           ],
         ),
