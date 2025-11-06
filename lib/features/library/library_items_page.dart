@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/blur_navigation_bar.dart';
 
 final itemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
@@ -13,76 +14,103 @@ final itemsProvider =
   final api = await EmbyApi.create();
   // 对于电视剧库，只获取 Series，不获取单集
   return api.getItemsByParent(
-    userId: auth.userId!, 
+    userId: auth.userId!,
     parentId: viewId,
     includeItemTypes: 'Movie,Series,BoxSet,Video', // 不包含 Episode
   );
 });
 
-class LibraryItemsPage extends ConsumerWidget {
+class LibraryItemsPage extends ConsumerStatefulWidget {
   const LibraryItemsPage({
     required this.viewId,
     this.viewName = '媒体库',
     super.key,
   });
-  
+
   final String viewId;
   final String viewName;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final items = ref.watch(itemsProvider(viewId));
+  ConsumerState<LibraryItemsPage> createState() => _LibraryItemsPageState();
+}
+
+class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = ref.watch(itemsProvider(widget.viewId));
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
-    
+
     return CupertinoPageScaffold(
       backgroundColor: CupertinoColors.systemBackground,
-      navigationBar: CupertinoNavigationBar(
-        leading: CupertinoNavigationBarBackButton(
-          color: isDark ? Colors.white : Colors.black87,
-          onPressed: () => context.pop(),
-        ),
-        middle: Text(
-          viewName,
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : Colors.black87,
-          ),
-        ),
-        backgroundColor: CupertinoColors.systemBackground,
-        border: null,
+      navigationBar: BlurNavigationBar(
+        leading: buildBlurBackButton(context),
+        middle: buildNavTitle(widget.viewName, context),
+        scrollController: _scrollController,
       ),
-      child: SafeArea(
-        child: items.when(
-          data: (list) {
-            if (list.isEmpty) {
-              return const Center(child: Text('此分类暂无内容'));
-            }
-            return RefreshIndicator(
-              displacement: 20,
-              edgeOffset: 0,
-              onRefresh: () async {
-                ref.invalidate(itemsProvider(viewId));
-                await Future.delayed(const Duration(milliseconds: 500));
-              },
-              child: GridView.builder(
-                padding: const EdgeInsets.all(12),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    childAspectRatio: 0.66,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8),
-                itemCount: list.length,
-                itemBuilder: (context, index) {
-                  final item = list[index];
-                  return _ItemTile(item: item);
-                },
+      child: items.when(
+        data: (list) {
+          if (list.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: MediaQuery.of(context).padding.top + 44,
+                ),
+                child: const Text('此分类暂无内容'),
               ),
             );
-          },
-          loading: () => const Center(child: CupertinoActivityIndicator()),
-          error: (e, _) => Center(child: Text('加载失败: $e')),
+          }
+          return RefreshIndicator(
+            displacement: 20,
+            edgeOffset: 0,
+            onRefresh: () async {
+              ref.invalidate(itemsProvider(widget.viewId));
+              await Future.delayed(const Duration(milliseconds: 500));
+            },
+            child: GridView.builder(
+              controller: _scrollController,
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 44 + 12,
+                left: 12,
+                right: 12,
+                bottom: 12,
+              ),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  childAspectRatio: 0.66,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8),
+              itemCount: list.length,
+              itemBuilder: (context, index) {
+                final item = list[index];
+                return _ItemTile(item: item);
+              },
+            ),
+          );
+        },
+        loading: () => Center(
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 44,
+            ),
+            child: const CupertinoActivityIndicator(),
+          ),
+        ),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 44,
+            ),
+            child: Text('加载失败: $e'),
+          ),
         ),
       ),
     );
@@ -97,11 +125,12 @@ class _ItemTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return CupertinoButton(
       padding: EdgeInsets.zero,
-      onPressed: item.id != null && item.id!.isNotEmpty 
+      onPressed: item.id != null && item.id!.isNotEmpty
           ? () {
               // Series 类型跳转到剧集详情页，其他类型跳转到普通详情页
               if (item.type == 'Series') {
-                context.push('/series/${item.id}?name=${Uri.encodeComponent(item.name)}');
+                context.push(
+                    '/series/${item.id}?name=${Uri.encodeComponent(item.name)}');
               } else {
                 context.push('/item/${item.id}');
               }
@@ -144,17 +173,18 @@ class _Poster extends ConsumerWidget {
         ),
       );
     }
-    
+
     return FutureBuilder(
       future: EmbyApi.create(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const ColoredBox(color: CupertinoColors.systemGrey4);
         }
-        
+
         // 使用 Primary 类型获取海报
-        final url = snapshot.data!.buildImageUrl(itemId: itemId!, type: 'Primary');
-        
+        final url =
+            snapshot.data!.buildImageUrl(itemId: itemId!, type: 'Primary');
+
         return Image.network(
           url,
           fit: BoxFit.cover,
@@ -162,9 +192,9 @@ class _Poster extends ConsumerWidget {
             color: CupertinoColors.systemGrey4,
             child: Center(
               child: Icon(
-                itemType == 'Series' || itemType == 'Episode' 
-                    ? CupertinoIcons.tv 
-                    : CupertinoIcons.film, 
+                itemType == 'Series' || itemType == 'Episode'
+                    ? CupertinoIcons.tv
+                    : CupertinoIcons.film,
                 size: 48,
               ),
             ),

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/blur_navigation_bar.dart';
 
 // Provider 获取剧集的季列表
 final seasonsProvider =
@@ -26,7 +27,7 @@ final seriesProvider =
   return api.getItem(auth.userId!, seriesId);
 });
 
-class SeriesDetailPage extends ConsumerWidget {
+class SeriesDetailPage extends ConsumerStatefulWidget {
   const SeriesDetailPage({
     required this.seriesId,
     this.seriesName = '剧集详情',
@@ -37,171 +38,187 @@ class SeriesDetailPage extends ConsumerWidget {
   final String seriesName;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final seriesAsync = ref.watch(seriesProvider(seriesId));
-    final seasonsAsync = ref.watch(seasonsProvider(seriesId));
+  ConsumerState<SeriesDetailPage> createState() => _SeriesDetailPageState();
+}
+
+class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seriesAsync = ref.watch(seriesProvider(widget.seriesId));
+    final seasonsAsync = ref.watch(seasonsProvider(widget.seriesId));
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
 
     return CupertinoPageScaffold(
-        backgroundColor: CupertinoColors.systemBackground,
-        navigationBar: CupertinoNavigationBar(
-          leading: CupertinoNavigationBarBackButton(
-            color: isDark ? Colors.white : Colors.black87,
-            onPressed: () => context.pop(),
+      backgroundColor: CupertinoColors.systemBackground,
+      navigationBar: BlurNavigationBar(
+        leading: buildBlurBackButton(context),
+        middle: buildNavTitle(widget.seriesName, context),
+        scrollController: _scrollController,
+      ),
+      child: RefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(seriesProvider(widget.seriesId));
+          ref.invalidate(seasonsProvider(widget.seriesId));
+          await Future.delayed(const Duration(milliseconds: 500));
+        },
+        child: ListView(
+          controller: _scrollController,
+          padding: EdgeInsets.only(
+            top: MediaQuery.of(context).padding.top + 44 + 16,
+            left: 16,
+            right: 16,
+            bottom: 16,
           ),
-          middle: Text(
-            seriesName,
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white : Colors.black87,
+          children: [
+            // 剧集基本信息
+            seriesAsync.when(
+              data: (series) => _buildSeriesInfo(context, series, isDark),
+              loading: () => const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32.0),
+                  child: CupertinoActivityIndicator(),
+                ),
+              ),
+              error: (e, _) => Center(child: Text('加载失败: $e')),
             ),
-          ),
-          backgroundColor: CupertinoColors.systemBackground,
-          border: null,
-        ),
-        child: SafeArea(
-          child: RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(seriesProvider(seriesId));
-              ref.invalidate(seasonsProvider(seriesId));
-              await Future.delayed(const Duration(milliseconds: 500));
-            },
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                // 剧集基本信息
-                seriesAsync.when(
-                  data: (series) => _buildSeriesInfo(context, series, isDark),
-                  loading: () => const Center(
+            const SizedBox(height: 24),
+            // 季列表
+            DefaultTextStyle(
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              child: const Text('季'),
+            ),
+            const SizedBox(height: 12),
+            seasonsAsync.when(
+              data: (seasons) {
+                print('🎬 Seasons loaded: ${seasons.length} seasons');
+                if (seasons.isEmpty) {
+                  return Center(
                     child: Padding(
-                      padding: EdgeInsets.all(32.0),
-                      child: CupertinoActivityIndicator(),
-                    ),
-                  ),
-                  error: (e, _) => Center(child: Text('加载失败: $e')),
-                ),
-                const SizedBox(height: 24),
-                // 季列表
-                DefaultTextStyle(
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                  child: const Text('季'),
-                ),
-                const SizedBox(height: 12),
-                seasonsAsync.when(
-                  data: (seasons) {
-                    print('🎬 Seasons loaded: ${seasons.length} seasons');
-                    if (seasons.isEmpty) {
-                      return Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(32.0),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(CupertinoIcons.tv, size: 64, color: Colors.grey),
-                              const SizedBox(height: 16),
-                              DefaultTextStyle(
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: isDark ? Colors.white.withOpacity( 0.7) : Colors.black.withOpacity( 0.7),
-                                ),
-                                child: const Text('暂无季信息'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-                    return Column(
-                      children: seasons
-                          .map((season) => _SeasonTile(
-                                season: season,
-                                seriesId: seriesId,
-                                seriesName: seriesName,
-                              ))
-                          .toList(),
-                    );
-                  },
-                  loading: () {
-                    print('⏳ Loading seasons for series: $seriesId');
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(32.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const CupertinoActivityIndicator(),
-                            const SizedBox(height: 16),
-                            DefaultTextStyle(
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: isDark ? Colors.white.withOpacity( 0.7) : Colors.black.withOpacity( 0.7),
-                              ),
-                              child: const Text('正在加载季列表...'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                  error: (e, stack) => Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
+                      padding: const EdgeInsets.all(32.0),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(CupertinoIcons.exclamationmark_triangle, size: 48, color: Colors.red),
+                          const Icon(CupertinoIcons.tv,
+                              size: 64, color: Colors.grey),
                           const SizedBox(height: 16),
                           DefaultTextStyle(
                             style: TextStyle(
                               fontSize: 16,
-                              color: isDark ? Colors.white : Colors.black87,
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.7)
+                                  : Colors.black.withOpacity(0.7),
                             ),
-                            child: const Text('加载季列表失败'),
-                          ),
-                          const SizedBox(height: 8),
-                          DefaultTextStyle(
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark ? Colors.white.withOpacity( 0.7) : Colors.black.withOpacity( 0.7),
-                            ),
-                            child: Text(
-                              '错误信息: ${e.toString()}',
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          DefaultTextStyle(
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: isDark ? Colors.white.withOpacity( 0.5) : Colors.black.withOpacity( 0.5),
-                            ),
-                            child: Text(
-                              'seriesId: $seriesId',
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          CupertinoButton(
-                            child: const Text('重试'),
-                            onPressed: () {
-                              ref.invalidate(seasonsProvider(seriesId));
-                            },
+                            child: const Text('暂无季信息'),
                           ),
                         ],
                       ),
                     ),
+                  );
+                }
+                return Column(
+                  children: seasons
+                      .map((season) => _SeasonTile(
+                            season: season,
+                            seriesId: widget.seriesId,
+                            seriesName: widget.seriesName,
+                          ))
+                      .toList(),
+                );
+              },
+              loading: () {
+                print('⏳ Loading seasons for series: ${widget.seriesId}');
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CupertinoActivityIndicator(),
+                        const SizedBox(height: 16),
+                        DefaultTextStyle(
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: isDark
+                                ? Colors.white.withOpacity(0.7)
+                                : Colors.black.withOpacity(0.7),
+                          ),
+                          child: const Text('正在加载季列表...'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+              error: (e, stack) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(CupertinoIcons.exclamationmark_triangle,
+                          size: 48, color: Colors.red),
+                      const SizedBox(height: 16),
+                      DefaultTextStyle(
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                        child: const Text('加载季列表失败'),
+                      ),
+                      const SizedBox(height: 8),
+                      DefaultTextStyle(
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark
+                              ? Colors.white.withOpacity(0.7)
+                              : Colors.black.withOpacity(0.7),
+                        ),
+                        child: Text(
+                          '错误信息: ${e.toString()}',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      DefaultTextStyle(
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: isDark
+                              ? Colors.white.withOpacity(0.5)
+                              : Colors.black.withOpacity(0.5),
+                        ),
+                        child: Text(
+                          'seriesId: ${widget.seriesId}',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      CupertinoButton(
+                        child: const Text('重试'),
+                        onPressed: () {
+                          ref.invalidate(seasonsProvider(widget.seriesId));
+                        },
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
+      ),
     );
   }
 
@@ -212,7 +229,7 @@ class SeriesDetailPage extends ConsumerWidget {
         // 海报
         ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: _SeriesPoster(seriesId: seriesId),
+          child: _SeriesPoster(seriesId: widget.seriesId),
         ),
         const SizedBox(width: 16),
         // 简介
@@ -234,8 +251,8 @@ class SeriesDetailPage extends ConsumerWidget {
                   style: TextStyle(
                     fontSize: 14,
                     color: isDark
-                        ? Colors.white.withOpacity( 0.7)
-                        : Colors.black.withOpacity( 0.7),
+                        ? Colors.white.withOpacity(0.7)
+                        : Colors.black.withOpacity(0.7),
                     height: 1.5,
                   ),
                   child: Text(
@@ -350,8 +367,8 @@ class _SeasonTile extends ConsumerWidget {
                       style: TextStyle(
                         fontSize: 12,
                         color: isDark
-                            ? Colors.white.withOpacity( 0.6)
-                            : Colors.black.withOpacity( 0.6),
+                            ? Colors.white.withOpacity(0.6)
+                            : Colors.black.withOpacity(0.6),
                       ),
                       child: Text(
                         season.overview!,
@@ -367,8 +384,8 @@ class _SeasonTile extends ConsumerWidget {
               CupertinoIcons.chevron_forward,
               size: 20,
               color: isDark
-                  ? Colors.white.withOpacity( 0.5)
-                  : Colors.black.withOpacity( 0.5),
+                  ? Colors.white.withOpacity(0.5)
+                  : Colors.black.withOpacity(0.5),
             ),
           ],
         ),
@@ -424,4 +441,3 @@ class _SeasonThumbnail extends ConsumerWidget {
     );
   }
 }
-

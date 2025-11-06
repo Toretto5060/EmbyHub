@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/blur_navigation_bar.dart';
 
 // Provider 获取某一季的集列表
 final episodesProvider = FutureProvider.family
@@ -19,7 +20,7 @@ final episodesProvider = FutureProvider.family
   );
 });
 
-class SeasonEpisodesPage extends ConsumerWidget {
+class SeasonEpisodesPage extends ConsumerStatefulWidget {
   const SeasonEpisodesPage({
     required this.seriesId,
     required this.seasonId,
@@ -34,128 +35,148 @@ class SeasonEpisodesPage extends ConsumerWidget {
   final String seasonName;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SeasonEpisodesPage> createState() => _SeasonEpisodesPageState();
+}
+
+class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final episodes = ref.watch(episodesProvider({
-      'seriesId': seriesId,
-      'seasonId': seasonId,
+      'seriesId': widget.seriesId,
+      'seasonId': widget.seasonId,
     }));
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
 
     return CupertinoPageScaffold(
-        backgroundColor: CupertinoColors.systemBackground,
-        navigationBar: CupertinoNavigationBar(
-          leading: CupertinoNavigationBarBackButton(
-            color: isDark ? Colors.white : Colors.black87,
-            onPressed: () => context.pop(),
-          ),
-          middle: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DefaultTextStyle(
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-                child: Text(seriesName),
+      backgroundColor: CupertinoColors.systemBackground,
+      navigationBar: BlurNavigationBar(
+        leading: buildBlurBackButton(context),
+        scrollController: _scrollController,
+        middle: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DefaultTextStyle(
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
               ),
-              DefaultTextStyle(
-                style: TextStyle(
-                  fontSize: 12,
-                  color: isDark
-                      ? Colors.white.withOpacity( 0.6)
-                      : Colors.black.withOpacity( 0.6),
-                ),
-                child: Text(seasonName),
+              child: Text(widget.seriesName),
+            ),
+            DefaultTextStyle(
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark
+                    ? Colors.white.withOpacity(0.6)
+                    : Colors.black.withOpacity(0.6),
               ),
-            ],
-          ),
-          backgroundColor: CupertinoColors.systemBackground,
-          border: null,
+              child: Text(widget.seasonName),
+            ),
+          ],
         ),
-        child: SafeArea(
-          child: episodes.when(
-            data: (list) {
-              if (list.isEmpty) {
-                return const Center(child: Text('此季暂无剧集'));
-              }
-              return CustomScrollView(
-                physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-                slivers: [
-                  CupertinoSliverRefreshControl(
-                    onRefresh: () async {
+      ),
+      child: episodes.when(
+        data: (list) {
+          if (list.isEmpty) {
+            return const Center(child: Text('此季暂无剧集'));
+          }
+          return RefreshIndicator(
+            onRefresh: () async {
+              ref.invalidate(episodesProvider);
+              await Future.delayed(const Duration(milliseconds: 500));
+            },
+            child: ListView.builder(
+              controller: _scrollController,
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 44 + 12,
+                left: 12,
+                right: 12,
+                bottom: 12,
+              ),
+              itemCount: list.length,
+              itemBuilder: (context, index) {
+                final episode = list[index];
+                return _EpisodeTile(episode: episode);
+              },
+            ),
+          );
+        },
+        loading: () => Center(
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 44,
+            ),
+            child: const CupertinoActivityIndicator(),
+          ),
+        ),
+        error: (e, stack) => Center(
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 44,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(CupertinoIcons.exclamationmark_triangle,
+                      size: 48, color: Colors.red),
+                  const SizedBox(height: 16),
+                  DefaultTextStyle(
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    child: const Text('加载集列表失败'),
+                  ),
+                  const SizedBox(height: 8),
+                  DefaultTextStyle(
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark
+                          ? Colors.white.withOpacity(0.7)
+                          : Colors.black.withOpacity(0.7),
+                    ),
+                    child: Text(
+                      '错误信息: ${e.toString()}',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  DefaultTextStyle(
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isDark
+                          ? Colors.white.withOpacity(0.5)
+                          : Colors.black.withOpacity(0.5),
+                    ),
+                    child: Text(
+                      'seriesId: ${widget.seriesId}\nseasonId: ${widget.seasonId}',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  CupertinoButton(
+                    child: const Text('重试'),
+                    onPressed: () {
                       ref.invalidate(episodesProvider);
-                      await Future.delayed(const Duration(milliseconds: 500));
                     },
                   ),
-                  SliverPadding(
-                    padding: const EdgeInsets.all(12),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          final episode = list[index];
-                          return _EpisodeTile(episode: episode);
-                        },
-                        childCount: list.length,
-                      ),
-                    ),
-                  ),
                 ],
-              );
-            },
-            loading: () =>
-                const Center(child: CupertinoActivityIndicator()),
-            error: (e, stack) => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(CupertinoIcons.exclamationmark_triangle, size: 48, color: Colors.red),
-                    const SizedBox(height: 16),
-                    DefaultTextStyle(
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                      child: const Text('加载集列表失败'),
-                    ),
-                    const SizedBox(height: 8),
-                    DefaultTextStyle(
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.white.withOpacity( 0.7) : Colors.black.withOpacity( 0.7),
-                      ),
-                      child: Text(
-                        '错误信息: ${e.toString()}',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    DefaultTextStyle(
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: isDark ? Colors.white.withOpacity( 0.5) : Colors.black.withOpacity( 0.5),
-                      ),
-                      child: Text(
-                        'seriesId: $seriesId\nseasonId: $seasonId',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    CupertinoButton(
-                      child: const Text('重试'),
-                      onPressed: () {
-                        ref.invalidate(episodesProvider);
-                      },
-                    ),
-                  ],
-                ),
               ),
             ),
           ),
         ),
+      ),
     );
   }
 }
@@ -210,8 +231,8 @@ class _EpisodeTile extends ConsumerWidget {
                         style: TextStyle(
                           fontSize: 12,
                           color: isDark
-                              ? Colors.white.withOpacity( 0.5)
-                              : Colors.black.withOpacity( 0.5),
+                              ? Colors.white.withOpacity(0.5)
+                              : Colors.black.withOpacity(0.5),
                         ),
                         child: Text(episodeNumber),
                       ),
@@ -234,8 +255,8 @@ class _EpisodeTile extends ConsumerWidget {
                         style: TextStyle(
                           fontSize: 13,
                           color: isDark
-                              ? Colors.white.withOpacity( 0.6)
-                              : Colors.black.withOpacity( 0.6),
+                              ? Colors.white.withOpacity(0.6)
+                              : Colors.black.withOpacity(0.6),
                           height: 1.4,
                         ),
                         child: Text(
@@ -251,8 +272,8 @@ class _EpisodeTile extends ConsumerWidget {
                         style: TextStyle(
                           fontSize: 12,
                           color: isDark
-                              ? Colors.white.withOpacity( 0.5)
-                              : Colors.black.withOpacity( 0.5),
+                              ? Colors.white.withOpacity(0.5)
+                              : Colors.black.withOpacity(0.5),
                         ),
                         child: Text(_formatDuration(episode.runTimeTicks!)),
                       ),
@@ -327,4 +348,3 @@ class _EpisodeThumbnail extends ConsumerWidget {
     );
   }
 }
-
