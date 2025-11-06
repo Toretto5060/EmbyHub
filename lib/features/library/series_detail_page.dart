@@ -65,6 +65,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage> {
         scrollController: _scrollController,
       ),
       child: RefreshIndicator(
+        displacement: 20,
+        edgeOffset: MediaQuery.of(context).padding.top + 44,
         onRefresh: () async {
           ref.invalidate(seriesProvider(widget.seriesId));
           ref.invalidate(seasonsProvider(widget.seriesId));

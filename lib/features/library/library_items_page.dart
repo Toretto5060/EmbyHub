@@ -70,7 +70,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage> {
           }
           return RefreshIndicator(
             displacement: 20,
-            edgeOffset: 0,
+            edgeOffset: MediaQuery.of(context).padding.top + 44,
             onRefresh: () async {
               ref.invalidate(itemsProvider(widget.viewId));
               await Future.delayed(const Duration(milliseconds: 500));

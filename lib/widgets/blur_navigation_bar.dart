@@ -62,11 +62,16 @@ class BlurNavigationBar extends StatelessWidget
                   leading: leading != null
                       ? Padding(
                           padding: const EdgeInsets.only(left: 4),
-                          child: leading,
+                          child: _wrapWithColorTransition(
+                              leading!, showBlur, isDark),
                         )
                       : null,
-                  middle: middle,
-                  trailing: trailing,
+                  middle: middle != null
+                      ? _wrapWithColorTransition(middle!, showBlur, isDark)
+                      : null,
+                  trailing: trailing != null
+                      ? _wrapWithColorTransition(trailing!, showBlur, isDark)
+                      : null,
                   middleSpacing: 16,
                 ),
               ),
@@ -76,30 +81,51 @@ class BlurNavigationBar extends StatelessWidget
       },
     );
   }
+
+  // 为子组件包裹颜色过渡效果
+  Widget _wrapWithColorTransition(Widget child, bool showBlur, bool isDark) {
+    // 滑动时：白色
+    // 未滑动时：根据深浅模式显示原色
+    final color =
+        showBlur ? Colors.white : (isDark ? Colors.white : Colors.black87);
+
+    return DefaultTextStyle(
+      style: TextStyle(
+        color: color,
+        fontWeight: FontWeight.w400, // 更细的字体
+      ),
+      child: IconTheme(
+        data: IconThemeData(
+          color: color,
+          size: 28, // 稍小的图标尺寸，让箭头看起来更细
+        ),
+        child: child,
+      ),
+    );
+  }
 }
 
 /// 创建带毛玻璃效果的返回按钮
 Widget buildBlurBackButton(BuildContext context) {
-  final brightness = MediaQuery.of(context).platformBrightness;
-  final isDark = brightness == Brightness.dark;
-
-  return CupertinoNavigationBarBackButton(
-    color: isDark ? Colors.white : Colors.black87,
-    onPressed: () => context.pop(),
+  // 使用 Builder 来获取正确的 IconTheme 颜色
+  return Builder(
+    builder: (context) {
+      final color = IconTheme.of(context).color ?? CupertinoColors.activeBlue;
+      return CupertinoNavigationBarBackButton(
+        color: color,
+        onPressed: () => context.pop(),
+      );
+    },
   );
 }
 
 /// 创建带样式的标题
 Widget buildNavTitle(String title, BuildContext context) {
-  final brightness = MediaQuery.of(context).platformBrightness;
-  final isDark = brightness == Brightness.dark;
-
   return Text(
     title,
-    style: TextStyle(
+    style: const TextStyle(
       fontSize: 17,
-      fontWeight: FontWeight.w600,
-      color: isDark ? Colors.white : Colors.black87,
+      fontWeight: FontWeight.w400, // 更细的字体
     ),
   );
 }

@@ -90,6 +90,8 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage> {
             return const Center(child: Text('此季暂无剧集'));
           }
           return RefreshIndicator(
+            displacement: 20,
+            edgeOffset: MediaQuery.of(context).padding.top + 44,
             onRefresh: () async {
               ref.invalidate(episodesProvider);
               await Future.delayed(const Duration(milliseconds: 500));
