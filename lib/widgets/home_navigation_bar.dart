@@ -6,12 +6,14 @@ import 'package:flutter/material.dart';
 class HomeNavigationBar extends StatelessWidget
     implements ObstructingPreferredSizeWidget {
   const HomeNavigationBar({
+    this.leading,
     this.title,
     this.trailing,
     this.scrollController,
     super.key,
   });
 
+  final Widget? leading;
   final Widget? title;
   final Widget? trailing;
   final ScrollController? scrollController;
@@ -55,27 +57,32 @@ class HomeNavigationBar extends StatelessWidget
               ),
               child: SizedBox(
                 height: 44,
-                child: Row(
+                child: Stack(
+                  alignment: Alignment.center,  // ✅ 确保 Stack 内容垂直居中
                   children: [
-                    // 左侧占位，保持居中
-                    const SizedBox(width: 16),
-                    // 中间标题区域
-                    Expanded(
-                      child: Center(
-                        child: title != null
-                            ? _wrapWithColorTransition(title!, showBlur, isDark)
-                            : null,
-                      ),
+                    // ✅ 中间：logo + 标题 整体居中
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,  // ✅ 垂直居中
+                      children: [
+                        // logo
+                        if (leading != null)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: _wrapWithColorTransition(leading!, showBlur, isDark),
+                          ),
+                        // 标题
+                        if (title != null)
+                          _wrapWithColorTransition(title!, showBlur, isDark),
+                      ],
                     ),
-                    // 右侧操作区域（预留，可以添加按钮等）
+                    // ✅ 右侧：用户头像（绝对定位，垂直居中）
                     if (trailing != null)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: _wrapWithColorTransition(
-                            trailing!, showBlur, isDark),
-                      )
-                    else
-                      const SizedBox(width: 16),
+                      Positioned(
+                        right: 16,
+                        child: _wrapWithColorTransition(trailing!, showBlur, isDark),
+                      ),
                   ],
                 ),
               ),

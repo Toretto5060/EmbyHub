@@ -8,6 +8,7 @@ import '../../providers/account_history_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/fade_in_image.dart';
+import '../home/bottom_nav_wrapper.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -45,6 +46,7 @@ class SettingsPage extends ConsumerWidget {
                           _showAccountSwitcher(context, ref, serverData),
                       leadingWidget: authData.userId != null
                           ? _UserAvatarRounded(
+                              key: ValueKey(authData.userId),  // ✅ 使用 userId 作为 key 强制重建
                               userId: authData.userId,
                               username: authData.userName ?? 'U',
                               color: Colors.blue,
@@ -236,6 +238,7 @@ class SettingsPage extends ConsumerWidget {
                     final isCurrent = account.username == currentUsername;
                     return ListTile(
                       leading: _UserAvatar(
+                        key: ValueKey('${account.serverUrl}_${account.username}_${account.userId}'),  // ✅ 使用唯一key
                         userId: account.userId,
                         username: account.username,
                         isCurrent: isCurrent,
@@ -245,7 +248,14 @@ class SettingsPage extends ConsumerWidget {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // ✅ "当前"标识 - 垂直居中，靠右
+                          // ✅ loading圈
+                          if (loadingAccount == account.username)
+                            const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          // ✅ "当前"标识
                           if (isCurrent)
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -262,20 +272,16 @@ class SettingsPage extends ConsumerWidget {
                                 ),
                               ),
                             ),
-                          // ✅ loading圈或删除按钮
-                          if (loadingAccount == account.username) ...[
-                            const SizedBox(width: 8),
-                            const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          ] else if (freshAccounts.length > 1 && !isCurrent) ...[
-                            const SizedBox(width: 8),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 20),
-                              color: Colors.red,
-                              onPressed: () async {
+                          // ✅ 删除按钮（只在有多个账号时显示）
+                          if (freshAccounts.length > 1 && !isCurrent)
+                            Transform.translate(
+                              offset: const Offset(8, 0),  // ✅ 向右偏移8px，抵消ListTile的右边距
+                              child: IconButton(
+                                icon: const Icon(Icons.delete_outline, size: 20),
+                                color: Colors.red,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: () async {
                                 final confirm = await showDialog<bool>(
                                   context: context,
                                   builder: (context) => AlertDialog(
@@ -307,10 +313,7 @@ class SettingsPage extends ConsumerWidget {
                                 }
                               },
                             ),
-                          ] else if (!isCurrent) ...[
-                            const SizedBox(width: 8),
-                            const Icon(Icons.arrow_forward_ios, size: 16),
-                          ],
+                          ),  // Transform.translate
                         ],
                       ),
                       onTap: isCurrent || loadingAccount != null
@@ -329,7 +332,7 @@ class SettingsPage extends ConsumerWidget {
                               
                               // ✅ 切换成功
                               if (result['success'] == true) {
-                                print('✅ Switch successful, closing sheet and navigating to home');
+                                print('✅ Switch successful');
                                 
                                 // 关闭账号切换弹窗
                                 if (context.mounted) {
@@ -337,12 +340,49 @@ class SettingsPage extends ConsumerWidget {
                                 }
                                 
                                 // 等待弹窗完全关闭
-                                await Future.delayed(const Duration(milliseconds: 500));
+                                await Future.delayed(const Duration(milliseconds: 300));
                                 
-                                // 直接跳转到首页（不再显示成功对话框）
+                                // ✅ 在设置页显示成功弹窗
                                 if (outerContext.mounted) {
-                                  print('🏠 Navigating to home page');
-                                  outerContext.go('/');
+                                  showDialog(
+                                    context: outerContext,
+                                    barrierDismissible: false,
+                                    builder: (ctx) => AlertDialog(
+                                      content: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.check_circle,
+                                            color: Colors.green,
+                                            size: 48,
+                                          ),
+                                          const SizedBox(height: 16),
+                                          Text('已切换到 ${result['username']}'),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                  
+                                  // 1秒后自动关闭成功弹窗
+                                  await Future.delayed(const Duration(seconds: 1));
+                                  
+                                  if (outerContext.mounted) {
+                                    // ✅ 使用 rootNavigator: true 确保关闭的是对话框
+                                    Navigator.of(outerContext, rootNavigator: true).pop();
+                                    
+                                    // 等待对话框关闭动画
+                                    await Future.delayed(const Duration(milliseconds: 200));
+                                    
+                                    // ✅ 弹窗消失后切换到媒体库 tab
+                                    print('🏠 Switching to library tab (index 0)');
+                                    final bottomNav = BottomNavWrapper.of(outerContext);
+                                    if (bottomNav != null) {
+                                      bottomNav.switchToTab(0);
+                                      print('✅ Tab switched to library');
+                                    } else {
+                                      print('❌ BottomNavWrapper not found');
+                                    }
+                                  }
                                 }
                               } else {
                                 // 失败或取消，重置loading状态
@@ -952,6 +992,7 @@ class SettingsPage extends ConsumerWidget {
 // ✅ 用户头像组件 - 圆形（用于账号切换列表）
 class _UserAvatar extends StatelessWidget {
   const _UserAvatar({
+    super.key,
     required this.username,
     required this.isCurrent,
     this.userId,
@@ -1015,6 +1056,7 @@ class _UserAvatar extends StatelessWidget {
 // ✅ 用户头像组件 - 圆角矩形（用于设置页"当前用户"）
 class _UserAvatarRounded extends StatelessWidget {
   const _UserAvatarRounded({
+    super.key,
     required this.username,
     required this.color,
     this.userId,

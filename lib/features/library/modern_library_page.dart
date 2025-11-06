@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/library_provider.dart';
+import '../../providers/account_history_provider.dart';
 import '../../widgets/home_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 
@@ -37,7 +38,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
       }
       
       // 缓存未命中，请求获取
-      final api = await EmbyApi.create();
+  final api = await EmbyApi.create();
       final info = await api.systemInfo();
       final serverName = info['ServerName'] as String?;
       
@@ -182,6 +183,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
     return CupertinoPageScaffold(
       navigationBar: HomeNavigationBar(
         scrollController: _scrollController,
+        // ✅ Emby logo（会和标题一起居中）
+        leading: const _EmbyLogo(size: 28),  // ✅ 与用户头像大小一致
+        // ✅ 中间服务器名称
         title: server.when(
           data: (serverData) {
             // ✅ 优先从 SharedPreferences 读取服务器名称（启动页已保存）
@@ -196,14 +200,24 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
           loading: () => _buildTitleWithLoading('EmbyHub', shouldShowLoading),
           error: (_, __) => _buildTitleWithLoading('EmbyHub', shouldShowLoading),
         ),
-        // trailing 预留给将来的功能，如搜索、设置等
-        trailing: null,
+        // ✅ 右侧用户头像
+        trailing: auth.when(
+          data: (authData) => authData.userId != null
+              ? _UserAvatarMenu(
+                  key: ValueKey(authData.userId),  // ✅ 添加 key 以确保切换用户后更新
+                  userId: authData.userId!,
+                  username: authData.userName ?? 'User',
+                )
+              : null,
+          loading: () => null,
+          error: (_, __) => null,
+        ),
       ),
-      child: auth.when(
-        data: (authData) {
-          if (!authData.isLoggedIn) {
-            return _buildEmptyState(context, isLoggedIn: false);
-          }
+        child: auth.when(
+          data: (authData) {
+            if (!authData.isLoggedIn) {
+              return _buildEmptyState(context, isLoggedIn: false);
+            }
           return RefreshIndicator(
             displacement: 20,
             edgeOffset: MediaQuery.of(context).padding.top + 44,
@@ -258,21 +272,21 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                         // 我的媒体模块
                         _buildMyLibrariesSection(context, viewList),
                         // 继续观看模块（放在我的媒体之后）
-                        resumeItems.when(
-                          data: (items) {
-                            if (items.isEmpty) return const SizedBox.shrink();
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
+                resumeItems.when(
+                  data: (items) {
+                    if (items.isEmpty) return const SizedBox.shrink();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                                 _buildSectionHeader(context, '继续观看'),
                                 const SizedBox(
                                     height: _sectionTitleToContentSpacing),
-                                _buildResumeList(context, ref, items),
+                        _buildResumeList(context, ref, items),
                                 const SizedBox(height: _sectionSpacing),
-                              ],
-                            );
-                          },
-                          loading: () => const SizedBox.shrink(),
+                      ],
+                    );
+                  },
+                  loading: () => const SizedBox.shrink(),
                           error: (e, st) => const SizedBox.shrink(),
                         ),
                         // 显示各个媒体库的最新内容（每个section内部已有底部间距）
@@ -375,8 +389,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+                mainAxisSize: MainAxisSize.min,
+                children: [
           if (icon != null) ...[
             Icon(
               icon,
@@ -392,7 +406,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
               color: isDark ? Colors.white : Colors.black87,
             ),
             child: Text(title),
-          ),
+            ),
         ],
       ),
     );
@@ -437,20 +451,20 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
         width: 150,
         margin: const EdgeInsets.only(left: 6, right: 6),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+                mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
               child: Stack(
                 children: [
                   // Background image from Emby - try Primary type for library views
                   if (view.id != null && view.id!.isNotEmpty)
                     FutureBuilder<EmbyApi>(
                       future: EmbyApi.create(),
-                      builder: (context, snapshot) {
-                        if (!snapshot.hasData) {
-                          return Container(
+                            builder: (context, snapshot) {
+                              if (!snapshot.hasData) {
+                                return Container(
                             height: 100,
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
@@ -466,7 +480,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                         }
                         final imageUrl = snapshot.data!.buildImageUrl(
                           itemId: view.id!,
-                          type: 'Primary',
+                                  type: 'Primary',
                           maxWidth: 400,
                         );
                         if (imageUrl.isEmpty) {
@@ -489,28 +503,28 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                           width: 150,
                           child: EmbyFadeInImage(
                             imageUrl: imageUrl,
-                            fit: BoxFit.cover,
-                          ),
-                        );
-                      },
-                    )
+                                fit: BoxFit.cover,
+                                ),
+                              );
+                            },
+                          )
                   else
                     Container(
                       height: 100,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: [
+                        colors: [
                             Colors.blue.shade300,
                             Colors.purple.shade400,
                           ],
                         ),
-                      ),
+                          ),
+                        ),
+                      ],
                     ),
-                ],
-              ),
-            ),
+                  ),
             // 标题显示在图片下方，居中
             const SizedBox(height: 4),
             DefaultTextStyle(
@@ -521,11 +535,11 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
               ),
               child: Text(
                 view.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -678,17 +692,17 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                               size: 12,
                             ),
                           const SizedBox(width: 2),
-                          Text(
+            Text(
                             item.getRating()!.toStringAsFixed(1),
-                            style: const TextStyle(
+              style: const TextStyle(
                               color: Colors.white,
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+              ),
+            ),
+          ],
+        ),
+      ),
                   ),
                 // 剧集未看集数显示在右上角
                 if (item.type == 'Series' && item.userData != null)
@@ -698,7 +712,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                           (item.userData!['UnplayedItemCount'] as num?)
                               ?.toInt();
                       if (unplayedCount == null || unplayedCount == 0) {
-                        return const SizedBox.shrink();
+        return const SizedBox.shrink();
                       }
                       return Positioned(
                         top: 4,
@@ -836,44 +850,44 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Stack(
-              children: [
-                ClipRRect(
+          children: [
+            ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: AspectRatio(
+              child: AspectRatio(
                     aspectRatio: 16 / 9,
-                    child: item.id != null
-                        ? FutureBuilder<EmbyApi>(
-                            future: ref.read(embyApiProvider.future),
-                            builder: (context, snapshot) {
-                              if (!snapshot.hasData) {
-                                return Container(
-                                  color: CupertinoColors.systemGrey5,
-                                  child: const Icon(CupertinoIcons.film),
-                                );
-                              }
+                child: item.id != null
+                    ? FutureBuilder<EmbyApi>(
+                        future: ref.read(embyApiProvider.future),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return Container(
+                              color: CupertinoColors.systemGrey5,
+                              child: const Icon(CupertinoIcons.film),
+                            );
+                          }
                               final imageUrl = snapshot.data!.buildImageUrl(
-                                itemId: item.id!,
-                                type: 'Primary',
-                                maxWidth: 600,
+                              itemId: item.id!,
+                              type: 'Primary',
+                                  maxWidth: 600,
                               );
                               if (imageUrl.isEmpty) {
                                 return Container(
-                                  color: CupertinoColors.systemGrey5,
-                                  child: const Icon(CupertinoIcons.film),
+                              color: CupertinoColors.systemGrey5,
+                              child: const Icon(CupertinoIcons.film),
                                 );
                               }
                               return EmbyFadeInImage(
                                 imageUrl: imageUrl,
                                 fit: BoxFit.cover,
-                              );
-                            },
-                          )
-                        : Container(
-                            color: CupertinoColors.systemGrey5,
-                            child: const Icon(CupertinoIcons.film),
-                          ),
-                  ),
-                ),
+                          );
+                        },
+                      )
+                    : Container(
+                        color: CupertinoColors.systemGrey5,
+                        child: const Icon(CupertinoIcons.film),
+                      ),
+              ),
+            ),
                 // 剩余时间文字显示在左下角
                 Positioned(
                   bottom: 8,
@@ -886,10 +900,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: DefaultTextStyle(
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                      ),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                          ),
                       child: Text(
                         '剩余 ${remainingMinutes}分${remainingSecondsDisplay}秒',
                       ),
@@ -924,9 +938,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                             },
                           ),
                         ),
-                      ),
                     ),
                   ),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -939,7 +953,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
               child: Text(
                 titleText,
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              overflow: TextOverflow.ellipsis,
               ),
             ),
             if (subtitleText != null)
@@ -953,7 +967,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-              ),
+            ),
           ],
         ),
       ),
@@ -973,8 +987,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
 
     return FutureBuilder<EmbyApi>(
       future: EmbyApi.create(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
           return Container(color: CupertinoColors.systemGrey5);
         }
         final url = snapshot.data!.buildImageUrl(
@@ -983,14 +997,14 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
           maxWidth: 300,
         );
         if (url.isEmpty) {
-          return Container(
-            color: CupertinoColors.systemGrey5,
+                            return Container(
+                              color: CupertinoColors.systemGrey5,
             child: const Icon(CupertinoIcons.photo, size: 32),
           );
         }
         return EmbyFadeInImage(
           imageUrl: url,
-          fit: BoxFit.cover,
+                            fit: BoxFit.cover,
         );
       },
     );
@@ -1045,3 +1059,460 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
 
 // Provider for EmbyApi instance
 final embyApiProvider = FutureProvider<EmbyApi>((ref) => EmbyApi.create());
+
+// ✅ Emby Logo 组件
+class _EmbyLogo extends StatelessWidget {
+  const _EmbyLogo({this.size = 24});
+  
+  final double size;
+  
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      'assets/emby_logo.png',
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+    );
+  }
+}
+
+// ✅ 用户头像菜单组件
+class _UserAvatarMenu extends ConsumerWidget {
+  const _UserAvatarMenu({
+    super.key,
+    required this.userId,
+    required this.username,
+  });
+
+  final String userId;
+  final String username;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return GestureDetector(
+      onTap: () => _showUserMenu(context, ref),
+      child: FutureBuilder<EmbyApi>(
+        future: EmbyApi.create(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return _buildDefaultAvatar();
+          }
+
+          final api = snapshot.data!;
+          final avatarUrl = api.buildUserImageUrl(userId);
+
+          return ClipOval(
+            child: SizedBox(
+              width: 28,  // ✅ 缩小到 28
+              height: 28,
+              child: EmbyFadeInImage(
+                imageUrl: avatarUrl,
+                fit: BoxFit.cover,
+                placeholder: _buildDefaultAvatar(),
+                fadeDuration: const Duration(milliseconds: 300),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildDefaultAvatar() {
+    return CircleAvatar(
+      radius: 14,  // ✅ 缩小到 14
+      backgroundColor: Colors.blue.shade100,
+      child: Text(
+        username[0].toUpperCase(),
+        style: TextStyle(
+          color: Colors.blue.shade700,
+          fontSize: 12,  // ✅ 缩小字体
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showUserMenu(BuildContext context, WidgetRef ref) async {
+    print('👤 User avatar tapped');
+    
+    // ✅ 保存外部 context 和 ref
+    final outerContext = context;
+    final outerRef = ref;
+    
+    final server = ref.read(serverSettingsProvider).value;
+    if (server == null) return;
+    
+    final serverUrl = '${server.protocol}://${server.host}:${server.port}';
+    final allAccounts = ref.read(accountHistoryProvider);
+    final accounts = allAccounts.where((a) => a.serverUrl == serverUrl).toList();
+    
+    // ✅ 如果只有1个账号，不显示下拉菜单
+    if (accounts.length <= 1) {
+      print('👤 Only one account, skip menu');
+      return;
+    }
+    
+    final currentUserId = userId;
+    
+    // ✅ 计算最长用户名的宽度
+    double maxTextWidth = 0;
+    final textStyle = const TextStyle(fontSize: 14);  // 使用默认字体大小
+    
+    for (final account in accounts) {
+      final textPainter = TextPainter(
+        text: TextSpan(text: account.username, style: textStyle),
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      if (textPainter.width > maxTextWidth) {
+        maxTextWidth = textPainter.width;
+      }
+    }
+    
+    // ✅ 计算菜单宽度：头像(28) + 间距(12) + 最长文字宽度 + 最小间距(8) + 对号(20) + PopupMenuItem左右padding(32)
+    // PopupMenuItem 默认左右 padding 各 16px，共 32px
+    // 对号靠右对齐，文字和对号之间至少有 8px 间距
+    final contentWidth = 28 + 12 + maxTextWidth + 8 + 20;  // 内容宽度
+    final menuWidth = contentWidth + 20;  // 加上 PopupMenuItem 的 padding
+    
+    // ✅ 显示用户下拉菜单（根据最长用户名动态计算宽度）
+    await showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        MediaQuery.of(context).size.width - menuWidth,  // ✅ 根据计算出的宽度定位
+        MediaQuery.of(context).padding.top + 44,  // 顶部导航栏下方
+        16,
+        0,
+      ),
+      constraints: BoxConstraints(
+        minWidth: menuWidth,  // ✅ 固定宽度
+        maxWidth: menuWidth,  // ✅ 固定宽度
+      ),
+      items: [
+        ...accounts.map((account) {
+          final isCurrent = account.userId == currentUserId;
+          return PopupMenuItem(
+            enabled: !isCurrent,  // 当前用户禁用点击
+            child: Row(
+              children: [
+                // 用户头像
+                _UserAvatarSmall(
+                  userId: account.userId,
+                  username: account.username,
+                ),
+                const SizedBox(width: 12),
+                // 用户名（左对齐）
+                Text(
+                  account.username,
+                  style: TextStyle(
+                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                const Spacer(),  // ✅ 填充剩余空间，让对号靠右
+                // 当前标识（靠右对齐）
+                if (isCurrent)
+                  const Icon(
+                    Icons.check,
+                    color: Colors.green,
+                    size: 20,
+                  ),
+              ],
+            ),
+            onTap: isCurrent ? null : () {
+              // ✅ 菜单会自动关闭，延迟后用外部 context 切换
+              Future.delayed(const Duration(milliseconds: 300), () async {
+                if (outerContext.mounted) {
+                  await _switchToAccount(outerContext, outerRef, account);
+                }
+              });
+            },
+          );
+        }),
+      ],
+    );
+  }
+  
+  // ✅ 切换账号逻辑（从设置页复制）
+  Future<void> _switchToAccount(
+      BuildContext context, WidgetRef ref, AccountRecord account) async {
+    print('🔄 [Menu] Switching to account: ${account.username}');
+    
+    // ✅ 显示居中loading，保存 dialog context
+    BuildContext? dialogContext;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        dialogContext = ctx;  // ✅ 保存 dialog 的 context
+        return const Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('正在切换账号...'),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    
+    try {
+      // ✅ 优先使用保存的 token 和 userId
+      if (account.lastToken != null && account.lastToken!.isNotEmpty &&
+          account.userId != null && account.userId!.isNotEmpty) {
+        print('🔑 [Menu] Using saved token for ${account.username}');
+        
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('emby_token', account.lastToken!);
+        await prefs.setString('emby_user_id', account.userId!);
+        await prefs.setString('emby_user_name', account.username);
+        
+        // 验证 token
+        final api = await EmbyApi.create();
+        try {
+          await api.getUserViews(account.userId!);
+          
+          print('✅ [Menu] Token valid, switching');
+          
+          // 使所有 provider 失效
+          ref.invalidate(viewsProvider);
+          ref.invalidate(resumeProvider);
+          ref.invalidate(latestByViewProvider);
+          
+          await ref.read(authStateProvider.notifier).load();
+          await Future.delayed(const Duration(milliseconds: 300));
+          
+          // ✅ 关闭 loading dialog
+          if (dialogContext != null && dialogContext!.mounted) {
+            Navigator.of(dialogContext!).pop();
+          }
+          
+          if (context.mounted) {
+            // ✅ 显示成功提示（简化版，1秒后自动消失）
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.white),
+                    const SizedBox(width: 12),
+                    Text('已切换到 ${account.username}'),
+                  ],
+                ),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+          return;
+        } catch (e) {
+          print('❌ [Menu] Token invalid: $e');
+        }
+      }
+      
+      // Token 失效，要求输入密码
+      // ✅ 关闭第一个 loading dialog
+      if (dialogContext != null && dialogContext!.mounted) {
+        Navigator.of(dialogContext!).pop();
+      }
+      
+      if (context.mounted) {
+        final password = await _showPasswordDialog(context, account.username);
+        if (password == null || password.isEmpty) {
+          return;
+        }
+        
+        // ✅ 重新显示loading，保存新的 dialog context
+        dialogContext = null;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) {
+            dialogContext = ctx;  // ✅ 保存新的 dialog context
+            return const Center(
+              child: Card(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('正在登录...'),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+        
+        final api = await EmbyApi.create();
+        final loginResult = await api.authenticate(
+            username: account.username, password: password);
+        
+        // 更新账号历史
+        await ref.read(accountHistoryProvider.notifier).addAccount(
+          account.serverUrl,
+          loginResult.userName,
+          loginResult.token,
+          userId: loginResult.userId,
+        );
+        
+        // 使所有 provider 失效
+        ref.invalidate(viewsProvider);
+        ref.invalidate(resumeProvider);
+        ref.invalidate(latestByViewProvider);
+        
+        await ref.read(authStateProvider.notifier).load();
+        await Future.delayed(const Duration(milliseconds: 300));
+        
+        // ✅ 关闭 loading dialog
+        if (dialogContext != null && dialogContext!.mounted) {
+          Navigator.of(dialogContext!).pop();
+        }
+        
+        if (context.mounted) {
+          // ✅ 显示成功提示
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Text('已切换到 ${loginResult.userName}'),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e, stack) {
+      print('❌ [Menu] Switch failed: $e');
+      print('Stack: $stack');
+      
+      // ✅ 尝试关闭 loading dialog（如果还在显示）
+      if (dialogContext != null && dialogContext!.mounted) {
+        try {
+          Navigator.of(dialogContext!).pop();
+        } catch (_) {
+          print('❌ Failed to close loading dialog');
+        }
+      }
+      
+      if (context.mounted) {
+        // ✅ 显示错误（使用 SnackBar）
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(child: Text('切换失败: ${e.toString()}')),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+  
+  Future<String?> _showPasswordDialog(BuildContext context, String username) async {
+    final passwordController = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('输入密码'),
+        content: TextField(
+          controller: passwordController,
+          obscureText: true,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: '${username} 的密码',
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (value) => Navigator.pop(ctx, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, passwordController.text),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ✅ 小尺寸用户头像（用于下拉菜单）
+class _UserAvatarSmall extends StatelessWidget {
+  const _UserAvatarSmall({
+    required this.username,
+    this.userId,
+  });
+
+  final String? userId;
+  final String username;
+
+  @override
+  Widget build(BuildContext context) {
+    if (userId == null || userId!.isEmpty) {
+      return _buildDefaultAvatar();
+    }
+
+    return FutureBuilder<EmbyApi>(
+      future: EmbyApi.create(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return _buildDefaultAvatar();
+        }
+
+        final api = snapshot.data!;
+        final avatarUrl = api.buildUserImageUrl(userId!);
+
+        return ClipOval(
+          child: SizedBox(
+            width: 28,  // ✅ 与当前用户头像大小一致
+            height: 28,
+            child: EmbyFadeInImage(
+              imageUrl: avatarUrl,
+              fit: BoxFit.cover,
+              placeholder: _buildDefaultAvatar(),
+              fadeDuration: const Duration(milliseconds: 300),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDefaultAvatar() {
+    return CircleAvatar(
+      radius: 14,  // ✅ 28 / 2 = 14
+      backgroundColor: Colors.blue.shade100,
+      child: Text(
+        username[0].toUpperCase(),
+        style: TextStyle(
+          color: Colors.blue.shade700,
+          fontSize: 12,  // ✅ 缩小字体
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}

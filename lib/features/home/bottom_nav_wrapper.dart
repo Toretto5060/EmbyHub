@@ -42,6 +42,15 @@ class _BottomNavWrapperState extends State<BottomNavWrapper> {
   int _index = 0;
 
   int get currentIndex => _index;
+  
+  // ✅ 切换到指定的 tab
+  void switchToTab(int index) {
+    if (_index != index) {
+      setState(() {
+        _index = index;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
