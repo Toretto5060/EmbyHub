@@ -131,24 +131,28 @@ class EmbyApi {
 
   // Get resume items (continue watching)
   Future<List<ItemInfo>> getResumeItems(String userId, {int limit = 12}) async {
-    final res = await _dio.get('/Users/$userId/Items/Resume', queryParameters: {
-      'Limit': limit,
-      'Recursive': true,
-      'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData',
-      'ImageTypeLimit': 1,
-      'EnableImageTypes': 'Primary,Backdrop,Thumb',
-    });
-    final list =
-        (res.data['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    return list.map((e) => ItemInfo.fromJson(e)).toList();
+    try {
+      final res =
+          await _dio.get('/Users/$userId/Items/Resume', queryParameters: {
+        'Limit': limit,
+        'Recursive': true,
+        'Fields':
+            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear',
+        'ImageTypeLimit': 1,
+        'EnableImageTypes': 'Primary,Backdrop,Thumb',
+      });
+      final list =
+          (res.data['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      return list.map((e) => ItemInfo.fromJson(e)).toList();
+    } catch (e, stack) {
+      return [];
+    }
   }
 
   // Get latest items from a library
   Future<List<ItemInfo>> getLatestItems(String userId,
       {required String parentId, int limit = 16}) async {
     try {
-      print('Fetching latest items for parentId: $parentId, userId: $userId');
       final res =
           await _dio.get('/Users/$userId/Items/Latest', queryParameters: {
         'ParentId': parentId,
@@ -159,20 +163,13 @@ class EmbyApi {
         'EnableImageTypes': 'Primary,Backdrop,Thumb',
       });
 
-      print('Latest API response type: ${res.data.runtimeType}');
-      print('Latest API response data: ${res.data}');
-
       // Latest API returns an array directly, not wrapped in Items
       if (res.data is List) {
         final list = (res.data as List).cast<Map<String, dynamic>>();
-        print('Found ${list.length} items');
         return list.map((e) => ItemInfo.fromJson(e)).toList();
       }
-      print('Response data is not a List');
       return [];
     } catch (e, stack) {
-      print('Error fetching latest items for $parentId: $e');
-      print('Stack trace: $stack');
       return [];
     }
   }
@@ -368,15 +365,6 @@ class ItemInfo {
   final int? productionYear;
 
   factory ItemInfo.fromJson(Map<String, dynamic> json) {
-    // 调试：打印年份相关字段
-    if (json['Name'] != null) {
-      print('Parsing ItemInfo: ${json['Name']}');
-      print('  JSON Keys: ${json.keys.toList()}');
-      print('  PremiereDate in JSON: ${json['PremiereDate']}');
-      print('  EndDate in JSON: ${json['EndDate']}');
-      print('  ProductionYear in JSON: ${json['ProductionYear']}');
-    }
-
     return ItemInfo(
       id: json['Id'] as String?,
       name: json['Name'] as String? ?? 'Unknown',

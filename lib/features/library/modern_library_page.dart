@@ -74,6 +74,10 @@ class ModernLibraryPage extends ConsumerStatefulWidget {
 class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
   final _scrollController = ScrollController();
 
+  // 统一管理间距
+  static const double _sectionTitleToContentSpacing = 5.0; // 模块标题距离下方卡片的高度
+  static const double _sectionSpacing = 5.0; // 模块之间的距离
+
   @override
   void dispose() {
     _scrollController.dispose();
@@ -149,18 +153,21 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                 // Continue Watching Section
                 resumeItems.when(
                   data: (items) {
-                    if (items.isEmpty) return const SizedBox.shrink();
+                    if (items.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildSectionHeader(context, '继续观看'),
+                        const SizedBox(height: _sectionTitleToContentSpacing),
                         _buildResumeList(context, ref, items),
-                        const SizedBox(height: 32),
+                        const SizedBox(height: _sectionSpacing),
                       ],
                     );
                   },
                   loading: () => const SizedBox.shrink(),
-                  error: (_, __) => const SizedBox.shrink(),
+                  error: (e, st) => const SizedBox.shrink(),
                 ),
                 // My Libraries Section
                 views.when(
@@ -171,10 +178,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildSectionHeader(context, '我的媒体'),
-                        _buildLibraryGrid(context, viewList),
-                        const SizedBox(height: 32),
-                        // 显示各个媒体库的最新内容
+                        // 我的媒体模块
+                        _buildMyLibrariesSection(context, viewList),
+                        // 显示各个媒体库的最新内容（每个section内部已有底部间距）
                         ...viewList
                             .where((v) =>
                                 v.collectionType != 'livetv' &&
@@ -224,17 +230,19 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
     // 根据标题选择合适的 icon
     IconData? icon;
     if (title == '我的媒体') {
-      icon = CupertinoIcons.square_grid_2x2;
+      icon = CupertinoIcons.collections;
     } else if (title == '继续观看') {
       icon = CupertinoIcons.play_circle;
-    } else if (title.contains('电影') || title.contains('动漫')) {
+    } else if (title.contains('电影')) {
       icon = CupertinoIcons.film;
+    } else if (title.contains('动漫')) {
+      icon = CupertinoIcons.sparkles;
     } else if (title.contains('电视剧')) {
       icon = CupertinoIcons.tv;
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -261,7 +269,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
 
   Widget _buildLibraryGrid(BuildContext context, List<ViewInfo> views) {
     return SizedBox(
-      height: 120,
+      height: 125,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -278,27 +286,28 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
 
-    return Container(
-      width: 150,
-      margin: const EdgeInsets.only(right: 12),
-      child: CupertinoButton(
-        padding: EdgeInsets.zero,
-        onPressed: view.id != null && view.id!.isNotEmpty
-            ? () {
-                // 根据媒体库类型跳转到不同页面
-                if (view.collectionType == 'livetv') {
-                  context.push(
-                      '/livetv/${view.id}?name=${Uri.encodeComponent(view.name)}');
-                } else if (view.collectionType == 'music') {
-                  context.push(
-                      '/music/${view.id}?name=${Uri.encodeComponent(view.name)}');
-                } else {
-                  context.push(
-                      '/library/${view.id}?name=${Uri.encodeComponent(view.name)}');
-                }
+    return GestureDetector(
+      onTap: view.id != null && view.id!.isNotEmpty
+          ? () {
+              // 根据媒体库类型跳转到不同页面
+              if (view.collectionType == 'livetv') {
+                context.push(
+                    '/livetv/${view.id}?name=${Uri.encodeComponent(view.name)}');
+              } else if (view.collectionType == 'music') {
+                context.push(
+                    '/music/${view.id}?name=${Uri.encodeComponent(view.name)}');
+              } else {
+                context.push(
+                    '/library/${view.id}?name=${Uri.encodeComponent(view.name)}');
               }
-            : null,
+            }
+          : null,
+      child: Container(
+        width: 150,
+        margin: const EdgeInsets.only(left: 6, right: 6),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
@@ -407,6 +416,19 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
     );
   }
 
+  Widget _buildMyLibrariesSection(
+      BuildContext context, List<ViewInfo> viewList) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(context, '我的媒体'),
+        const SizedBox(height: _sectionTitleToContentSpacing),
+        _buildLibraryGrid(context, viewList),
+        const SizedBox(height: _sectionSpacing),
+      ],
+    );
+  }
+
   Widget _buildLatestSection(
       BuildContext context, WidgetRef ref, ViewInfo view) {
     final latestItems = ref.watch(_latestByViewProvider(view.id ?? ''));
@@ -418,8 +440,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildSectionHeader(context, view.name),
+            const SizedBox(height: _sectionTitleToContentSpacing),
             _buildLatestList(context, ref, items),
-            const SizedBox(height: 24),
+            const SizedBox(height: _sectionSpacing),
           ],
         );
       },
@@ -431,7 +454,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
   Widget _buildLatestList(
       BuildContext context, WidgetRef ref, List<ItemInfo> items) {
     return SizedBox(
-      height: 210,
+      height: 190,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -447,13 +470,6 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
   Widget _buildLatestCard(BuildContext context, WidgetRef ref, ItemInfo item) {
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
-
-    // 调试：打印年份信息
-    print('Item: ${item.name}');
-    print('  Type: ${item.type}');
-    print('  PremiereDate: ${item.premiereDate}');
-    print('  EndDate: ${item.endDate}');
-    print('  ProductionYear: ${item.productionYear}');
 
     // 构建年份显示文本
     String? yearText;
@@ -479,11 +495,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
       }
     }
 
-    print('  YearText: $yearText');
-
     return Container(
       width: 100,
-      margin: const EdgeInsets.only(right: 12),
+      margin: const EdgeInsets.only(left: 6, right: 6),
       child: CupertinoButton(
         padding: EdgeInsets.zero,
         onPressed: item.id != null && item.id!.isNotEmpty
@@ -510,7 +524,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
             const SizedBox(height: 6),
             Text(
               item.name,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -564,7 +578,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
 
     return Container(
       width: 300,
-      margin: const EdgeInsets.symmetric(horizontal: 4),
+      margin: const EdgeInsets.only(left: 6, right: 6),
       child: CupertinoButton(
         padding: EdgeInsets.zero,
         onPressed: () => context.push('/player/${item.id}'),
