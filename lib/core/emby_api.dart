@@ -81,7 +81,7 @@ class EmbyApi {
     await prefs.setString('emby_user_id', user['Id'] as String);
     await prefs.setString(
         'emby_user_name', user['Name'] as String? ?? username);
-    
+
     // Save account to history
     final protocol = prefs.getString('server_protocol') ?? 'http';
     final host = prefs.getString('server_host') ?? '';
@@ -89,7 +89,7 @@ class EmbyApi {
     final serverUrl = _buildBaseUrl(protocol, host, port);
     // Note: This would need to be called from the provider layer
     // For now, we'll handle this in the connect page
-    
+
     return LoginResult(
         token: token,
         userId: user['Id'] as String,
@@ -102,23 +102,23 @@ class EmbyApi {
       final res = await _dio.get('/Users/$userId/Views');
       print('getUserViews response type: ${res.data.runtimeType}');
       print('getUserViews response: ${res.data}');
-      
+
       if (res.data is! Map<String, dynamic>) {
         print('getUserViews: Response is not a Map');
         return [];
       }
-      
+
       final items = res.data['Items'];
       if (items == null) {
         print('getUserViews: No Items field in response');
         return [];
       }
-      
+
       if (items is! List) {
         print('getUserViews: Items is not a List');
         return [];
       }
-      
+
       final list = items.cast<Map<String, dynamic>>();
       print('getUserViews: Found ${list.length} views');
       return list.map((e) => ViewInfo.fromJson(e)).toList();
@@ -134,29 +134,34 @@ class EmbyApi {
     final res = await _dio.get('/Users/$userId/Items/Resume', queryParameters: {
       'Limit': limit,
       'Recursive': true,
-      'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData',
+      'Fields':
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData',
       'ImageTypeLimit': 1,
       'EnableImageTypes': 'Primary,Backdrop,Thumb',
     });
-    final list = (res.data['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final list =
+        (res.data['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     return list.map((e) => ItemInfo.fromJson(e)).toList();
   }
 
   // Get latest items from a library
-  Future<List<ItemInfo>> getLatestItems(String userId, {required String parentId, int limit = 16}) async {
+  Future<List<ItemInfo>> getLatestItems(String userId,
+      {required String parentId, int limit = 16}) async {
     try {
       print('Fetching latest items for parentId: $parentId, userId: $userId');
-      final res = await _dio.get('/Users/$userId/Items/Latest', queryParameters: {
+      final res =
+          await _dio.get('/Users/$userId/Items/Latest', queryParameters: {
         'ParentId': parentId,
         'Limit': limit,
-        'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData',
+        'Fields':
+            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear',
         'ImageTypeLimit': 1,
         'EnableImageTypes': 'Primary,Backdrop,Thumb',
       });
-      
+
       print('Latest API response type: ${res.data.runtimeType}');
       print('Latest API response data: ${res.data}');
-      
+
       // Latest API returns an array directly, not wrapped in Items
       if (res.data is List) {
         final list = (res.data as List).cast<Map<String, dynamic>>();
@@ -185,19 +190,20 @@ class EmbyApi {
       'Recursive': true,
       'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview',
     };
-    
+
     // 如果指定了类型，使用指定的；否则使用默认的
     if (includeItemTypes != null) {
       queryParams['IncludeItemTypes'] = includeItemTypes;
     } else {
       queryParams['IncludeItemTypes'] = 'Movie,Series,BoxSet,Video';
     }
-    
-    final res = await _dio.get('/Users/$userId/Items', queryParameters: queryParams);
+
+    final res =
+        await _dio.get('/Users/$userId/Items', queryParameters: queryParams);
     final list = (res.data['Items'] as List).cast<Map<String, dynamic>>();
     return list.map((e) => ItemInfo.fromJson(e)).toList();
   }
-  
+
   // 获取某个剧集的季列表
   Future<List<ItemInfo>> getSeasons({
     required String userId,
@@ -210,23 +216,23 @@ class EmbyApi {
         'Fields': 'PrimaryImageAspectRatio,Overview',
       });
       print('getSeasons response: ${res.data}');
-      
+
       if (res.data is! Map<String, dynamic>) {
         print('getSeasons: Response is not a Map');
         return [];
       }
-      
+
       final items = res.data['Items'];
       if (items == null) {
         print('getSeasons: No Items field in response');
         return [];
       }
-      
+
       if (items is! List) {
         print('getSeasons: Items is not a List');
         return [];
       }
-      
+
       final list = items.cast<Map<String, dynamic>>();
       print('getSeasons: Found ${list.length} seasons');
       return list.map((e) => ItemInfo.fromJson(e)).toList();
@@ -236,7 +242,7 @@ class EmbyApi {
       rethrow;
     }
   }
-  
+
   // 获取某一季的所有集
   Future<List<ItemInfo>> getEpisodes({
     required String userId,
@@ -244,30 +250,31 @@ class EmbyApi {
     required String seasonId,
   }) async {
     try {
-      print('getEpisodes: userId=$userId, seriesId=$seriesId, seasonId=$seasonId');
+      print(
+          'getEpisodes: userId=$userId, seriesId=$seriesId, seasonId=$seasonId');
       final res = await _dio.get('/Shows/$seriesId/Episodes', queryParameters: {
         'UserId': userId,
         'SeasonId': seasonId,
         'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview',
       });
       print('getEpisodes response: ${res.data}');
-      
+
       if (res.data is! Map<String, dynamic>) {
         print('getEpisodes: Response is not a Map');
         return [];
       }
-      
+
       final items = res.data['Items'];
       if (items == null) {
         print('getEpisodes: No Items field in response');
         return [];
       }
-      
+
       if (items is! List) {
         print('getEpisodes: Items is not a List');
         return [];
       }
-      
+
       final list = items.cast<Map<String, dynamic>>();
       print('getEpisodes: Found ${list.length} episodes');
       return list.map((e) => ItemInfo.fromJson(e)).toList();
@@ -320,9 +327,9 @@ class ViewInfo {
     final id = json['Id'] as String?;
     final name = json['Name'] as String? ?? 'Unknown';
     final collectionType = json['CollectionType'] as String?;
-    
+
     print('ViewInfo.fromJson: id=$id, name=$name, type=$collectionType');
-    
+
     return ViewInfo(
       id: id,
       name: name,
@@ -342,8 +349,11 @@ class ItemInfo {
     this.seriesName,
     this.parentIndexNumber,
     this.indexNumber,
+    this.premiereDate,
+    this.endDate,
+    this.productionYear,
   });
-  
+
   final String? id;
   final String name;
   final String type;
@@ -353,8 +363,20 @@ class ItemInfo {
   final String? seriesName;
   final int? parentIndexNumber;
   final int? indexNumber;
+  final String? premiereDate;
+  final String? endDate;
+  final int? productionYear;
 
   factory ItemInfo.fromJson(Map<String, dynamic> json) {
+    // 调试：打印年份相关字段
+    if (json['Name'] != null) {
+      print('Parsing ItemInfo: ${json['Name']}');
+      print('  JSON Keys: ${json.keys.toList()}');
+      print('  PremiereDate in JSON: ${json['PremiereDate']}');
+      print('  EndDate in JSON: ${json['EndDate']}');
+      print('  ProductionYear in JSON: ${json['ProductionYear']}');
+    }
+
     return ItemInfo(
       id: json['Id'] as String?,
       name: json['Name'] as String? ?? 'Unknown',
@@ -365,6 +387,9 @@ class ItemInfo {
       seriesName: json['SeriesName'] as String?,
       parentIndexNumber: (json['ParentIndexNumber'] as num?)?.toInt(),
       indexNumber: (json['IndexNumber'] as num?)?.toInt(),
+      premiereDate: json['PremiereDate'] as String?,
+      endDate: json['EndDate'] as String?,
+      productionYear: (json['ProductionYear'] as num?)?.toInt(),
     );
   }
 }

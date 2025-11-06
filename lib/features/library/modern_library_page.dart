@@ -431,7 +431,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
   Widget _buildLatestList(
       BuildContext context, WidgetRef ref, List<ItemInfo> items) {
     return SizedBox(
-      height: 200,
+      height: 210,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -448,8 +448,41 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
 
+    // 调试：打印年份信息
+    print('Item: ${item.name}');
+    print('  Type: ${item.type}');
+    print('  PremiereDate: ${item.premiereDate}');
+    print('  EndDate: ${item.endDate}');
+    print('  ProductionYear: ${item.productionYear}');
+
+    // 构建年份显示文本
+    String? yearText;
+    if (item.premiereDate != null || item.productionYear != null) {
+      final startYear = item.premiereDate != null
+          ? DateTime.tryParse(item.premiereDate!)?.year
+          : item.productionYear;
+
+      if (startYear != null) {
+        if (item.endDate != null) {
+          final endYear = DateTime.tryParse(item.endDate!)?.year;
+          if (endYear != null && endYear != startYear) {
+            yearText = '$startYear-$endYear';
+          } else {
+            yearText = '$startYear';
+          }
+        } else if (item.type == 'Series') {
+          // 电视剧如果没有结束日期，显示"开始年份-现在"
+          yearText = '$startYear-现在';
+        } else {
+          yearText = '$startYear';
+        }
+      }
+    }
+
+    print('  YearText: $yearText');
+
     return Container(
-      width: 130,
+      width: 100,
       margin: const EdgeInsets.only(right: 12),
       child: CupertinoButton(
         padding: EdgeInsets.zero,
@@ -464,11 +497,13 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
               }
             : null,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: AspectRatio(
+                aspectRatio: 2 / 3,
                 child: _buildLatestPoster(context, ref, item.id),
               ),
             ),
@@ -477,11 +512,23 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
               item.name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
                 color: isDark ? Colors.white : Colors.black87,
               ),
             ),
+            if (yearText != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                yearText,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isDark ? Colors.grey : Colors.grey.shade600,
+                ),
+              ),
+            ],
           ],
         ),
       ),
