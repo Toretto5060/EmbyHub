@@ -13,8 +13,13 @@ final _resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
 
+  print('=== _resumeProvider 调试 ===');
+  print('authAsync.hasValue: ${authAsync.hasValue}');
+  print('auth: $auth');
+  print('auth?.isLoggedIn: ${auth?.isLoggedIn}');
+
   if (auth == null || !auth.isLoggedIn) {
-    print('_resumeProvider: Not logged in');
+    print('_resumeProvider: Not logged in, returning empty list');
     return <ItemInfo>[];
   }
 
@@ -22,6 +27,9 @@ final _resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
   final api = await EmbyApi.create();
   final items = await api.getResumeItems(auth.userId!);
   print('_resumeProvider: Got ${items.length} resume items');
+  for (var i = 0; i < items.length && i < 3; i++) {
+    print('  - ${items[i].name} (${items[i].type})');
+  }
   return items;
 });
 
@@ -35,14 +43,12 @@ final _viewsProvider = FutureProvider.autoDispose<List<ViewInfo>>((ref) async {
     return <ViewInfo>[];
   }
 
-  print('_viewsProvider: Fetching views for userId=${auth.userId}');
   final api = await EmbyApi.create();
   final views = await api.getUserViews(auth.userId!);
-  print('_viewsProvider: Got ${views.length} views');
-  for (final view in views) {
-    print(
-        '  View: id=${view.id}, name=${view.name}, type=${view.collectionType}');
-  }
+  // for (final view in views) {
+  //   print(
+  //       '  View: id=${view.id}, name=${view.name}, type=${view.collectionType}');
+  // }
   return views;
 });
 
@@ -97,7 +103,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
 
     final auth = ref.watch(authStateProvider);
     final server = ref.watch(serverSettingsProvider);
+    print('build: 开始 watch _resumeProvider');
     final resumeItems = ref.watch(_resumeProvider);
+    print('build: resumeItems 状态: ${resumeItems.runtimeType}');
     final views = ref.watch(_viewsProvider);
 
     return CupertinoPageScaffold(
@@ -150,25 +158,6 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                 top: MediaQuery.of(context).padding.top + 44,
               ),
               children: [
-                // Continue Watching Section
-                resumeItems.when(
-                  data: (items) {
-                    if (items.isEmpty) {
-                      return const SizedBox.shrink();
-                    }
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildSectionHeader(context, '继续观看'),
-                        const SizedBox(height: _sectionTitleToContentSpacing),
-                        _buildResumeList(context, ref, items),
-                        const SizedBox(height: _sectionSpacing),
-                      ],
-                    );
-                  },
-                  loading: () => const SizedBox.shrink(),
-                  error: (e, st) => const SizedBox.shrink(),
-                ),
                 // My Libraries Section
                 views.when(
                   data: (viewList) {
@@ -180,6 +169,24 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                       children: [
                         // 我的媒体模块
                         _buildMyLibrariesSection(context, viewList),
+                        // 继续观看模块（放在我的媒体之后）
+                        resumeItems.when(
+                          data: (items) {
+                            if (items.isEmpty) return const SizedBox.shrink();
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildSectionHeader(context, '继续观看'),
+                                const SizedBox(
+                                    height: _sectionTitleToContentSpacing),
+                                _buildResumeList(context, ref, items),
+                                const SizedBox(height: _sectionSpacing),
+                              ],
+                            );
+                          },
+                          loading: () => const SizedBox.shrink(),
+                          error: (e, st) => const SizedBox.shrink(),
+                        ),
                         // 显示各个媒体库的最新内容（每个section内部已有底部间距）
                         ...viewList
                             .where((v) =>
@@ -257,7 +264,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
           DefaultTextStyle(
             style: TextStyle(
               fontSize: 20,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w400,
               color: isDark ? Colors.white : Colors.black87,
             ),
             child: Text(title),
@@ -333,15 +340,12 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                             ),
                           );
                         }
-                        print(
-                            'Loading library image for ${view.name} (${view.id}), type: Primary');
                         // Try Primary type first
                         final imageUrl = snapshot.data!.buildImageUrl(
                           itemId: view.id!,
                           type: 'Primary',
                           maxWidth: 400, // 提高图片清晰度
                         );
-                        print('Image URL: $imageUrl');
                         return Image.network(
                           imageUrl,
                           height: 100,
@@ -514,12 +518,96 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
           crossAxisAlignment: CrossAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: AspectRatio(
-                aspectRatio: 2 / 3,
-                child: _buildLatestPoster(context, ref, item.id),
-              ),
+            Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: AspectRatio(
+                    aspectRatio: 2 / 3,
+                    child: _buildLatestPoster(context, ref, item.id),
+                  ),
+                ),
+                // 评分显示在右下角（优先豆瓣，否则IMDb等）
+                if (item.getRating() != null)
+                  Positioned(
+                    bottom: 4,
+                    right: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // 根据评分来源显示不同图标
+                          if (item.getRatingSource() == 'douban')
+                            Container(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 2),
+                              child: const Text(
+                                '豆',
+                                style: TextStyle(
+                                  color: Colors.green,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            )
+                          else
+                            const Icon(
+                              CupertinoIcons.star_fill,
+                              color: Colors.amber,
+                              size: 12,
+                            ),
+                          const SizedBox(width: 2),
+                          Text(
+                            item.getRating()!.toStringAsFixed(1),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                // 剧集未看集数显示在右上角
+                if (item.type == 'Series' && item.userData != null)
+                  Builder(
+                    builder: (context) {
+                      final unplayedCount =
+                          (item.userData!['UnplayedItemCount'] as num?)
+                              ?.toInt();
+                      if (unplayedCount == null || unplayedCount == 0) {
+                        return const SizedBox.shrink();
+                      }
+                      return Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: CupertinoColors.destructiveRed,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '$unplayedCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+              ],
             ),
             const SizedBox(height: 6),
             Text(
@@ -552,7 +640,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
   Widget _buildResumeList(
       BuildContext context, WidgetRef ref, List<ItemInfo> items) {
     return SizedBox(
-      height: 200,
+      height: 141,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -566,6 +654,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
   }
 
   Widget _buildResumeCard(BuildContext context, WidgetRef ref, ItemInfo item) {
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+
     final progress =
         (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
     final positionTicks =
@@ -576,8 +667,42 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
     final remainingMinutes = (remainingSeconds / 60).floor();
     final remainingSecondsDisplay = remainingSeconds % 60;
 
+    // 构建标题文本
+    String titleText;
+    String? subtitleText;
+
+    try {
+      titleText = item.seriesName ?? item.name ?? '未知';
+      // 如果是剧集，添加季数信息（如果大于1季）
+      if (item.seriesName != null &&
+          item.parentIndexNumber != null &&
+          item.parentIndexNumber! > 1) {
+        titleText += ' 第${item.parentIndexNumber}季';
+      }
+
+      // 构建副标题文本（集数信息）
+      if (item.seriesName != null && item.indexNumber != null) {
+        final episodeName = item.name ?? '';
+        final episodeNum = item.indexNumber!;
+        // 检查集名是否和集数重复（例如："第6集"）
+        if (episodeName.contains('$episodeNum') ||
+            episodeName.contains('${episodeNum}集')) {
+          subtitleText = '第${episodeNum}集';
+        } else {
+          subtitleText = '第${episodeNum}集 $episodeName';
+        }
+      }
+    } catch (e) {
+      // 解析失败，显示原始格式
+      titleText = item.seriesName ?? item.name ?? '未知';
+      if (item.seriesName != null) {
+        subtitleText =
+            'S${item.parentIndexNumber ?? 0}E${item.indexNumber ?? 0} ${item.name ?? ''}';
+      }
+    }
+
     return Container(
-      width: 300,
+      width: 180,
       margin: const EdgeInsets.only(left: 6, right: 6),
       child: CupertinoButton(
         padding: EdgeInsets.zero,
@@ -621,75 +746,82 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                           ),
                   ),
                 ),
+                // 剩余时间文字显示在左下角
                 Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
+                  bottom: 8,
+                  left: 8,
                   child: Container(
-                    padding: const EdgeInsets.all(8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withOpacity(0.7),
-                        ],
-                      ),
-                      borderRadius: const BorderRadius.vertical(
-                          bottom: Radius.circular(12)),
+                      color: Colors.black.withOpacity(0.6),
+                      borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (progress > 0)
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(2),
-                            child: LinearProgressIndicator(
-                              value: progress / 100,
-                              minHeight: 4,
-                              backgroundColor: Colors.white.withOpacity(0.3),
-                              valueColor: const AlwaysStoppedAnimation(
-                                  CupertinoColors.activeBlue),
-                            ),
-                          ),
-                        const SizedBox(height: 4),
-                        DefaultTextStyle(
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                          ),
-                          child: Text(
-                            '剩余 ${remainingMinutes}分${remainingSecondsDisplay}秒',
-                          ),
-                        ),
-                      ],
+                    child: DefaultTextStyle(
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                      ),
+                      child: Text(
+                        '剩余 ${remainingMinutes}分${remainingSecondsDisplay}秒',
+                      ),
                     ),
                   ),
                 ),
+                // 进度条显示在图片底部（缩小宽度，避开圆角，居中）
+                if (progress > 0)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: SizedBox(
+                          width: 160, // 缩小宽度，避开圆角
+                          child: TweenAnimationBuilder<double>(
+                            key: ValueKey(
+                                'progress_${item.id}'), // 使用唯一key避免重复动画
+                            duration: const Duration(seconds: 1),
+                            curve: Curves.easeOutCubic,
+                            tween: Tween<double>(begin: 0, end: progress / 100),
+                            builder: (context, value, child) {
+                              return LinearProgressIndicator(
+                                value: value,
+                                minHeight: 3,
+                                backgroundColor: Colors.black.withOpacity(0.3),
+                                valueColor: const AlwaysStoppedAnimation(
+                                    CupertinoColors.activeBlue),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
             const SizedBox(height: 8),
             DefaultTextStyle(
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: CupertinoColors.label,
+                fontWeight: FontWeight.w400,
+                color: isDark ? Colors.white : Colors.black87,
               ),
               child: Text(
-                item.seriesName ?? item.name ?? '未知',
+                titleText,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (item.seriesName != null)
+            if (subtitleText != null)
               DefaultTextStyle(
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: CupertinoColors.systemGrey,
+                  color: isDark ? Colors.grey : Colors.grey.shade600,
                 ),
                 child: Text(
-                  'S${item.parentIndexNumber ?? 0}E${item.indexNumber ?? 0} ${item.name ?? ''}',
+                  subtitleText,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

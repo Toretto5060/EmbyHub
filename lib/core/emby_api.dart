@@ -132,10 +132,12 @@ class EmbyApi {
   // Get resume items (continue watching)
   Future<List<ItemInfo>> getResumeItems(String userId, {int limit = 12}) async {
     try {
-      final res =
-          await _dio.get('/Users/$userId/Items/Resume', queryParameters: {
+      final res = await _dio.get('/Users/$userId/Items', queryParameters: {
         'Limit': limit,
         'Recursive': true,
+        'Filters': 'IsResumable',
+        'SortBy': 'DatePlayed',
+        'SortOrder': 'Descending',
         'Fields':
             'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear',
         'ImageTypeLimit': 1,
@@ -158,7 +160,7 @@ class EmbyApi {
         'ParentId': parentId,
         'Limit': limit,
         'Fields':
-            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear',
+            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
         'ImageTypeLimit': 1,
         'EnableImageTypes': 'Primary,Backdrop,Thumb',
       });
@@ -349,6 +351,9 @@ class ItemInfo {
     this.premiereDate,
     this.endDate,
     this.productionYear,
+    this.communityRating,
+    this.childCount,
+    this.providerIds,
   });
 
   final String? id;
@@ -363,6 +368,27 @@ class ItemInfo {
   final String? premiereDate;
   final String? endDate;
   final int? productionYear;
+  final double? communityRating; // 评分（IMDb等）
+  final int? childCount; // 子项目数量（剧集的总集数）
+  final Map<String, dynamic>? providerIds; // 第三方ID（包含豆瓣）
+
+  // 获取评分和来源
+  double? getRating() {
+    // 优先使用豆瓣评分
+    if (providerIds != null && providerIds!['Douban'] != null) {
+      final doubanRating = double.tryParse(providerIds!['Douban'].toString());
+      if (doubanRating != null) return doubanRating;
+    }
+    // 没有豆瓣评分则使用社区评分
+    return communityRating;
+  }
+
+  String getRatingSource() {
+    if (providerIds != null && providerIds!['Douban'] != null) {
+      return 'douban';
+    }
+    return 'community';
+  }
 
   factory ItemInfo.fromJson(Map<String, dynamic> json) {
     return ItemInfo(
@@ -378,6 +404,9 @@ class ItemInfo {
       premiereDate: json['PremiereDate'] as String?,
       endDate: json['EndDate'] as String?,
       productionYear: (json['ProductionYear'] as num?)?.toInt(),
+      communityRating: (json['CommunityRating'] as num?)?.toDouble(),
+      childCount: (json['ChildCount'] as num?)?.toInt(),
+      providerIds: json['ProviderIds'] as Map<String, dynamic>?,
     );
   }
 }
