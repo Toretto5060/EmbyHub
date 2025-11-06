@@ -164,6 +164,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
           serverUrl,
           result.userName,
           result.token,
+          userId: result.userId,
         );
       }
       

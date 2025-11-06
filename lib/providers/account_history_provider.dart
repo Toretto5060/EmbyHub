@@ -6,23 +6,27 @@ class AccountRecord {
   final String serverUrl;
   final String username;
   final String? lastToken;
+  final String? userId;  // ✅ 添加 userId 字段
 
   AccountRecord({
     required this.serverUrl,
     required this.username,
     this.lastToken,
+    this.userId,
   });
 
   Map<String, dynamic> toJson() => {
         'serverUrl': serverUrl,
         'username': username,
         'lastToken': lastToken,
+        'userId': userId,
       };
 
   factory AccountRecord.fromJson(Map<String, dynamic> json) => AccountRecord(
         serverUrl: json['serverUrl'] as String,
         username: json['username'] as String,
         lastToken: json['lastToken'] as String?,
+        userId: json['userId'] as String?,
       );
 }
 
@@ -42,12 +46,12 @@ class AccountHistoryNotifier extends StateNotifier<List<AccountRecord>> {
     }
   }
 
-  Future<void> addAccount(String serverUrl, String username, String? token) async {
+  Future<void> addAccount(String serverUrl, String username, String? token, {String? userId}) async {
     // Remove existing record with same server+username
     state = state.where((a) => !(a.serverUrl == serverUrl && a.username == username)).toList();
     // Add to front
     state = [
-      AccountRecord(serverUrl: serverUrl, username: username, lastToken: token),
+      AccountRecord(serverUrl: serverUrl, username: username, lastToken: token, userId: userId),
       ...state,
     ];
     await _save();

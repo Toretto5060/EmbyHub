@@ -47,8 +47,6 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage> {
   @override
   Widget build(BuildContext context) {
     final items = ref.watch(itemsProvider(widget.viewId));
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
 
     return CupertinoPageScaffold(
       backgroundColor: CupertinoColors.systemBackground,
@@ -86,9 +84,9 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage> {
               ),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3,
-                  childAspectRatio: 0.66,
+                  childAspectRatio: 0.58,  // 调整比例以适应标题+年份
                   crossAxisSpacing: 8,
-                  mainAxisSpacing: 8),
+                  mainAxisSpacing: 12),
               itemCount: list.length,
               itemBuilder: (context, index) {
                 final item = list[index];
@@ -124,6 +122,32 @@ class _ItemTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+    
+    // 提取年份信息（与首页逻辑一致）
+    String? yearText;
+    if (item.premiereDate != null && item.premiereDate!.isNotEmpty) {
+      final startYear =
+          int.tryParse(item.premiereDate!.substring(0, 4));
+      if (startYear != null) {
+        if (item.endDate != null && item.endDate!.isNotEmpty) {
+          final endYear = int.tryParse(item.endDate!.substring(0, 4));
+          if (endYear != null && endYear != startYear) {
+            yearText = '$startYear-$endYear';
+          } else {
+            yearText = '$startYear';
+          }
+        } else if (item.type == 'Series') {
+          yearText = '$startYear-现在';
+        } else {
+          yearText = '$startYear';
+        }
+      }
+    } else if (item.productionYear != null) {
+      yearText = '${item.productionYear}';
+    }
+    
     return CupertinoButton(
       padding: EdgeInsets.zero,
       onPressed: item.id != null && item.id!.isNotEmpty
@@ -138,21 +162,121 @@ class _ItemTile extends ConsumerWidget {
             }
           : null,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: _Poster(itemId: item.id, itemType: item.type),
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: _Poster(itemId: item.id, itemType: item.type),
+                ),
+                // 评分显示在右下角（优先豆瓣，否则IMDb等）
+                if (item.getRating() != null)
+                  Positioned(
+                    bottom: 4,
+                    right: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // 根据评分来源显示不同图标
+                          if (item.getRatingSource() == 'douban')
+                            Container(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 2),
+                              child: const Text(
+                                '豆',
+                                style: TextStyle(
+                                  color: Colors.green,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            )
+                          else
+                            const Icon(
+                              CupertinoIcons.star_fill,
+                              color: Colors.amber,
+                              size: 12,
+                            ),
+                          const SizedBox(width: 2),
+                          Text(
+                            item.getRating()!.toStringAsFixed(1),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                // 剧集未看集数显示在右上角
+                if (item.type == 'Series' && item.userData != null)
+                  Builder(
+                    builder: (context) {
+                      final unplayedCount =
+                          (item.userData!['UnplayedItemCount'] as num?)
+                              ?.toInt();
+                      if (unplayedCount != null && unplayedCount > 0) {
+                        return Positioned(
+                          top: 4,
+                          right: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: CupertinoColors.systemRed,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '$unplayedCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 6),
           Text(
             item.name,
-            maxLines: 2,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w400,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
           ),
+          if (yearText != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              yearText,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 10,
+                color: isDark ? Colors.grey : Colors.grey.shade600,
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/account_history_provider.dart';
+import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -99,6 +100,15 @@ class SettingsPage extends ConsumerWidget {
                         ),
                       );
                       if (confirm == true && context.mounted) {
+                        // ✅ 清空所有缓存的数据
+                        ref.read(cachedViewsProvider.notifier).state = {};
+                        ref.read(cachedResumeProvider.notifier).state = {};
+                        
+                        // ✅ 使所有 provider 失效
+                        ref.invalidate(viewsProvider);
+                        ref.invalidate(resumeProvider);
+                        ref.invalidate(latestByViewProvider);
+                        
                         await ref.read(authStateProvider.notifier).clear();
                         context.go('/connect');
                       }
@@ -330,53 +340,149 @@ class SettingsPage extends ConsumerWidget {
       BuildContext context, WidgetRef ref, AccountRecord account) async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
-    // Show loading
-    scaffoldMessenger.showSnackBar(
-      const SnackBar(
-          content: Text('正在切换账号...'), duration: Duration(seconds: 2)),
-    );
+    print('🔄 [Switch] Starting switch to account: ${account.username}');
+    print('🔄 [Switch] Server URL: ${account.serverUrl}');
+    print('🔄 [Switch] Saved token: ${account.lastToken != null ? "exists" : "null"}');
+    print('🔄 [Switch] Saved userId: ${account.userId}');
 
     try {
-      // Try to use saved token first
-      if (account.lastToken != null) {
+      // ✅ 优先使用保存的 token 和 userId
+      if (account.lastToken != null && account.lastToken!.isNotEmpty &&
+          account.userId != null && account.userId!.isNotEmpty) {
+        print('🔑 [Switch] Trying saved token and userId for ${account.username}');
+        
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+              content: Text('正在切换账号...'), duration: Duration(seconds: 3)),
+        );
+        
         final prefs = await SharedPreferences.getInstance();
+        
+        // 保存到 SharedPreferences
         await prefs.setString('emby_token', account.lastToken!);
+        await prefs.setString('emby_user_id', account.userId!);
         await prefs.setString('emby_user_name', account.username);
+        
+        print('💾 [Switch] Saved to SharedPreferences: userId=${account.userId}, userName=${account.username}');
 
-        // Verify token is still valid
+        // 验证 token 是否有效
         final api = await EmbyApi.create();
         try {
-          final userId = prefs.getString('emby_user_id') ?? '';
-          await api.getUserViews(userId);
+          print('📡 [Switch] Verifying token by calling getUserViews...');
+          await api.getUserViews(account.userId!);
+          
+          print('✅ [Switch] Token valid! Switching account successfully');
+          
+          // ✅ 使所有 provider 失效，强制重新加载
+          print('🔄 [Switch] Invalidating all providers...');
+          ref.invalidate(viewsProvider);
+          ref.invalidate(resumeProvider);
+          ref.invalidate(latestByViewProvider);
+          
+          // 等待 authStateProvider 重新加载
+          print('🔄 [Switch] Reloading authStateProvider...');
           await ref.read(authStateProvider.notifier).load();
+          
+          // 验证 authStateProvider 的状态
+          final authState = ref.read(authStateProvider).value;
+          print('✅ [Switch] AuthStateProvider reloaded:');
+          print('✅ [Switch]   userId: ${authState?.userId}');
+          print('✅ [Switch]   userName: ${authState?.userName}');
+          print('✅ [Switch]   isLoggedIn: ${authState?.isLoggedIn}');
+          
           scaffoldMessenger.hideCurrentSnackBar();
           scaffoldMessenger.showSnackBar(
-            SnackBar(content: Text('已切换到 ${account.username}')),
+            SnackBar(
+              content: Text('已切换到 ${account.username}'),
+              duration: const Duration(seconds: 2),
+            ),
           );
           return;
         } catch (e) {
-          // Token invalid, need re-login
+          print('❌ [Switch] Token invalid or expired: $e');
+          print('🔐 [Switch] Will require password login');
+          // Token 失效，继续执行下面的密码登录逻辑
         }
+      } else {
+        print('⚠️ [Switch] No saved token or userId, need password login');
       }
 
-      // Need to login with password
+      // ✅ Token 失效或不存在，要求输入密码
+      scaffoldMessenger.hideCurrentSnackBar();
+      
       if (context.mounted) {
+        print('🔐 [Switch] Showing password dialog for ${account.username}');
         final password = await _showPasswordDialog(context, account.username);
-        if (password != null && password.isNotEmpty) {
-          final api = await EmbyApi.create();
-          await api.authenticate(
-              username: account.username, password: password);
-          await ref.read(authStateProvider.notifier).load();
-          scaffoldMessenger.hideCurrentSnackBar();
+        
+        print('🔐 [Switch] Password dialog returned: ${password != null ? "password entered (length: ${password.length})" : "null (cancelled)"}');
+        
+        if (password == null || password.isEmpty) {
+          print('❌ [Switch] User cancelled password input');
           scaffoldMessenger.showSnackBar(
-            SnackBar(content: Text('已切换到 ${account.username}')),
+            const SnackBar(content: Text('已取消切换账号')),
           );
+          return;
         }
+        
+        print('📡 [Switch] Calling api.authenticate() with username: ${account.username}');
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+              content: Text('正在登录...'), duration: Duration(seconds: 5)),
+        );
+        
+        final api = await EmbyApi.create();
+        final loginResult = await api.authenticate(
+            username: account.username, password: password);
+        
+        print('✅ [Switch] Authentication successful!');
+        print('✅ [Switch] Returned userName: ${loginResult.userName}');
+        print('✅ [Switch] Returned userId: ${loginResult.userId}');
+        print('✅ [Switch] Returned token: ${loginResult.token.substring(0, 10)}...');
+        
+        // ✅ 更新账号历史中的 token 和 userId
+        await ref.read(accountHistoryProvider.notifier).addAccount(
+          account.serverUrl,
+          account.username,
+          loginResult.token,
+          userId: loginResult.userId,
+        );
+        print('💾 [Switch] Updated account history with new token and userId');
+        
+        // ✅ 使所有 provider 失效，强制重新加载
+        print('🔄 [Switch] Invalidating all providers...');
+        ref.invalidate(viewsProvider);
+        ref.invalidate(resumeProvider);
+        ref.invalidate(latestByViewProvider);
+        
+        // 等待 authStateProvider 重新加载
+        print('🔄 [Switch] Reloading authStateProvider...');
+        await ref.read(authStateProvider.notifier).load();
+        
+        // 验证 authStateProvider 的状态
+        final authState = ref.read(authStateProvider).value;
+        print('✅ [Switch] AuthStateProvider reloaded:');
+        print('✅ [Switch]   userId: ${authState?.userId}');
+        print('✅ [Switch]   userName: ${authState?.userName}');
+        print('✅ [Switch]   isLoggedIn: ${authState?.isLoggedIn}');
+        
+        scaffoldMessenger.hideCurrentSnackBar();
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('已切换到 ${loginResult.userName}'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('❌ [Switch] Switch account failed: $e');
+      print('❌ [Switch] Stack trace: $stackTrace');
       scaffoldMessenger.hideCurrentSnackBar();
       scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text('切换失败: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('切换失败: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
       );
     }
   }
@@ -535,7 +641,7 @@ class SettingsPage extends ConsumerWidget {
                             ),
                         ],
                       ),
-                      subtitle: Text('${freshAllAccounts.where((a) => a.serverUrl == serverUrl).length} 个账号'),
+                      subtitle: Text('${accounts.length} 个账号'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [

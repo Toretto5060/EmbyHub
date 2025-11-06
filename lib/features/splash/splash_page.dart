@@ -167,16 +167,25 @@ class _SplashPageState extends ConsumerState<SplashPage>
       final serverName = serverInfo['ServerName'] as String?;
       print('✅ Splash: Preloaded ${views.length} views, ${resumeItems.length} resume items, server: $serverName');
 
-      // ✅ 将数据写入缓存，供首页使用
-      ref.read(cachedViewsProvider.notifier).state = views;
-      ref.read(cachedResumeProvider.notifier).state = resumeItems;
+      // ✅ 将数据写入该用户的缓存，供首页使用
+      final viewsCache = ref.read(cachedViewsProvider);
+      final resumeCache = ref.read(cachedResumeProvider);
+      
+      ref.read(cachedViewsProvider.notifier).state = {
+        ...viewsCache,
+        userId: views,
+      };
+      ref.read(cachedResumeProvider.notifier).state = {
+        ...resumeCache,
+        userId: resumeItems,
+      };
       
       // ✅ 保存服务器名称
       if (serverName != null && serverName.isNotEmpty) {
         await prefs.setString('server_name', serverName);
       }
       
-      print('✅ Splash: 数据已写入缓存');
+      print('✅ Splash: 数据已写入缓存 for user $userId');
 
       // 取消超时定时器
       _timeoutTimer?.cancel();
