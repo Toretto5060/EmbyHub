@@ -8,13 +8,17 @@ import 'features/home/home_page.dart';
 import 'features/home/bottom_nav_wrapper.dart';
 import 'features/item/item_detail_page.dart';
 import 'features/library/library_items_page.dart';
+import 'features/library/livetv_page.dart';
+import 'features/library/music_page.dart';
 import 'features/library/series_detail_page.dart';
 import 'features/library/season_episodes_page.dart';
 import 'features/player/player_page.dart';
 
 // 用于全局访问 navigator key
-final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
-final GlobalKey<NavigatorState> _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
+final GlobalKey<NavigatorState> _rootNavigatorKey =
+    GlobalKey<NavigatorState>(debugLabel: 'root');
+final GlobalKey<NavigatorState> _shellNavigatorKey =
+    GlobalKey<NavigatorState>(debugLabel: 'shell');
 
 // Cupertino style page transition
 CupertinoPage<T> buildCupertinoPage<T>({
@@ -35,13 +39,13 @@ GoRouter createRouter() {
       final prefs = await sp.SharedPreferences.getInstance();
       final token = prefs.getString('emby_token');
       final hasToken = token != null && token.isNotEmpty;
-      
+
       // Allow access to home page always
       // If logged in and on connect page, go to home
       if (hasToken && state.matchedLocation == '/connect') {
         return '/';
       }
-      
+
       // Redirect to connect page only for protected routes when not logged in
       if (!hasToken && state.matchedLocation.startsWith('/library/')) {
         return '/';
@@ -61,7 +65,8 @@ GoRouter createRouter() {
       GoRoute(
         path: '/connect',
         pageBuilder: (context, state) {
-          final startAtLogin = state.uri.queryParameters['startAtLogin'] == 'true';
+          final startAtLogin =
+              state.uri.queryParameters['startAtLogin'] == 'true';
           return buildCupertinoPage(
             child: ModernConnectPage(startAtLogin: startAtLogin),
             state: state,
@@ -116,8 +121,10 @@ GoRouter createRouter() {
             pageBuilder: (context, state) {
               final seriesId = state.pathParameters['seriesId'] ?? '';
               final seasonId = state.pathParameters['seasonId'] ?? '';
-              final seriesName = state.uri.queryParameters['seriesName'] ?? '剧集';
-              final seasonName = state.uri.queryParameters['seasonName'] ?? '第一季';
+              final seriesName =
+                  state.uri.queryParameters['seriesName'] ?? '剧集';
+              final seasonName =
+                  state.uri.queryParameters['seasonName'] ?? '第一季';
               return buildCupertinoPage(
                 child: SeasonEpisodesPage(
                   seriesId: seriesId,
@@ -132,9 +139,38 @@ GoRouter createRouter() {
           GoRoute(
             path: '/item/:itemId',
             pageBuilder: (context, state) => buildCupertinoPage(
-              child: ItemDetailPage(itemId: state.pathParameters['itemId'] ?? ''),
+              child:
+                  ItemDetailPage(itemId: state.pathParameters['itemId'] ?? ''),
               state: state,
             ),
+          ),
+          GoRoute(
+            path: '/livetv/:viewId',
+            pageBuilder: (context, state) {
+              final viewId = state.pathParameters['viewId'] ?? '';
+              final viewName = state.uri.queryParameters['name'] ?? '电视直播';
+              return buildCupertinoPage(
+                child: LiveTvPage(
+                  viewId: viewId,
+                  viewName: viewName,
+                ),
+                state: state,
+              );
+            },
+          ),
+          GoRoute(
+            path: '/music/:viewId',
+            pageBuilder: (context, state) {
+              final viewId = state.pathParameters['viewId'] ?? '';
+              final viewName = state.uri.queryParameters['name'] ?? '音乐';
+              return buildCupertinoPage(
+                child: MusicPage(
+                  viewId: viewId,
+                  viewName: viewName,
+                ),
+                state: state,
+              );
+            },
           ),
         ],
       ),

@@ -6,17 +6,18 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/home_navigation_bar.dart';
 
 final _resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
   // Watch authStateProvider so this provider rebuilds when auth changes
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
-  
+
   if (auth == null || !auth.isLoggedIn) {
     print('_resumeProvider: Not logged in');
     return <ItemInfo>[];
   }
-  
+
   print('_resumeProvider: Fetching resume items for userId=${auth.userId}');
   final api = await EmbyApi.create();
   final items = await api.getResumeItems(auth.userId!);
@@ -28,32 +29,34 @@ final _viewsProvider = FutureProvider.autoDispose<List<ViewInfo>>((ref) async {
   // Watch authStateProvider so this provider rebuilds when auth changes
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
-  
+
   if (auth == null || !auth.isLoggedIn) {
     print('_viewsProvider: Not logged in');
     return <ViewInfo>[];
   }
-  
+
   print('_viewsProvider: Fetching views for userId=${auth.userId}');
   final api = await EmbyApi.create();
   final views = await api.getUserViews(auth.userId!);
   print('_viewsProvider: Got ${views.length} views');
   for (final view in views) {
-    print('  View: id=${view.id}, name=${view.name}, type=${view.collectionType}');
+    print(
+        '  View: id=${view.id}, name=${view.name}, type=${view.collectionType}');
   }
   return views;
 });
 
-final _latestByViewProvider = FutureProvider.autoDispose.family<List<ItemInfo>, String>((ref, viewId) async {
+final _latestByViewProvider = FutureProvider.autoDispose
+    .family<List<ItemInfo>, String>((ref, viewId) async {
   // Watch authStateProvider so this provider rebuilds when auth changes
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
-  
+
   if (auth == null || !auth.isLoggedIn) {
     print('_latestByViewProvider: Not logged in for viewId=$viewId');
     return <ItemInfo>[];
   }
-  
+
   print('_latestByViewProvider: Fetching latest items for viewId=$viewId');
   final api = await EmbyApi.create();
   final items = await api.getLatestItems(auth.userId!, parentId: viewId);
@@ -61,14 +64,27 @@ final _latestByViewProvider = FutureProvider.autoDispose.family<List<ItemInfo>, 
   return items;
 });
 
-class ModernLibraryPage extends ConsumerWidget {
+class ModernLibraryPage extends ConsumerStatefulWidget {
   const ModernLibraryPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ModernLibraryPage> createState() => _ModernLibraryPageState();
+}
+
+class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
-    
+
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
@@ -81,147 +97,121 @@ class ModernLibraryPage extends ConsumerWidget {
     final views = ref.watch(_viewsProvider);
 
     return CupertinoPageScaffold(
-      child: SafeArea(
-        top: true,
-        bottom: false,
-        child: auth.when(
-          data: (authData) {
-            if (!authData.isLoggedIn) {
-              return _buildEmptyState(context, isLoggedIn: false);
-            }
-            return Column(
-              children: [
-                // Server name header - 固定在顶部
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: server.when(
-                    data: (serverData) {
-                      return FutureBuilder<EmbyApi>(
-                        future: EmbyApi.create(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
-                            return DefaultTextStyle(
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                              child: const Text(
-                                'EmbyHub',
-                                textAlign: TextAlign.center,
-                              ),
-                            );
-                          }
-                          return FutureBuilder<Map<String, dynamic>>(
-                            future: snapshot.data!.systemInfo(),
-                            builder: (context, infoSnapshot) {
-                              final serverName = (infoSnapshot.data?['ServerName'] as String?) ?? 
-                                               serverData.host;
-                              return DefaultTextStyle(
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                ),
-                                child: Text(
-                                  serverName,
-                                  textAlign: TextAlign.center,
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      );
-                    },
-                    loading: () => DefaultTextStyle(
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                      child: const Text(
-                        'EmbyHub',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    error: (_, __) => DefaultTextStyle(
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                      child: const Text(
-                        'EmbyHub',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                ),
-                // 下拉刷新包裹的内容区域
-                Expanded(
-                  child: RefreshIndicator(
-                    displacement: 20,
-                    edgeOffset: 0,
-                    onRefresh: () async {
-                      // Invalidate providers to refresh data
-                      ref.invalidate(_resumeProvider);
-                      ref.invalidate(_viewsProvider);
-                      // Wait a bit for the refresh to complete
-                      await Future.delayed(const Duration(milliseconds: 500));
-                    },
-                    child: ListView(
-                      padding: EdgeInsets.zero,
-                      children: [
-                        // Continue Watching Section
-                        resumeItems.when(
-                          data: (items) {
-                            if (items.isEmpty) return const SizedBox.shrink();
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildSectionHeader(context, '继续观看'),
-                                _buildResumeList(context, ref, items),
-                                const SizedBox(height: 32),
-                              ],
-                            );
-                          },
-                          loading: () => const SizedBox.shrink(),
-                          error: (_, __) => const SizedBox.shrink(),
-                        ),
-                        // My Libraries Section
-                        views.when(
-                          data: (viewList) {
-                            if (viewList.isEmpty) {
-                              return _buildEmptyState(context, isLoggedIn: true);
-                            }
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildSectionHeader(context, '我的媒体'),
-                                const SizedBox(height: 8),
-                                _buildLibraryGrid(context, viewList),
-                                const SizedBox(height: 16),
-                              ],
-                            );
-                          },
-                          loading: () => const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(32),
-                              child: CupertinoActivityIndicator(),
-                            ),
-                          ),
-                          error: (e, _) => Center(child: Text('加载失败: $e')),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+      navigationBar: HomeNavigationBar(
+        scrollController: _scrollController,
+        title: server.when(
+          data: (serverData) {
+            return FutureBuilder<EmbyApi>(
+              future: EmbyApi.create(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return buildHomeTitle('EmbyHub');
+                }
+                return FutureBuilder<Map<String, dynamic>>(
+                  future: snapshot.data!.systemInfo(),
+                  builder: (context, infoSnapshot) {
+                    final serverName =
+                        (infoSnapshot.data?['ServerName'] as String?) ??
+                            serverData.host;
+                    return buildHomeTitle(serverName);
+                  },
+                );
+              },
             );
           },
-          loading: () => const Center(child: CupertinoActivityIndicator()),
-          error: (_, __) => _buildEmptyState(context, isLoggedIn: false),
+          loading: () => buildHomeTitle('EmbyHub'),
+          error: (_, __) => buildHomeTitle('EmbyHub'),
+        ),
+        // trailing 预留给将来的功能，如搜索、设置等
+        trailing: null,
+      ),
+      child: auth.when(
+        data: (authData) {
+          if (!authData.isLoggedIn) {
+            return _buildEmptyState(context, isLoggedIn: false);
+          }
+          return RefreshIndicator(
+            displacement: 20,
+            edgeOffset: MediaQuery.of(context).padding.top + 44,
+            onRefresh: () async {
+              // Invalidate providers to refresh data
+              ref.invalidate(_resumeProvider);
+              ref.invalidate(_viewsProvider);
+              // Wait a bit for the refresh to complete
+              await Future.delayed(const Duration(milliseconds: 500));
+            },
+            child: ListView(
+              controller: _scrollController,
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 44,
+              ),
+              children: [
+                // Continue Watching Section
+                resumeItems.when(
+                  data: (items) {
+                    if (items.isEmpty) return const SizedBox.shrink();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildSectionHeader(context, '继续观看'),
+                        _buildResumeList(context, ref, items),
+                        const SizedBox(height: 32),
+                      ],
+                    );
+                  },
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, __) => const SizedBox.shrink(),
+                ),
+                // My Libraries Section
+                views.when(
+                  data: (viewList) {
+                    if (viewList.isEmpty) {
+                      return _buildEmptyState(context, isLoggedIn: true);
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildSectionHeader(context, '我的媒体'),
+                        _buildLibraryGrid(context, viewList),
+                        const SizedBox(height: 32),
+                        // 显示各个媒体库的最新内容
+                        ...viewList
+                            .where((v) =>
+                                v.collectionType != 'livetv' &&
+                                v.collectionType != 'music')
+                            .map((view) =>
+                                _buildLatestSection(context, ref, view)),
+                        const SizedBox(height: 16),
+                      ],
+                    );
+                  },
+                  loading: () => const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32),
+                      child: CupertinoActivityIndicator(),
+                    ),
+                  ),
+                  error: (e, _) => const Center(child: Text('加载失败')),
+                ),
+              ],
+            ),
+          );
+        },
+        loading: () => Center(
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 44,
+            ),
+            child: const CupertinoActivityIndicator(),
+          ),
+        ),
+        error: (_, __) => Center(
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 44,
+            ),
+            child: _buildEmptyState(context, isLoggedIn: false),
+          ),
         ),
       ),
     );
@@ -230,23 +220,48 @@ class ModernLibraryPage extends ConsumerWidget {
   Widget _buildSectionHeader(BuildContext context, String title) {
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
-    
+
+    // 根据标题选择合适的 icon
+    IconData? icon;
+    if (title == '我的媒体') {
+      icon = CupertinoIcons.square_grid_2x2;
+    } else if (title == '继续观看') {
+      icon = CupertinoIcons.play_circle;
+    } else if (title.contains('电影') || title.contains('动漫')) {
+      icon = CupertinoIcons.film;
+    } else if (title.contains('电视剧')) {
+      icon = CupertinoIcons.tv;
+    }
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      child: DefaultTextStyle(
-        style: TextStyle(
-          fontSize: 20,
-              fontWeight: FontWeight.bold,
-          color: isDark ? Colors.white : Colors.black87,
-        ),
-        child: Text(title),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(
+              icon,
+              size: 22,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+            const SizedBox(width: 8),
+          ],
+          DefaultTextStyle(
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w500,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+            child: Text(title),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildLibraryGrid(BuildContext context, List<ViewInfo> views) {
     return SizedBox(
-      height: 100,
+      height: 120,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -267,138 +282,214 @@ class ModernLibraryPage extends ConsumerWidget {
       width: 150,
       margin: const EdgeInsets.only(right: 12),
       child: CupertinoButton(
-              padding: EdgeInsets.zero,
+        padding: EdgeInsets.zero,
         onPressed: view.id != null && view.id!.isNotEmpty
-            ? () => context.push('/library/${view.id}?name=${Uri.encodeComponent(view.name)}')
+            ? () {
+                // 根据媒体库类型跳转到不同页面
+                if (view.collectionType == 'livetv') {
+                  context.push(
+                      '/livetv/${view.id}?name=${Uri.encodeComponent(view.name)}');
+                } else if (view.collectionType == 'music') {
+                  context.push(
+                      '/music/${view.id}?name=${Uri.encodeComponent(view.name)}');
+                } else {
+                  context.push(
+                      '/library/${view.id}?name=${Uri.encodeComponent(view.name)}');
+                }
+              }
             : null,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Stack(
+        child: Column(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
                 children: [
-              // Background image from Emby - try Primary type for library views
-              if (view.id != null && view.id!.isNotEmpty)
-                FutureBuilder<EmbyApi>(
-                  future: EmbyApi.create(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return Container(
-                        height: 100,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              Colors.blue.shade300,
-                              Colors.purple.shade400,
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-                    print('Loading library image for ${view.name} (${view.id}), type: Primary');
-                    // Try Primary type first
-                    final imageUrl = snapshot.data!.buildImageUrl(
-                      itemId: view.id!,
-                      type: 'Primary',
-                      maxWidth: 240,
-                    );
-                    print('Image URL: $imageUrl');
-                    return Image.network(
-                      imageUrl,
-                      height: 100,
-                      width: 150,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
-                          height: 100,
-                          color: CupertinoColors.systemGrey5,
-                          child: const Center(
-                            child: CupertinoActivityIndicator(),
-                          ),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) {
-                        print('Error loading image for ${view.name}: $error');
-                        // Fallback to gradient background
-                        return Container(
-                          height: 80,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                Colors.blue.shade300,
-                                Colors.purple.shade400,
-                              ],
+                  // Background image from Emby - try Primary type for library views
+                  if (view.id != null && view.id!.isNotEmpty)
+                    FutureBuilder<EmbyApi>(
+                      future: EmbyApi.create(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return Container(
+                            height: 100,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  Colors.blue.shade300,
+                                  Colors.purple.shade400,
+                                ],
+                              ),
                             ),
-                          ),
+                          );
+                        }
+                        print(
+                            'Loading library image for ${view.name} (${view.id}), type: Primary');
+                        // Try Primary type first
+                        final imageUrl = snapshot.data!.buildImageUrl(
+                          itemId: view.id!,
+                          type: 'Primary',
+                          maxWidth: 400, // 提高图片清晰度
+                        );
+                        print('Image URL: $imageUrl');
+                        return Image.network(
+                          imageUrl,
+                          height: 100,
+                          width: 150,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return Container(
+                              height: 100,
+                              color: CupertinoColors.systemGrey5,
+                              child: const Center(
+                                child: CupertinoActivityIndicator(),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) {
+                            print(
+                                'Error loading image for ${view.name}: $error');
+                            // Fallback to gradient background
+                            return Container(
+                              height: 100,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Colors.blue.shade300,
+                                    Colors.purple.shade400,
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
                         );
                       },
-                    );
-                  },
-                )
-              else
-                Container(
-                  height: 80,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Colors.blue.shade300,
-                        Colors.purple.shade400,
-                      ],
-                    ),
-                  ),
-                ),
-              // Gradient overlay
-              Container(
-                height: 100,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withOpacity( 0.2),
-                      Colors.black.withOpacity( 0.6),
-                    ],
-                  ),
-                ),
-              ),
-              // Title
-              Positioned(
-                bottom: 6,
-                left: 6,
-                right: 6,
-                child: DefaultTextStyle(
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    shadows: [
-                      Shadow(
-                        color: Colors.black54,
-                        blurRadius: 8,
+                    )
+                  else
+                    Container(
+                      height: 100,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.blue.shade300,
+                            Colors.purple.shade400,
+                          ],
+                        ),
                       ),
-                    ],
-                  ),
-                  child: Text(
-                    view.name,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                    ),
+                ],
               ),
             ),
-        ],
-          ),
+            // 标题显示在图片下方，居中
+            const SizedBox(height: 4),
+            DefaultTextStyle(
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.normal,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              child: Text(
+                view.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildResumeList(BuildContext context, WidgetRef ref, List<ItemInfo> items) {
+  Widget _buildLatestSection(
+      BuildContext context, WidgetRef ref, ViewInfo view) {
+    final latestItems = ref.watch(_latestByViewProvider(view.id ?? ''));
+
+    return latestItems.when(
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionHeader(context, view.name),
+            _buildLatestList(context, ref, items),
+            const SizedBox(height: 24),
+          ],
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+
+  Widget _buildLatestList(
+      BuildContext context, WidgetRef ref, List<ItemInfo> items) {
+    return SizedBox(
+      height: 200,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          final item = items[index];
+          return _buildLatestCard(context, ref, item);
+        },
+      ),
+    );
+  }
+
+  Widget _buildLatestCard(BuildContext context, WidgetRef ref, ItemInfo item) {
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+
+    return Container(
+      width: 130,
+      margin: const EdgeInsets.only(right: 12),
+      child: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: item.id != null && item.id!.isNotEmpty
+            ? () {
+                if (item.type == 'Series') {
+                  context.push(
+                      '/series/${item.id}?name=${Uri.encodeComponent(item.name)}');
+                } else {
+                  context.push('/player/${item.id}');
+                }
+              }
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: _buildLatestPoster(context, ref, item.id),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              item.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResumeList(
+      BuildContext context, WidgetRef ref, List<ItemInfo> items) {
     return SizedBox(
       height: 200,
       child: ListView.builder(
@@ -414,10 +505,13 @@ class ModernLibraryPage extends ConsumerWidget {
   }
 
   Widget _buildResumeCard(BuildContext context, WidgetRef ref, ItemInfo item) {
-    final progress = (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
-    final positionTicks = (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+    final progress =
+        (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
+    final positionTicks =
+        (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
     final totalTicks = item.runTimeTicks ?? 0;
-    final remainingSeconds = totalTicks > 0 ? ((totalTicks - positionTicks) / 10000000).floor() : 0;
+    final remainingSeconds =
+        totalTicks > 0 ? ((totalTicks - positionTicks) / 10000000).floor() : 0;
     final remainingMinutes = (remainingSeconds / 60).floor();
     final remainingSecondsDisplay = remainingSeconds % 60;
 
@@ -478,10 +572,11 @@ class ModernLibraryPage extends ConsumerWidget {
                         end: Alignment.bottomCenter,
                         colors: [
                           Colors.transparent,
-                          Colors.black.withOpacity( 0.7),
+                          Colors.black.withOpacity(0.7),
                         ],
                       ),
-                      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                      borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(12)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -492,8 +587,9 @@ class ModernLibraryPage extends ConsumerWidget {
                             child: LinearProgressIndicator(
                               value: progress / 100,
                               minHeight: 4,
-                              backgroundColor: Colors.white.withOpacity( 0.3),
-                              valueColor: const AlwaysStoppedAnimation(CupertinoColors.activeBlue),
+                              backgroundColor: Colors.white.withOpacity(0.3),
+                              valueColor: const AlwaysStoppedAnimation(
+                                  CupertinoColors.activeBlue),
                             ),
                           ),
                         const SizedBox(height: 4),
@@ -536,10 +632,46 @@ class ModernLibraryPage extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-            ),
+              ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildLatestPoster(
+      BuildContext context, WidgetRef ref, String? itemId) {
+    if (itemId == null || itemId.isEmpty) {
+      return Container(
+        color: CupertinoColors.systemGrey5,
+        child: const Center(
+          child: Icon(CupertinoIcons.film, size: 48),
+        ),
+      );
+    }
+
+    return FutureBuilder<EmbyApi>(
+      future: EmbyApi.create(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return Container(color: CupertinoColors.systemGrey5);
+        }
+        final url = snapshot.data!.buildImageUrl(
+          itemId: itemId,
+          type: 'Primary',
+          maxWidth: 300,
+        );
+        return Image.network(
+          url,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            color: CupertinoColors.systemGrey5,
+            child: const Center(
+              child: Icon(CupertinoIcons.film, size: 48),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -551,7 +683,9 @@ class ModernLibraryPage extends ConsumerWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              isLoggedIn ? CupertinoIcons.folder : CupertinoIcons.person_crop_circle_badge_xmark,
+              isLoggedIn
+                  ? CupertinoIcons.folder
+                  : CupertinoIcons.person_crop_circle_badge_xmark,
               size: 80,
               color: CupertinoColors.systemGrey,
             ),
@@ -590,4 +724,3 @@ class ModernLibraryPage extends ConsumerWidget {
 
 // Provider for EmbyApi instance
 final embyApiProvider = FutureProvider<EmbyApi>((ref) => EmbyApi.create());
-
