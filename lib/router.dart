@@ -82,60 +82,65 @@ GoRouter createRouter() {
               child: SizedBox.shrink(), // 首页内容在 HomePage 中显示
             ),
           ),
-          GoRoute(
-            path: '/library/:viewId',
-            pageBuilder: (context, state) {
-              final viewId = state.pathParameters['viewId'] ?? '';
-              final viewName = state.uri.queryParameters['name'] ?? '媒体库';
-              return buildCupertinoPage(
-                child: LibraryItemsPage(
-                  viewId: viewId,
-                  viewName: viewName,
-                ),
-                state: state,
-              );
-            },
-          ),
-          GoRoute(
-            path: '/series/:seriesId',
-            pageBuilder: (context, state) {
-              final seriesId = state.pathParameters['seriesId'] ?? '';
-              final seriesName = state.uri.queryParameters['name'] ?? '剧集详情';
-              return buildCupertinoPage(
-                child: SeriesDetailPage(
-                  seriesId: seriesId,
-                  seriesName: seriesName,
-                ),
-                state: state,
-              );
-            },
-          ),
-          GoRoute(
-            path: '/series/:seriesId/season/:seasonId',
-            pageBuilder: (context, state) {
-              final seriesId = state.pathParameters['seriesId'] ?? '';
-              final seasonId = state.pathParameters['seasonId'] ?? '';
-              final seriesName = state.uri.queryParameters['seriesName'] ?? '剧集';
-              final seasonName = state.uri.queryParameters['seasonName'] ?? '第一季';
-              return buildCupertinoPage(
-                child: SeasonEpisodesPage(
-                  seriesId: seriesId,
-                  seasonId: seasonId,
-                  seriesName: seriesName,
-                  seasonName: seasonName,
-                ),
-                state: state,
-              );
-            },
-          ),
-          GoRoute(
-            path: '/item/:itemId',
-            pageBuilder: (context, state) => buildCupertinoPage(
-              child: ItemDetailPage(itemId: state.pathParameters['itemId'] ?? ''),
-              state: state,
-            ),
-          ),
         ],
+      ),
+      // 二级页面使用根导航器，这样可以正确 pop 回首页
+      GoRoute(
+        parentNavigatorKey: _rootNavigatorKey,
+        path: '/library/:viewId',
+        pageBuilder: (context, state) {
+          final viewId = state.pathParameters['viewId'] ?? '';
+          final viewName = state.uri.queryParameters['name'] ?? '媒体库';
+          return buildCupertinoPage(
+            child: LibraryItemsPage(
+              viewId: viewId,
+              viewName: viewName,
+            ),
+            state: state,
+          );
+        },
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavigatorKey,
+        path: '/series/:seriesId',
+        pageBuilder: (context, state) {
+          final seriesId = state.pathParameters['seriesId'] ?? '';
+          final seriesName = state.uri.queryParameters['name'] ?? '剧集详情';
+          return buildCupertinoPage(
+            child: SeriesDetailPage(
+              seriesId: seriesId,
+              seriesName: seriesName,
+            ),
+            state: state,
+          );
+        },
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavigatorKey,
+        path: '/series/:seriesId/season/:seasonId',
+        pageBuilder: (context, state) {
+          final seriesId = state.pathParameters['seriesId'] ?? '';
+          final seasonId = state.pathParameters['seasonId'] ?? '';
+          final seriesName = state.uri.queryParameters['seriesName'] ?? '剧集';
+          final seasonName = state.uri.queryParameters['seasonName'] ?? '第一季';
+          return buildCupertinoPage(
+            child: SeasonEpisodesPage(
+              seriesId: seriesId,
+              seasonId: seasonId,
+              seriesName: seriesName,
+              seasonName: seasonName,
+            ),
+            state: state,
+          );
+        },
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavigatorKey,
+        path: '/item/:itemId',
+        pageBuilder: (context, state) => buildCupertinoPage(
+          child: ItemDetailPage(itemId: state.pathParameters['itemId'] ?? ''),
+          state: state,
+        ),
       ),
       // 全屏页面（隐藏底部导航）
       GoRoute(

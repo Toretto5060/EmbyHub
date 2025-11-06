@@ -63,14 +63,6 @@ class _HomePageState extends State<HomePage> {
                     color: isDark
                         ? const Color(0xFF1C1C1E).withOpacity( 0.85)
                         : const Color(0xFFF2F2F7).withOpacity( 0.85),
-                    border: Border(
-                      top: BorderSide(
-                        color: isDark
-                            ? Colors.white.withOpacity( 0.2)
-                            : Colors.black.withOpacity( 0.15),
-                        width: 0.3,
-                      ),
-                    ),
                   ),
                   child: SafeArea(
                     top: false,

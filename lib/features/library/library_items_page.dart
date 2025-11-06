@@ -36,6 +36,7 @@ class LibraryItemsPage extends ConsumerWidget {
     final isDark = brightness == Brightness.dark;
     
     return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemBackground,
       navigationBar: CupertinoNavigationBar(
         leading: CupertinoNavigationBarBackButton(
           color: isDark ? Colors.white : Colors.black87,
@@ -44,16 +45,13 @@ class LibraryItemsPage extends ConsumerWidget {
         middle: Text(
           viewName,
           style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
             color: isDark ? Colors.white : Colors.black87,
           ),
         ),
         backgroundColor: CupertinoColors.systemBackground,
-        border: Border(
-          bottom: BorderSide(
-            color: isDark ? Colors.white.withOpacity( 0.1) : Colors.black.withOpacity( 0.1),
-            width: 0.5,
-          ),
-        ),
+        border: null,
       ),
       child: SafeArea(
         child: items.when(
@@ -62,6 +60,8 @@ class LibraryItemsPage extends ConsumerWidget {
               return const Center(child: Text('此分类暂无内容'));
             }
             return RefreshIndicator(
+              displacement: 20,
+              edgeOffset: 0,
               onRefresh: () async {
                 ref.invalidate(itemsProvider(viewId));
                 await Future.delayed(const Duration(milliseconds: 500));
@@ -101,9 +101,9 @@ class _ItemTile extends ConsumerWidget {
           ? () {
               // Series 类型跳转到剧集详情页，其他类型跳转到普通详情页
               if (item.type == 'Series') {
-                context.go('/series/${item.id}?name=${Uri.encodeComponent(item.name)}');
+                context.push('/series/${item.id}?name=${Uri.encodeComponent(item.name)}');
               } else {
-                context.go('/item/${item.id}');
+                context.push('/item/${item.id}');
               }
             }
           : null,

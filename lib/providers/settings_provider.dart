@@ -23,7 +23,7 @@ class ServerSettingsController
     final prefs = await SharedPreferences.getInstance();
     final protocol = prefs.getString('server_protocol') ?? 'http';
     final host = prefs.getString('server_host') ?? '';
-    final port = prefs.getString('server_port') ?? '8096';
+    final port = prefs.getString('server_port') ?? '';
     state = AsyncValue.data(
         ServerSettings(protocol: protocol, host: host, port: port));
   }

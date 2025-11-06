@@ -59,11 +59,15 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
       setState(() {
         _protocol = value.protocol;
         _host.text = value.host;
-        _port.text = value.port;
+        // 只有当用户之前保存过端口时才填充，否则保持空白
+        if (value.port.isNotEmpty) {
+          _port.text = value.port;
+        }
         // If startAtLogin is true and we have server settings, go directly to login
         if (widget.startAtLogin && value.host.isNotEmpty) {
           _serverConnected = true;
-          _serverName = '${value.protocol}://${value.host}:${value.port}';
+          final displayPort = value.port.isEmpty ? '8096' : value.port;
+          _serverName = '${value.protocol}://${value.host}:$displayPort';
         }
       });
     });
@@ -80,15 +84,19 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
   }
 
   Future<void> _testConnection() async {
+    // 让所有输入框失去焦点，避免键盘闪烁和焦点传递问题
+    FocusScope.of(context).unfocus();
+    
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
+      final port = _port.text.trim().isEmpty ? '8096' : _port.text.trim();
       await ref.read(serverSettingsProvider.notifier).save(ServerSettings(
           protocol: _protocol,
           host: _host.text.trim(),
-          port: _port.text.trim().isEmpty ? '8096' : _port.text.trim()));
+          port: port));
       final api = await EmbyApi.create();
       final info = await api.systemInfo();
       setState(() {
@@ -429,9 +437,9 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 controller: _port,
                 style: const TextStyle(fontSize: 16, color: Colors.black87),
                 decoration: InputDecoration(
-                  labelText: '端口',
-                  hintText: '默认 8096',
-                  hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                  labelText: '端口（可选）',
+                  hintText: '留空则使用 8096',
+                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
                   prefixIcon: const Icon(Icons.settings_ethernet_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,

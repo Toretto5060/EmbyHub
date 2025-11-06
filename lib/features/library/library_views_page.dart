@@ -130,7 +130,7 @@ class LibraryViewsPage extends ConsumerWidget {
         final v = list[index];
         return CupertinoButton(
           padding: const EdgeInsets.all(12),
-          onPressed: () => context.go('/library/${v.id}'),
+          onPressed: () => context.push('/library/${v.id}'),
           child: Container(
             alignment: Alignment.centerLeft,
             decoration: BoxDecoration(

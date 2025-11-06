@@ -43,6 +43,7 @@ class SeasonEpisodesPage extends ConsumerWidget {
     final isDark = brightness == Brightness.dark;
 
     return CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.systemBackground,
         navigationBar: CupertinoNavigationBar(
           leading: CupertinoNavigationBarBackButton(
             color: isDark ? Colors.white : Colors.black87,
@@ -71,14 +72,7 @@ class SeasonEpisodesPage extends ConsumerWidget {
             ],
           ),
           backgroundColor: CupertinoColors.systemBackground,
-          border: Border(
-            bottom: BorderSide(
-              color: isDark
-                  ? Colors.white.withOpacity( 0.1)
-                  : Colors.black.withOpacity( 0.1),
-              width: 0.5,
-            ),
-          ),
+          border: null,
         ),
         child: SafeArea(
           child: episodes.when(
@@ -86,19 +80,28 @@ class SeasonEpisodesPage extends ConsumerWidget {
               if (list.isEmpty) {
                 return const Center(child: Text('此季暂无剧集'));
               }
-              return RefreshIndicator(
-                onRefresh: () async {
-                  ref.invalidate(episodesProvider);
-                  await Future.delayed(const Duration(milliseconds: 500));
-                },
-                child: ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: list.length,
-                  itemBuilder: (context, index) {
-                    final episode = list[index];
-                    return _EpisodeTile(episode: episode);
-                  },
-                ),
+              return CustomScrollView(
+                physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                slivers: [
+                  CupertinoSliverRefreshControl(
+                    onRefresh: () async {
+                      ref.invalidate(episodesProvider);
+                      await Future.delayed(const Duration(milliseconds: 500));
+                    },
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.all(12),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final episode = list[index];
+                          return _EpisodeTile(episode: episode);
+                        },
+                        childCount: list.length,
+                      ),
+                    ),
+                  ),
+                ],
               );
             },
             loading: () =>
@@ -174,7 +177,7 @@ class _EpisodeTile extends ConsumerWidget {
     return CupertinoButton(
       padding: EdgeInsets.zero,
       onPressed: episode.id != null && episode.id!.isNotEmpty
-          ? () => context.go('/player/${episode.id}')
+          ? () => context.push('/player/${episode.id}')
           : null,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),

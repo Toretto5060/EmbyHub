@@ -39,8 +39,8 @@ android {
         abi {
             enable true
             reset()
-            include 'arm64-v8a'
-            universalApk false
+            include 'arm64-v8a', 'x86', 'x86_64'
+            universalApk true  // 生成通用 APK，用于 debug 模式
         }
     }
 

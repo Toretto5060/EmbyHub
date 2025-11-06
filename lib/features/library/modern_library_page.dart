@@ -89,126 +89,135 @@ class ModernLibraryPage extends ConsumerWidget {
             if (!authData.isLoggedIn) {
               return _buildEmptyState(context, isLoggedIn: false);
             }
-            return RefreshIndicator(
-              onRefresh: () async {
-                // Invalidate providers to refresh data
-                ref.invalidate(_resumeProvider);
-                ref.invalidate(_viewsProvider);
-                // Wait a bit for the refresh to complete
-                await Future.delayed(const Duration(milliseconds: 500));
-              },
-              child: ListView(
-                padding: EdgeInsets.zero,
+            return Column(
               children: [
-                  // Server name header
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: server.when(
-                      data: (serverData) {
-                        return FutureBuilder<EmbyApi>(
-                          future: EmbyApi.create(),
-                          builder: (context, snapshot) {
-                            if (!snapshot.hasData) {
+                // Server name header - 固定在顶部
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: server.when(
+                    data: (serverData) {
+                      return FutureBuilder<EmbyApi>(
+                        future: EmbyApi.create(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return DefaultTextStyle(
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                              child: const Text(
+                                'EmbyHub',
+                                textAlign: TextAlign.center,
+                              ),
+                            );
+                          }
+                          return FutureBuilder<Map<String, dynamic>>(
+                            future: snapshot.data!.systemInfo(),
+                            builder: (context, infoSnapshot) {
+                              final serverName = (infoSnapshot.data?['ServerName'] as String?) ?? 
+                                               serverData.host;
                               return DefaultTextStyle(
                                 style: TextStyle(
                                   fontSize: 17,
                                   fontWeight: FontWeight.w600,
                                   color: isDark ? Colors.white : Colors.black87,
                                 ),
-                                child: const Text(
-                                  'EmbyHub',
+                                child: Text(
+                                  serverName,
                                   textAlign: TextAlign.center,
                                 ),
                               );
-                            }
-                            return FutureBuilder<Map<String, dynamic>>(
-                              future: snapshot.data!.systemInfo(),
-                              builder: (context, infoSnapshot) {
-                                final serverName = (infoSnapshot.data?['ServerName'] as String?) ?? 
-                                                 serverData.host;
-                                return DefaultTextStyle(
-                                  style: TextStyle(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDark ? Colors.white : Colors.black87,
-                                  ),
-                                  child: Text(
-                                    serverName,
-                                    textAlign: TextAlign.center,
-                                  ),
-                                );
-                              },
+                            },
+                          );
+                        },
+                      );
+                    },
+                    loading: () => DefaultTextStyle(
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      child: const Text(
+                        'EmbyHub',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    error: (_, __) => DefaultTextStyle(
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      child: const Text(
+                        'EmbyHub',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ),
+                // 下拉刷新包裹的内容区域
+                Expanded(
+                  child: RefreshIndicator(
+                    displacement: 20,
+                    edgeOffset: 0,
+                    onRefresh: () async {
+                      // Invalidate providers to refresh data
+                      ref.invalidate(_resumeProvider);
+                      ref.invalidate(_viewsProvider);
+                      // Wait a bit for the refresh to complete
+                      await Future.delayed(const Duration(milliseconds: 500));
+                    },
+                    child: ListView(
+                      padding: EdgeInsets.zero,
+                      children: [
+                        // Continue Watching Section
+                        resumeItems.when(
+                          data: (items) {
+                            if (items.isEmpty) return const SizedBox.shrink();
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildSectionHeader(context, '继续观看'),
+                                _buildResumeList(context, ref, items),
+                                const SizedBox(height: 32),
+                              ],
                             );
                           },
-                        );
-                      },
-                      loading: () => DefaultTextStyle(
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white : Colors.black87,
+                          loading: () => const SizedBox.shrink(),
+                          error: (_, __) => const SizedBox.shrink(),
                         ),
-                        child: const Text(
-                          'EmbyHub',
-                          textAlign: TextAlign.center,
+                        // My Libraries Section
+                        views.when(
+                          data: (viewList) {
+                            if (viewList.isEmpty) {
+                              return _buildEmptyState(context, isLoggedIn: true);
+                            }
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildSectionHeader(context, '我的媒体'),
+                                const SizedBox(height: 8),
+                                _buildLibraryGrid(context, viewList),
+                                const SizedBox(height: 16),
+                              ],
+                            );
+                          },
+                          loading: () => const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(32),
+                              child: CupertinoActivityIndicator(),
+                            ),
+                          ),
+                          error: (e, _) => Center(child: Text('加载失败: $e')),
                         ),
-                      ),
-                      error: (_, __) => DefaultTextStyle(
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                        child: const Text(
-                          'EmbyHub',
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                  ),
-                // Continue Watching Section
-                resumeItems.when(
-                  data: (items) {
-                    if (items.isEmpty) return const SizedBox.shrink();
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                          _buildSectionHeader(context, '继续观看'),
-                        _buildResumeList(context, ref, items),
-                          const SizedBox(height: 32),
                       ],
-                    );
-                  },
-                  loading: () => const SizedBox.shrink(),
-                  error: (_, __) => const SizedBox.shrink(),
-                ),
-                  // My Libraries Section
-                views.when(
-                  data: (viewList) {
-                    if (viewList.isEmpty) {
-                      return _buildEmptyState(context, isLoggedIn: true);
-                    }
-                    return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildSectionHeader(context, '我的媒体'),
-                          const SizedBox(height: 8),
-                          _buildLibraryGrid(context, viewList),
-                          const SizedBox(height: 16),
-                        ],
-                    );
-                  },
-                  loading: () => const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32),
-                      child: CupertinoActivityIndicator(),
                     ),
                   ),
-                  error: (e, _) => Center(child: Text('加载失败: $e')),
                 ),
               ],
-              ),
             );
           },
           loading: () => const Center(child: CupertinoActivityIndicator()),
@@ -260,7 +269,7 @@ class ModernLibraryPage extends ConsumerWidget {
       child: CupertinoButton(
               padding: EdgeInsets.zero,
         onPressed: view.id != null && view.id!.isNotEmpty
-            ? () => context.go('/library/${view.id}?name=${Uri.encodeComponent(view.name)}')
+            ? () => context.push('/library/${view.id}?name=${Uri.encodeComponent(view.name)}')
             : null,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
@@ -417,7 +426,7 @@ class ModernLibraryPage extends ConsumerWidget {
       margin: const EdgeInsets.symmetric(horizontal: 4),
       child: CupertinoButton(
         padding: EdgeInsets.zero,
-        onPressed: () => context.go('/player/${item.id}'),
+        onPressed: () => context.push('/player/${item.id}'),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

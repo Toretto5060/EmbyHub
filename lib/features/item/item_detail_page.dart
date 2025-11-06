@@ -27,6 +27,7 @@ class ItemDetailPage extends ConsumerWidget {
     final isDark = brightness == Brightness.dark;
     
     return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemBackground,
       navigationBar: CupertinoNavigationBar(
         leading: CupertinoNavigationBarBackButton(
           color: isDark ? Colors.white : Colors.black87,
@@ -35,16 +36,13 @@ class ItemDetailPage extends ConsumerWidget {
         middle: Text(
           '详情',
           style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
             color: isDark ? Colors.white : Colors.black87,
           ),
         ),
         backgroundColor: CupertinoColors.systemBackground,
-        border: Border(
-          bottom: BorderSide(
-            color: isDark ? Colors.white.withOpacity( 0.1) : Colors.black.withOpacity( 0.1),
-            width: 0.5,
-          ),
-        ),
+        border: null,
       ),
       child: SafeArea(
         child: item.when(
@@ -84,7 +82,7 @@ class ItemDetailPage extends ConsumerWidget {
                   Row(children: [
                     Expanded(
                         child: CupertinoButton.filled(
-                            onPressed: () => context.go('/player/${data.id}'),
+                            onPressed: () => context.push('/player/${data.id}'),
                             child: const Text('播放'))),
                   ]),
               ],

@@ -44,6 +44,7 @@ class SeriesDetailPage extends ConsumerWidget {
     final isDark = brightness == Brightness.dark;
 
     return CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.systemBackground,
         navigationBar: CupertinoNavigationBar(
           leading: CupertinoNavigationBarBackButton(
             color: isDark ? Colors.white : Colors.black87,
@@ -52,18 +53,13 @@ class SeriesDetailPage extends ConsumerWidget {
           middle: Text(
             seriesName,
             style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
               color: isDark ? Colors.white : Colors.black87,
             ),
           ),
           backgroundColor: CupertinoColors.systemBackground,
-          border: Border(
-            bottom: BorderSide(
-              color: isDark
-                  ? Colors.white.withOpacity( 0.1)
-                  : Colors.black.withOpacity( 0.1),
-              width: 0.5,
-            ),
-          ),
+          border: null,
         ),
         child: SafeArea(
           child: RefreshIndicator(
@@ -314,7 +310,7 @@ class _SeasonTile extends ConsumerWidget {
       padding: EdgeInsets.zero,
       onPressed: season.id != null && season.id!.isNotEmpty
           ? () {
-              context.go(
+              context.push(
                 '/series/$seriesId/season/${season.id}?seriesName=${Uri.encodeComponent(seriesName)}&seasonName=${Uri.encodeComponent(season.name)}',
               );
             }
