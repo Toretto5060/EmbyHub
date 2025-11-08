@@ -43,6 +43,63 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   final _scrollController = ScrollController();
   bool _isRouteSubscribed = false;
 
+  bool _hasHorizontalArtwork(ItemInfo item) {
+    final hasBackdrop = (item.backdropImageTags?.isNotEmpty ?? false) ||
+        (item.parentBackdropImageTags?.isNotEmpty ?? false);
+    if (hasBackdrop) return true;
+
+    final imageTags = item.imageTags ?? const <String, String>{};
+    final primaryTag = imageTags['Primary'];
+    if (primaryTag == null || primaryTag.isEmpty) {
+      return false;
+    }
+    // 如果缺少壁纸但存在 Primary 图，就将其作为竖向海报处理
+    return false;
+  }
+
+  List<List<_RowEntry>> _buildRows(List<ItemInfo> items) {
+    final rows = <List<_RowEntry>>[];
+    var index = 0;
+
+    while (index < items.length) {
+      final current = items[index];
+      final currentHorizontal = _hasHorizontalArtwork(current);
+
+      if (!currentHorizontal) {
+        final row = <_RowEntry>[_RowEntry(current, currentHorizontal)];
+        index++;
+        if (index < items.length) {
+          final next = items[index];
+          row.add(_RowEntry(next, _hasHorizontalArtwork(next)));
+          index++;
+        }
+        rows.add(row);
+        continue;
+      }
+
+      final row = <_RowEntry>[];
+      while (index < items.length && row.length < 3) {
+        final candidate = items[index];
+        final candidateHorizontal = _hasHorizontalArtwork(candidate);
+        if (!candidateHorizontal) {
+          break;
+        }
+        row.add(_RowEntry(candidate, candidateHorizontal));
+        index++;
+      }
+
+      if (row.isEmpty) {
+        // fallback: treat as vertical row
+        rows.add([_RowEntry(current, currentHorizontal)]);
+        index++;
+      } else {
+        rows.add(row);
+      }
+    }
+
+    return rows;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -104,6 +161,8 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
               ),
             );
           }
+          final rows = _buildRows(list);
+
           return RefreshIndicator(
             displacement: 20,
             edgeOffset: MediaQuery.of(context).padding.top + 44,
@@ -111,7 +170,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
               ref.invalidate(itemsProvider(widget.viewId));
               await Future.delayed(const Duration(milliseconds: 500));
             },
-            child: GridView.builder(
+            child: ListView.builder(
               controller: _scrollController,
               padding: EdgeInsets.only(
                 top: MediaQuery.of(context).padding.top + 44 + 12,
@@ -119,15 +178,43 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
                 right: 12,
                 bottom: 12,
               ),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  childAspectRatio: 0.58,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 12),
-              itemCount: list.length,
-              itemBuilder: (context, index) {
-                final item = list[index];
-                return _ItemTile(item: item);
+              itemCount: rows.length,
+              itemBuilder: (context, rowIndex) {
+                final row = rows[rowIndex];
+                return Padding(
+                  padding: EdgeInsets.only(
+                    bottom: rowIndex == rows.length - 1 ? 0 : 12,
+                  ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final hasHorizontal = row.any((entry) => entry.hasHorizontalArtwork);
+                      final columns = hasHorizontal ? 3 : 2;
+                      final spacing = columns > 1 ? 8.0 : 0.0;
+                      final availableWidth = constraints.maxWidth;
+                      final totalSpacing = spacing * (columns - 1);
+                      final cardWidth = (availableWidth - totalSpacing) / columns;
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (var i = 0; i < columns; i++) ...[
+                            if (i > 0) SizedBox(width: spacing),
+                            SizedBox(
+                              width: cardWidth,
+                              child: i < row.length
+                                  ? _ItemTile(
+                                      item: row[i].item,
+                                      hasHorizontalArtwork: row[i].hasHorizontalArtwork,
+                                      cardWidth: cardWidth,
+                                    )
+                                  : const SizedBox.shrink(),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
+                );
               },
             ),
           );
@@ -154,8 +241,14 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 }
 
 class _ItemTile extends ConsumerStatefulWidget {
-  const _ItemTile({required this.item});
+  const _ItemTile({
+    required this.item,
+    required this.hasHorizontalArtwork,
+    required this.cardWidth,
+  });
   final ItemInfo item;
+  final bool hasHorizontalArtwork;
+  final double cardWidth;
 
   @override
   ConsumerState<_ItemTile> createState() => _ItemTileState();
@@ -277,6 +370,7 @@ class _ItemTileState extends ConsumerState<_ItemTile>
     }
 
     final ratingChip = buildRatingChip();
+    final aspectRatio = widget.hasHorizontalArtwork ? 9 / 16 : 16 / 9;
 
     return CupertinoButton(
       padding: EdgeInsets.zero,
@@ -294,8 +388,10 @@ class _ItemTileState extends ConsumerState<_ItemTile>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Expanded(
+          AspectRatio(
+            aspectRatio: aspectRatio,
             child: Container(
+              width: widget.cardWidth,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
                 boxShadow: [
@@ -306,138 +402,138 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                   ),
                 ],
               ),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: _Poster(itemId: item.id, itemType: item.type),
-                  ),
-                  // 电影播放完成标记
-                  if (item.type == 'Movie' && played)
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.85),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          CupertinoIcons.check_mark,
-                          size: 14,
-                          color: Colors.white,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _Poster(itemId: item.id, itemType: item.type),
+                    // 电影播放完成标记
+                    if (item.type == 'Movie' && played)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.85),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            CupertinoIcons.check_mark,
+                            size: 14,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
-                    ),
-                  // 剧集未看集数显示在右上角
-                  if (item.type == 'Series' && item.userData != null)
-                    Builder(
-                      builder: (context) {
-                        final unplayedCount =
-                            (item.userData!['UnplayedItemCount'] as num?)
-                                ?.toInt();
-                        if (unplayedCount != null && unplayedCount > 0) {
-                          return Positioned(
-                            top: 4,
-                            right: 4,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: CupertinoColors.systemRed,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                '$unplayedCount',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
+                    // 剧集未看集数显示在右上角
+                    if (item.type == 'Series' && item.userData != null)
+                      Builder(
+                        builder: (context) {
+                          final unplayedCount =
+                              (item.userData!['UnplayedItemCount'] as num?)
+                                  ?.toInt();
+                          if (unplayedCount != null && unplayedCount > 0) {
+                            return Positioned(
+                              top: 4,
+                              right: 4,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: CupertinoColors.systemRed,
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
-                              ),
-                            ),
-                          );
-                        }
-                        return const SizedBox.shrink();
-                      },
-                    ),
-                  // 电影播放进度
-                  if (showProgress)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 6),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [
-                              Colors.black.withValues(alpha: 0.8),
-                              Colors.black.withValues(alpha: 0.0),
-                            ],
-                          ),
-                          borderRadius: const BorderRadius.only(
-                            bottomLeft: Radius.circular(8),
-                            bottomRight: Radius.circular(8),
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                Text(
-                                  '剩余 ${formatRemaining(remainingDuration)}',
+                                child: Text(
+                                  '$unplayedCount',
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 10,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                const Spacer(),
-                                if (ratingChip != null) ratingChip,
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                    // 电影播放进度
+                    if (showProgress)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.8),
+                                Colors.black.withValues(alpha: 0.0),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            TweenAnimationBuilder<double>(
-                              tween: Tween<double>(
-                                begin: 0,
-                                end: progress.clamp(0.0, 1.0),
-                              ),
-                              duration: const Duration(milliseconds: 400),
-                              curve: Curves.easeOut,
-                              builder: (context, value, child) {
-                                return ClipRRect(
-                                  borderRadius: BorderRadius.circular(999),
-                                  child: LinearProgressIndicator(
-                                    value: value,
-                                    minHeight: 4,
-                                    backgroundColor:
-                                        Colors.white.withValues(alpha: 0.2),
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.blueAccent.withValues(alpha: 0.9),
+                            borderRadius: const BorderRadius.only(
+                              bottomLeft: Radius.circular(8),
+                              bottomRight: Radius.circular(8),
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    '剩余 ${formatRemaining(remainingDuration)}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
                                     ),
                                   ),
-                                );
-                              },
-                            ),
-                          ],
+                                  const Spacer(),
+                                  if (ratingChip != null) ratingChip,
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              TweenAnimationBuilder<double>(
+                                tween: Tween<double>(
+                                  begin: 0,
+                                  end: progress.clamp(0.0, 1.0),
+                                ),
+                                duration: const Duration(milliseconds: 400),
+                                curve: Curves.easeOut,
+                                builder: (context, value, child) {
+                                  return ClipRRect(
+                                    borderRadius: BorderRadius.circular(999),
+                                    child: LinearProgressIndicator(
+                                      value: value,
+                                      minHeight: 4,
+                                      backgroundColor:
+                                          Colors.white.withValues(alpha: 0.2),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.blueAccent.withValues(alpha: 0.9),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  // 当没有进度条时仍显示评分
-                  if (!showProgress && ratingChip != null)
-                    Positioned(
-                      bottom: 4,
-                      right: 4,
-                      child: ratingChip,
-                    ),
-                ],
+                    // 当没有进度条时仍显示评分
+                    if (!showProgress && ratingChip != null)
+                      Positioned(
+                        bottom: 4,
+                        right: 4,
+                        child: ratingChip,
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -528,4 +624,11 @@ class _PosterSkeleton extends StatelessWidget {
       ),
     );
   }
+}
+
+class _RowEntry {
+  const _RowEntry(this.item, this.hasHorizontalArtwork);
+
+  final ItemInfo item;
+  final bool hasHorizontalArtwork;
 }
