@@ -280,9 +280,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                           if (externalLinks.isNotEmpty) ...[
                             const SizedBox(height: 24),
                             _buildExternalLinks(externalLinks, isDark),
-                            const SizedBox(height: 24),
-                            _buildDetailedMediaModules(data, isDark),
                           ],
+                          const SizedBox(height: 24),
+                          _buildDetailedMediaModules(data, isDark),
                         ],
                       ),
                     ),
@@ -317,18 +317,41 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
         if (!snapshot.hasData) {
                   return Container(color: CupertinoColors.systemGrey5);
                 }
-                final url = snapshot.data!.buildImageUrl(
-                  itemId: item.id!,
-                  type: 'Backdrop',
-                  maxWidth: 800,
-                );
-                return EmbyFadeInImage(
-                  imageUrl: url,
-                  fit: BoxFit.cover,
-                  onImageReady: (image) => _handleBackdropImage(image, item.id ?? url),
-                );
-              },
-            ),
+        final api = snapshot.data!;
+        String? backdropUrl;
+
+        if ((item.backdropImageTags?.isNotEmpty ?? false) ||
+            (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+          backdropUrl = api.buildImageUrl(
+            itemId: item.id!,
+            type: 'Backdrop',
+            maxWidth: 800,
+          );
+        }
+
+        if (backdropUrl == null || backdropUrl.isEmpty) {
+          final primaryTag = item.imageTags?['Primary'] ?? '';
+          if (primaryTag.isNotEmpty) {
+            backdropUrl = api.buildImageUrl(
+              itemId: item.id!,
+              type: 'Primary',
+              maxWidth: 600,
+            );
+          }
+        }
+
+        if (backdropUrl == null || backdropUrl.isEmpty) {
+          return Container(color: CupertinoColors.systemGrey5);
+        }
+
+        return EmbyFadeInImage(
+          imageUrl: backdropUrl,
+          fit: BoxFit.cover,
+          onImageReady: (image) =>
+              _handleBackdropImage(image, item.id ?? backdropUrl!),
+        );
+      },
+    ),
           // 底部虚化渐变（轻微虚化，自然过渡）
           Positioned(
             bottom: 0,
@@ -611,7 +634,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+              children: [
         Row(
           children: [
             Expanded(
@@ -1719,119 +1742,158 @@ class _PerformerCard extends StatelessWidget {
 }
 
 class _SimilarCard extends StatelessWidget {
-  const _SimilarCard({required this.item, required this.isDark});
+   const _SimilarCard({required this.item, required this.isDark});
+ 
+   final ItemInfo item;
+   final bool isDark;
+ 
+   @override
+   Widget build(BuildContext context) {
+     final Color textColor = isDark ? Colors.white : Colors.black87;
+     final hasHorizontalArtwork = _hasHorizontalArtwork(item);
+     final double cardWidth = hasHorizontalArtwork ? 100 :160 ;
+     final double aspectRatio = hasHorizontalArtwork ?  2 / 3 : 16 / 9;
+     final double imageHeight = cardWidth / aspectRatio;
+ 
+     return SizedBox(
+       width: cardWidth,
+       child: CupertinoButton(
+         padding: EdgeInsets.zero,
+         onPressed: item.id != null && item.id!.isNotEmpty
+             ? () => _handleTap(context)
+             : null,
+         child: Column(
+           crossAxisAlignment: CrossAxisAlignment.center,
+           children: [
+             ClipRRect(
+               borderRadius: BorderRadius.circular(10),
+               child: SizedBox(
+                 height: imageHeight,
+                 width: cardWidth,
+                 child: AspectRatio(
+                   aspectRatio: aspectRatio,
+                   child: _buildPoster(hasHorizontalArtwork: hasHorizontalArtwork),
+                 ),
+               ),
+             ),
+             const SizedBox(height: 8),
+             Text(
+               item.name,
+               maxLines: 1,
+               softWrap: false,
+               overflow: TextOverflow.ellipsis,
+               textAlign: TextAlign.center,
+               style: TextStyle(
+                 fontSize: 14,
+                 fontWeight: FontWeight.w400,
+                 color: textColor,
+               ),
+             ),
+             const SizedBox(height: 2),
+             Text(
+               _buildSubtitle(),
+               maxLines: 1,
+               softWrap: false,
+               overflow: TextOverflow.ellipsis,
+               textAlign: TextAlign.center,
+               style: TextStyle(
+                 fontSize: 10,
+                 color: isDark ? Colors.grey : Colors.grey.shade600,
+               ),
+             ),
+           ],
+         ),
+       ),
+     );
+   }
+ 
+   Widget _buildPoster({required bool hasHorizontalArtwork}) {
+     if (item.id == null || item.id!.isEmpty) {
+       return Container(
+         color: Colors.grey.withOpacity(0.2),
+         child: const Icon(CupertinoIcons.film, size: 32, color: Colors.grey),
+       );
+     }
+ 
+     return FutureBuilder<EmbyApi>(
+       future: EmbyApi.create(),
+       builder: (context, snapshot) {
+         if (!snapshot.hasData) {
+           return Container(
+             color: Colors.grey.withOpacity(0.1),
+             child: const Center(child: CupertinoActivityIndicator()),
+           );
+         }
+         final api = snapshot.data!;
+         String? url;
+         if ((item.imageTags?['Primary'] ?? '').isNotEmpty) {
+           url = api.buildImageUrl(
+             itemId: item.id!,
+             type: 'Primary',
+             maxWidth: hasHorizontalArtwork ? 480 : 320,
+           );
+         }
 
-  final ItemInfo item;
-  final bool isDark;
+         if ((url == null || url.isEmpty) && hasHorizontalArtwork) {
+           url = api.buildImageUrl(
+             itemId: item.id!,
+             type: 'Backdrop',
+             maxWidth: 720,
+           );
+         }
 
-  static const double _cardWidth = 90;
-  static const double _cardHeight = 140;
+         if (url == null || url.isEmpty) {
+           return Container(
+             color: Colors.grey.withOpacity(0.1),
+             child: const Center(child: Icon(CupertinoIcons.photo, size: 28)),
+           );
+         }
 
-  @override
-  Widget build(BuildContext context) {
-    final Color textColor = isDark ? Colors.white : Colors.black87;
+         return EmbyFadeInImage(
+           imageUrl: url,
+           fit: BoxFit.cover,
+         );
+       },
+     );
+   }
+ 
+   String _buildSubtitle() {
+     final year = item.productionYear?.toString();
+     if (year != null && year.isNotEmpty) {
+       return year;
+     }
+     return item.type.isNotEmpty ? item.type : '推荐';
+   }
+ 
+   void _handleTap(BuildContext context) {
+     final id = item.id;
+     if (id == null || id.isEmpty) return;
+ 
+     if (item.type == 'Series') {
+       context.push('/series/$id?name=${Uri.encodeComponent(item.name)}');
+     } else if (item.type == 'Movie') {
+       context.push('/item/$id');
+     } else {
+       context.push('/player/$id');
+     }
+   }
 
-    return SizedBox(
-      width: _cardWidth,
-      child: CupertinoButton(
-        padding: EdgeInsets.zero,
-        onPressed: item.id != null && item.id!.isNotEmpty
-            ? () => _handleTap(context)
-            : null,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: SizedBox(
-                height: _cardHeight,
-                width: _cardWidth,
-                child: _buildPoster(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              item.name,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: textColor,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _buildSubtitle(),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: textColor.withOpacity(0.7),
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPoster() {
-    if (item.id == null || item.id!.isEmpty) {
-      return Container(
-        color: Colors.grey.withOpacity(0.2),
-        child: const Icon(CupertinoIcons.film, size: 32, color: Colors.grey),
-      );
+  bool _hasHorizontalArtwork(ItemInfo item) {
+    if (item.backdropImageTags != null && item.backdropImageTags!.isNotEmpty) {
+      return true;
     }
-
-    return FutureBuilder<EmbyApi>(
-      future: EmbyApi.create(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return Container(
-            color: Colors.grey.withOpacity(0.1),
-            child: const Center(child: CupertinoActivityIndicator()),
-          );
-        }
-        final url = snapshot.data!.buildImageUrl(
-          itemId: item.id!,
-          type: 'Primary',
-          maxWidth: 320,
-        );
-        return EmbyFadeInImage(
-          imageUrl: url,
-          fit: BoxFit.cover,
-        );
-      },
-    );
-  }
-
-  String _buildSubtitle() {
-    final year = item.productionYear?.toString();
-    if (year != null && year.isNotEmpty) {
-      return year;
+    if (item.parentBackdropImageTags != null &&
+        item.parentBackdropImageTags!.isNotEmpty) {
+      return true;
     }
-    return item.type.isNotEmpty ? item.type : '推荐';
-  }
-
-  void _handleTap(BuildContext context) {
-    final id = item.id;
-    if (id == null || id.isEmpty) return;
-
-    if (item.type == 'Series') {
-      context.push('/series/$id?name=${Uri.encodeComponent(item.name)}');
-    } else if (item.type == 'Movie') {
-      context.push('/item/$id');
-    } else {
-      context.push('/player/$id');
+    if ((item.imageTags?['Primary'] ?? '').isEmpty) {
+      return false;
     }
+    return false;
   }
-}
-
-class _MediaFieldRow extends StatelessWidget {
+ }
+ 
+ class _MediaFieldRow extends StatelessWidget {
    const _MediaFieldRow({
      required this.label,
      required this.value,

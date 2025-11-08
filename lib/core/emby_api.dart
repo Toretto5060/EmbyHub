@@ -252,7 +252,7 @@ class EmbyApi {
   Future<List<ItemInfo>> getSimilarItems(
       String userId, String itemId,
       {int limit = 12}) async {
-    final params = {
+    final baseParams = {
       'Limit': limit,
       'IncludeItemTypes': 'Movie,Series,Video',
       'Fields':
@@ -261,28 +261,59 @@ class EmbyApi {
       'EnableImageTypes': 'Primary,Backdrop,Thumb',
     };
 
-    Future<List<ItemInfo>> fetch(String path) async {
+    Future<List<ItemInfo>> fetch(
+      String path,
+      Map<String, dynamic> queryParams,
+      String tag,
+    ) async {
       try {
-        final res = await _dio.get(path, queryParameters: params);
+        print('[API][Similar] try $tag path=$path params=$queryParams');
+        final res = await _dio.get(path, queryParameters: queryParams);
         final data = res.data;
         final items = _extractItemsList(data);
         final result = items?.map(ItemInfo.fromJson).toList() ?? [];
-        print('[API][Similar] path=$path type=${data.runtimeType} -> ${result.length} items');
+        print('[API][Similar] ok $tag path=$path -> ${result.length} items');
         return result;
       } catch (e) {
-        print('[API][Similar] error on $path: $e');
+        print('[API][Similar] error $tag path=$path: $e');
         return const [];
       }
     }
 
-    final endpoints = [
-      '/Users/$userId/Items/$itemId/Similar',
-      '/Items/$itemId/Similar',
-      '/Users/$userId/Items/$itemId/Similar?ExcludeArtistIds=$userId',
+    final requestVariants = [
+      (
+        path: '/Users/$userId/Items/$itemId/Similar',
+        params: {...baseParams},
+        tag: 'user+include',
+      ),
+      (
+        path: '/Users/$userId/Items/$itemId/Similar',
+        params: {...baseParams}..remove('IncludeItemTypes'),
+        tag: 'user+noType',
+      ),
+      (
+        path: '/Items/$itemId/Similar',
+        params: {...baseParams, 'UserId': userId},
+        tag: 'items+include',
+      ),
+      (
+        path: '/Items/$itemId/Similar',
+        params: {...baseParams, 'UserId': userId}..remove('IncludeItemTypes'),
+        tag: 'items+noType',
+      ),
+      (
+        path: '/Users/$userId/Items/$itemId/Similar',
+        params: {
+          'Limit': limit,
+          'Fields':
+              'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres',
+        },
+        tag: 'user+minimal',
+      ),
     ];
 
-    for (final path in endpoints) {
-      final result = await fetch(path);
+    for (final variant in requestVariants) {
+      final result = await fetch(variant.path, variant.params, variant.tag);
       if (result.isNotEmpty) {
         return result;
       }
@@ -292,7 +323,7 @@ class EmbyApi {
       userId: userId,
       itemId: itemId,
       limit: limit,
-      baseParams: params,
+      baseParams: baseParams,
     );
 
     if (fallback.isNotEmpty) {
