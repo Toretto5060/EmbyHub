@@ -249,6 +249,152 @@ class EmbyApi {
     return list.map((e) => ItemInfo.fromJson(e)).toList();
   }
 
+  Future<List<ItemInfo>> getSimilarItems(
+      String userId, String itemId,
+      {int limit = 12}) async {
+    final params = {
+      'Limit': limit,
+      'IncludeItemTypes': 'Movie,Series,Video',
+      'Fields':
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres',
+      'ImageTypeLimit': 1,
+      'EnableImageTypes': 'Primary,Backdrop,Thumb',
+    };
+
+    Future<List<ItemInfo>> fetch(String path) async {
+      try {
+        final res = await _dio.get(path, queryParameters: params);
+        final data = res.data;
+        final items = _extractItemsList(data);
+        final result = items?.map(ItemInfo.fromJson).toList() ?? [];
+        print('[API][Similar] path=$path type=${data.runtimeType} -> ${result.length} items');
+        return result;
+      } catch (e) {
+        print('[API][Similar] error on $path: $e');
+        return const [];
+      }
+    }
+
+    final endpoints = [
+      '/Users/$userId/Items/$itemId/Similar',
+      '/Items/$itemId/Similar',
+      '/Users/$userId/Items/$itemId/Similar?ExcludeArtistIds=$userId',
+    ];
+
+    for (final path in endpoints) {
+      final result = await fetch(path);
+      if (result.isNotEmpty) {
+        return result;
+      }
+    }
+
+    final fallback = await _fallbackSimilarItems(
+      userId: userId,
+      itemId: itemId,
+      limit: limit,
+      baseParams: params,
+    );
+
+    if (fallback.isNotEmpty) {
+      return fallback;
+    }
+
+    print('[API][Similar] no results for item=$itemId');
+    return const [];
+  }
+
+  List<Map<String, dynamic>>? _extractItemsList(dynamic data) {
+    if (data is List) {
+      return data.whereType<Map<String, dynamic>>().toList();
+    }
+    if (data is Map<String, dynamic>) {
+      final items = data['Items'];
+      if (items is List) {
+        return items.whereType<Map<String, dynamic>>().toList();
+      }
+    }
+    return null;
+  }
+
+  Future<List<ItemInfo>> _fallbackSimilarItems({
+    required String userId,
+    required String itemId,
+    required int limit,
+    required Map<String, dynamic> baseParams,
+  }) async {
+    try {
+      print('[API][Similar] fallback start for item=$itemId');
+      final itemRes = await _dio.get(
+        '/Users/$userId/Items/$itemId',
+        queryParameters: {
+          'Fields':
+              'PrimaryImageAspectRatio,Genres,ParentId,CollectionType,RunTimeTicks,ProviderIds',
+        },
+      );
+
+      if (itemRes.data is! Map<String, dynamic>) {
+        print('[API][Similar] fallback: item response not a map');
+        return const [];
+      }
+
+      final itemJson = itemRes.data as Map<String, dynamic>;
+      final itemType = itemJson['Type']?.toString();
+      final parentId = itemJson['ParentId']?.toString();
+      final genres = (itemJson['Genres'] as List?)
+              ?.whereType<String>()
+              .where((g) => g.isNotEmpty)
+              .toList() ??
+          const [];
+
+      final fallbackParams = <String, dynamic>{
+        ...baseParams,
+        'Recursive': true,
+        'SortBy': 'Random',
+        'Filters': 'IsNotFolder',
+        'ExcludeItemIds': itemId,
+        'Limit': limit + 6,
+      };
+
+      if (itemType != null && itemType.isNotEmpty) {
+        fallbackParams['IncludeItemTypes'] = itemType;
+      }
+
+      if (parentId != null && parentId.isNotEmpty) {
+        fallbackParams['ParentId'] = parentId;
+      }
+
+      if (genres.isNotEmpty) {
+        fallbackParams['Genres'] = genres.take(3).join(',');
+      }
+
+      print('[API][Similar] fallback params: type=$itemType parent=$parentId genres=${genres.take(3).join('/') }');
+
+      final res = await _dio.get(
+        '/Users/$userId/Items',
+        queryParameters: fallbackParams,
+      );
+
+      final items = _extractItemsList(res.data) ?? const [];
+      if (items.isEmpty) {
+        print('[API][Similar] fallback: no items returned');
+        return const [];
+      }
+
+      final filtered = items
+          .where((e) => e['Id'] != itemId)
+          .take(limit)
+          .map(ItemInfo.fromJson)
+          .toList();
+
+      print('[API][Similar] fallback produced ${filtered.length} items');
+      return filtered;
+    } catch (e, stack) {
+      print('[API][Similar] fallback error: $e');
+      print(stack);
+      return const [];
+    }
+  }
+
   // 获取某个剧集的季列表
   Future<List<ItemInfo>> getSeasons({
     required String userId,
@@ -334,7 +480,7 @@ class EmbyApi {
     final res =
         await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres,People',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres,People,ExternalUrls,DateCreated',
     });
     return ItemInfo.fromJson(res.data as Map<String, dynamic>);
   }
@@ -487,12 +633,14 @@ class ItemInfo {
     this.genres,
     this.mediaSources,
     this.performers,
+    this.externalUrls,
     this.premiereDate,
     this.endDate,
     this.productionYear,
     this.communityRating,
     this.childCount,
     this.providerIds,
+    this.dateCreated,
   });
 
   final String? id;
@@ -523,6 +671,8 @@ class ItemInfo {
   final double? communityRating; // 评分（IMDb等）
   final int? childCount; // 子项目数量（剧集的总集数）
   final Map<String, dynamic>? providerIds; // 第三方ID（包含豆瓣）
+  final String? dateCreated;
+  final List<ExternalUrlInfo>? externalUrls;
 
   // 获取评分和来源
   double? getRating() {
@@ -584,12 +734,18 @@ class ItemInfo {
           .map((element) => PerformerInfo.fromJson(
               Map<String, dynamic>.from(element as Map)))
           .toList(),
+      externalUrls: (json['ExternalUrls'] as List?)
+          ?.whereType<Map<String, dynamic>>()
+          .map(ExternalUrlInfo.fromJson)
+          .where((e) => e.isValid)
+          .toList(),
       premiereDate: json['PremiereDate'] as String?,
       endDate: json['EndDate'] as String?,
       productionYear: (json['ProductionYear'] as num?)?.toInt(),
       communityRating: (json['CommunityRating'] as num?)?.toDouble(),
       childCount: (json['ChildCount'] as num?)?.toInt(),
       providerIds: json['ProviderIds'] as Map<String, dynamic>?,
+      dateCreated: json['DateCreated'] as String?,
     );
   }
 }
@@ -598,6 +754,22 @@ class MediaSourceUrl {
   MediaSourceUrl({required this.uri, required this.headers});
   final String uri;
   final Map<String, String> headers;
+}
+
+class ExternalUrlInfo {
+  ExternalUrlInfo({required this.name, required this.url});
+
+  final String name;
+  final String url;
+
+  factory ExternalUrlInfo.fromJson(Map<String, dynamic> map) {
+    return ExternalUrlInfo(
+      name: map['Name']?.toString() ?? '',
+      url: map['Url']?.toString() ?? '',
+    );
+  }
+
+  bool get isValid => name.isNotEmpty && url.isNotEmpty;
 }
 
 class PerformerInfo {
