@@ -10,6 +10,7 @@ import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/account_history_provider.dart';
+import '../../providers/emby_api_provider.dart';
 import '../../widgets/home_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/app_route_observer.dart';
@@ -817,7 +818,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                   children: [
                     AspectRatio(
                       aspectRatio: 16 / 9,
-                      child: _buildLatestPoster(context, ref, item.id),
+                      child: _buildResumePoster(context, ref, item),
                     ),
                     if (totalTicks > 0 && normalizedProgress > 0)
                       Positioned(
@@ -910,6 +911,172 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     );
   }
 
+  Widget _buildResumePoster(
+      BuildContext context, WidgetRef ref, ItemInfo item) {
+    final apiAsync = ref.watch(embyApiProvider);
+
+    Widget placeholder() => Container(
+          color: CupertinoColors.systemGrey5,
+          child: const Center(
+            child: Icon(CupertinoIcons.tv, size: 48),
+          ),
+        );
+
+    final itemId = item.id;
+    if (itemId == null || itemId.isEmpty) {
+      return placeholder();
+    }
+
+    return apiAsync.when(
+      data: (api) {
+        final candidates = <_ImageCandidate>[];
+        final seen = <String>{};
+
+        void addCandidate({
+          required String? id,
+          required String type,
+          String? tag,
+          int? index,
+          bool allowWithoutTag = false,
+        }) {
+          if (id == null || id.isEmpty) return;
+          if (!allowWithoutTag && (tag == null || tag.isEmpty)) return;
+          final key = '$id|$type|${tag ?? ''}|${index ?? -1}|$allowWithoutTag';
+          if (seen.contains(key)) return;
+          seen.add(key);
+          candidates.add(_ImageCandidate(
+            id: id,
+            type: type,
+            tag: tag?.isEmpty ?? true ? null : tag,
+            index: index,
+            allowWithoutTag: allowWithoutTag,
+          ));
+        }
+
+        final imageTags = item.imageTags ?? const <String, String>{};
+        final backdropTags = item.backdropImageTags ?? const <String>[];
+
+        if (item.type == 'Episode' || item.type == 'Series') {
+          addCandidate(
+            id: item.id,
+            type: 'Thumb',
+            tag: imageTags['Thumb'],
+          );
+          if (backdropTags.isNotEmpty) {
+            addCandidate(
+              id: item.id,
+              type: 'Backdrop',
+              tag: backdropTags.first,
+              index: 0,
+            );
+          }
+          addCandidate(
+            id: item.id,
+            type: 'Primary',
+            tag: imageTags['Primary'],
+          );
+
+          addCandidate(
+            id: item.parentThumbItemId,
+            type: 'Thumb',
+            tag: item.parentThumbImageTag,
+          );
+          final parentBackdropTags = item.parentBackdropImageTags ?? const <String>[];
+          if (item.parentBackdropItemId != null && parentBackdropTags.isNotEmpty) {
+            addCandidate(
+              id: item.parentBackdropItemId,
+              type: 'Backdrop',
+              tag: parentBackdropTags.first,
+              index: 0,
+            );
+          }
+
+          addCandidate(
+            id: item.seasonId,
+            type: 'Primary',
+            tag: item.seasonPrimaryImageTag,
+          );
+          if (item.seasonId != null) {
+            addCandidate(
+              id: item.seasonId,
+              type: 'Primary',
+              allowWithoutTag: true,
+            );
+          }
+
+          addCandidate(
+            id: item.seriesId,
+            type: 'Primary',
+            tag: item.seriesPrimaryImageTag,
+          );
+          if (item.seriesId != null) {
+            addCandidate(
+              id: item.seriesId,
+              type: 'Primary',
+              allowWithoutTag: true,
+            );
+          }
+
+          addCandidate(
+            id: item.id,
+            type: 'Primary',
+            allowWithoutTag: true,
+          );
+        } else {
+          if (backdropTags.isNotEmpty) {
+            addCandidate(
+              id: item.id,
+              type: 'Backdrop',
+              tag: backdropTags.first,
+              index: 0,
+            );
+          }
+          addCandidate(
+            id: item.id,
+            type: 'Primary',
+            tag: imageTags['Primary'],
+          );
+          addCandidate(
+            id: item.id,
+            type: 'Thumb',
+            tag: imageTags['Thumb'],
+          );
+          addCandidate(
+            id: item.id,
+            type: 'Primary',
+            allowWithoutTag: true,
+          );
+        }
+
+        String? url;
+        for (final candidate in candidates) {
+          url = api.buildImageUrl(
+            itemId: candidate.id,
+            type: candidate.type,
+            maxWidth: 720,
+            imageIndex: candidate.index,
+            tag: candidate.tag,
+          );
+          if (url.isNotEmpty) {
+            break;
+          }
+        }
+
+        if (url == null || url.isEmpty) {
+          return placeholder();
+        }
+
+        return EmbyFadeInImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          placeholder: placeholder(),
+        );
+      },
+      loading: () => placeholder(),
+      error: (_, __) => placeholder(),
+    );
+  }
+
   Widget _buildLatestPoster(
       BuildContext context, WidgetRef ref, String? itemId) {
     if (itemId == null || itemId.isEmpty) {
@@ -992,9 +1159,6 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     );
   }
 }
-
-// Provider for EmbyApi instance
-final embyApiProvider = FutureProvider<EmbyApi>((ref) => EmbyApi.create());
 
 // ✅ Emby Logo 组件
 class _EmbyLogo extends StatelessWidget {
@@ -1451,4 +1615,20 @@ class _UserAvatarSmall extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ImageCandidate {
+  const _ImageCandidate({
+    required this.id,
+    required this.type,
+    this.tag,
+    this.index,
+    this.allowWithoutTag = false,
+  });
+
+  final String id;
+  final String type;
+  final String? tag;
+  final int? index;
+  final bool allowWithoutTag;
 }

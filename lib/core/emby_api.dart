@@ -183,7 +183,7 @@ class EmbyApi {
         'SortBy': 'DatePlayed',
         'SortOrder': 'Descending',
         'Fields':
-            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag',
         'ImageTypeLimit': 1,
         'EnableImageTypes': 'Primary,Backdrop,Thumb',
       });
@@ -205,7 +205,7 @@ class EmbyApi {
         'ParentId': parentId,
         'Limit': limit,
         'Fields':
-            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,UserData,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag',
         'ImageTypeLimit': 1,
         'EnableImageTypes': 'Primary,Backdrop,Thumb',
       });
@@ -233,7 +233,7 @@ class EmbyApi {
       'StartIndex': startIndex,
       'Limit': limit,
       'Recursive': true,
-      'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+      'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag',
     };
 
     // 如果指定了类型，使用指定的；否则使用默认的
@@ -339,10 +339,34 @@ class EmbyApi {
     return ItemInfo.fromJson(res.data as Map<String, dynamic>);
   }
 
-  String buildImageUrl(
-      {required String itemId, String type = 'Primary', int maxWidth = 400}) {
-    return _dio.options.baseUrl +
-        '/Items/$itemId/Images/$type?maxWidth=$maxWidth';
+  String buildImageUrl({
+    required String itemId,
+    String type = 'Primary',
+    int maxWidth = 400,
+    int? imageIndex,
+    String? tag,
+  }) {
+    final buffer = StringBuffer('${_dio.options.baseUrl}/Items/$itemId/Images/$type');
+    if (imageIndex != null) {
+      buffer.write('/$imageIndex');
+    }
+
+    final params = <String, String>{};
+    if (maxWidth > 0) {
+      params['maxWidth'] = maxWidth.toString();
+    }
+    if (tag != null && tag.isNotEmpty) {
+      params['tag'] = tag;
+    }
+
+    if (params.isEmpty) {
+      return buffer.toString();
+    }
+
+    final query = params.entries
+        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    return '${buffer.toString()}?$query';
   }
 
   // ✅ 获取用户头像URL
@@ -450,6 +474,16 @@ class ItemInfo {
     this.seriesName,
     this.parentIndexNumber,
     this.indexNumber,
+    this.seriesId,
+    this.seasonId,
+    this.seriesPrimaryImageTag,
+    this.seasonPrimaryImageTag,
+    this.imageTags,
+    this.backdropImageTags,
+    this.parentThumbItemId,
+    this.parentThumbImageTag,
+    this.parentBackdropItemId,
+    this.parentBackdropImageTags,
     this.premiereDate,
     this.endDate,
     this.productionYear,
@@ -467,6 +501,16 @@ class ItemInfo {
   final String? seriesName;
   final int? parentIndexNumber;
   final int? indexNumber;
+  final String? seriesId;
+  final String? seasonId;
+  final String? seriesPrimaryImageTag;
+  final String? seasonPrimaryImageTag;
+  final Map<String, String>? imageTags;
+  final List<String>? backdropImageTags;
+  final String? parentThumbItemId;
+  final String? parentThumbImageTag;
+  final String? parentBackdropItemId;
+  final List<String>? parentBackdropImageTags;
   final String? premiereDate;
   final String? endDate;
   final int? productionYear;
@@ -503,6 +547,24 @@ class ItemInfo {
       seriesName: json['SeriesName'] as String?,
       parentIndexNumber: (json['ParentIndexNumber'] as num?)?.toInt(),
       indexNumber: (json['IndexNumber'] as num?)?.toInt(),
+      seriesId: json['SeriesId'] as String?,
+      seasonId: json['SeasonId'] as String?,
+      seriesPrimaryImageTag: json['SeriesPrimaryImageTag'] as String?,
+      seasonPrimaryImageTag: json['SeasonPrimaryImageTag'] as String?,
+      imageTags: (json['ImageTags'] as Map<String, dynamic>?)?.map(
+        (key, value) => MapEntry(key, value?.toString() ?? ''),
+      ),
+      backdropImageTags: (json['BackdropImageTags'] as List?)
+          ?.map((e) => e?.toString() ?? '')
+          .where((element) => element.isNotEmpty)
+          .toList(),
+      parentThumbItemId: json['ParentThumbItemId'] as String?,
+      parentThumbImageTag: json['ParentThumbImageTag'] as String?,
+      parentBackdropItemId: json['ParentBackdropItemId'] as String?,
+      parentBackdropImageTags: (json['ParentBackdropImageTags'] as List?)
+          ?.map((e) => e?.toString() ?? '')
+          .where((element) => element.isNotEmpty)
+          .toList(),
       premiereDate: json['PremiereDate'] as String?,
       endDate: json['EndDate'] as String?,
       productionYear: (json['ProductionYear'] as num?)?.toInt(),

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
+import '../../providers/emby_api_provider.dart';
 import '../../utils/app_route_observer.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
@@ -14,7 +15,7 @@ final itemsProvider =
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
-  final api = await EmbyApi.create();
+  final api = await ref.read(embyApiProvider.future);
   // 对于电视剧库，只获取 Series，不获取单集
   return api.getItemsByParent(
     userId: auth.userId!,
@@ -120,7 +121,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
               ),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3,
-                  childAspectRatio: 0.58,  // 调整比例以适应标题+年份
+                  childAspectRatio: 0.58,
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 12),
               itemCount: list.length,
@@ -152,12 +153,24 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   }
 }
 
-class _ItemTile extends ConsumerWidget {
+class _ItemTile extends ConsumerStatefulWidget {
   const _ItemTile({required this.item});
   final ItemInfo item;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ItemTile> createState() => _ItemTileState();
+}
+
+class _ItemTileState extends ConsumerState<_ItemTile>
+    with AutomaticKeepAliveClientMixin {
+  ItemInfo get item => widget.item;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
     
@@ -215,6 +228,56 @@ class _ItemTile extends ConsumerWidget {
       return '${d.inSeconds}s';
     }
 
+    Widget? buildRatingChip() {
+      if (item.getRating() == null) {
+        return null;
+      }
+      return Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 4,
+          vertical: 2,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (item.getRatingSource() == 'douban')
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: const Text(
+                  '豆',
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              )
+            else
+              const Icon(
+                CupertinoIcons.star_fill,
+                color: Colors.amber,
+                size: 12,
+              ),
+            const SizedBox(width: 2),
+            Text(
+              item.getRating()!.toStringAsFixed(1),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final ratingChip = buildRatingChip();
+
     return CupertinoButton(
       padding: EdgeInsets.zero,
       onPressed: item.id != null && item.id!.isNotEmpty
@@ -265,54 +328,6 @@ class _ItemTile extends ConsumerWidget {
                           CupertinoIcons.check_mark,
                           size: 14,
                           color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  // 评分显示在右下角（优先豆瓣，否则IMDb等）
-                  if (item.getRating() != null)
-                    Positioned(
-                      bottom: showProgress ? 26 : 4,
-                      right: 4,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.7),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // 根据评分来源显示不同图标
-                            if (item.getRatingSource() == 'douban')
-                              Container(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 2),
-                                child: const Text(
-                                  '豆',
-                                  style: TextStyle(
-                                    color: Colors.green,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              )
-                            else
-                              const Icon(
-                                CupertinoIcons.star_fill,
-                                color: Colors.amber,
-                                size: 12,
-                              ),
-                            const SizedBox(width: 2),
-                            Text(
-                              item.getRating()!.toStringAsFixed(1),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
                         ),
                       ),
                     ),
@@ -375,13 +390,18 @@ class _ItemTile extends ConsumerWidget {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text(
-                              '剩余 ${formatRemaining(remainingDuration)}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                              ),
-                              textAlign: TextAlign.right,
+                            Row(
+                              children: [
+                                Text(
+                                  '剩余 ${formatRemaining(remainingDuration)}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                const Spacer(),
+                                if (ratingChip != null) ratingChip,
+                              ],
                             ),
                             const SizedBox(height: 4),
                             TweenAnimationBuilder<double>(
@@ -409,6 +429,13 @@ class _ItemTile extends ConsumerWidget {
                           ],
                         ),
                       ),
+                    ),
+                  // 当没有进度条时仍显示评分
+                  if (!showProgress && ratingChip != null)
+                    Positioned(
+                      bottom: 4,
+                      right: 4,
+                      child: ratingChip,
                     ),
                 ],
               ),
@@ -455,17 +482,14 @@ class _Poster extends ConsumerWidget {
       return _PosterSkeleton(itemType: itemType);
     }
 
-    return FutureBuilder<EmbyApi>(
-      future: EmbyApi.create(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+    final apiAsync = ref.watch(embyApiProvider);
+
+    return apiAsync.when(
+      data: (api) {
+        final url = api.buildImageUrl(itemId: itemId!, type: 'Primary');
+        if (url.isEmpty) {
           return _PosterSkeleton(itemType: itemType);
         }
-
-        // 使用 Primary 类型获取海报
-        final url =
-            snapshot.data!.buildImageUrl(itemId: itemId!, type: 'Primary');
-
         return SizedBox.expand(
           child: EmbyFadeInImage(
             imageUrl: url,
@@ -474,6 +498,8 @@ class _Poster extends ConsumerWidget {
           ),
         );
       },
+      loading: () => _PosterSkeleton(itemType: itemType),
+      error: (_, __) => _PosterSkeleton(itemType: itemType),
     );
   }
 }
