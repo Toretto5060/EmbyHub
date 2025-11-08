@@ -515,7 +515,7 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                                       backgroundColor:
                                           Colors.white.withValues(alpha: 0.2),
                                       valueColor: AlwaysStoppedAnimation<Color>(
-                                        Colors.blueAccent.withValues(alpha: 0.9),
+                                        const Color(0xFFFFB74D).withValues(alpha: 0.95),
                                       ),
                                     ),
                                   );

@@ -55,6 +55,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   static const double _detailsOverlayTopOffset = 90;
   static const double _detailsContentGap = 24;
   final GlobalKey _resumeMenuAnchorKey = GlobalKey();
+  static const Color _resumeButtonColor = Color(0xFFFFB74D);
+  static const Color _playButtonColor = Color(0xFF3F8CFF);
   bool _hasLoggedPerformers = false;
 
   @override
@@ -166,17 +168,19 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                       // 标题
                       Text(
                         data.name,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                          shadows: [
-                            Shadow(
-                              color: Colors.black54,
-                              blurRadius: 8,
-                              offset: Offset(0, 2),
-                            ),
-                          ],
+                          color: isDark ? Colors.white : Colors.black87,
+                          shadows: isDark
+                              ? const [
+                                  Shadow(
+                                    color: Colors.black54,
+                                    blurRadius: 8,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ]
+                              : null,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -403,7 +407,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
         widgets.add(const SizedBox(height: 6));
       }
 
-      final valueText = isDefault ? '$value (默认)' : value;
+      final valueText = isDefault && !value.contains('默认')
+          ? '$value (默认)'
+          : value;
       widgets.add(Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -531,7 +537,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     }
 
     final Color buttonColor =
-        canResume ? const Color(0xFF3F8CFF) : const Color(0xFF4A90E2);
+        canResume ? _resumeButtonColor : _playButtonColor;
     final Color textColor = Colors.white;
     final String buttonLabel = canResume ? '恢复播放' : '播放';
 
@@ -577,12 +583,12 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                         menuOpenNotifier.value = false;
                       },
                       child: Container(
-                        height: 44,
-                        width: 44,
-                        decoration: BoxDecoration(
-                          color: buttonColor,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
+                         height: 44,
+                         width: 44,
+                         decoration: BoxDecoration(
+                           color: buttonColor,
+                           borderRadius: BorderRadius.circular(14),
+                         ),
                         alignment: Alignment.center,
                         child: AnimatedRotation(
                           turns: isOpen ? 0.5 : 0.0,
@@ -611,10 +617,13 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                   child: LinearProgressIndicator(
                     value: progress.clamp(0.0, 1.0),
                     minHeight: 6,
-                    backgroundColor:
-                        (isDarkBackground ? Colors.white : Colors.black)
-                            .withOpacity(0.15),
-                    valueColor: AlwaysStoppedAnimation(buttonColor),
+                    backgroundColor: (isDarkBackground
+                            ? Colors.white
+                            : Colors.black)
+                        .withValues(alpha: 0.18),
+                    valueColor: AlwaysStoppedAnimation(
+                      _resumeButtonColor.withValues(alpha: 0.95),
+                    ),
                   ),
                 ),
               ),

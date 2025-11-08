@@ -874,10 +874,11 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                                       value: value,
                                       minHeight: 3,
                                       backgroundColor:
-                                          Colors.white.withOpacity(0.25),
+                                          Colors.white.withValues(alpha: 0.2),
                                       valueColor:
-                                          const AlwaysStoppedAnimation(
-                                              CupertinoColors.activeBlue),
+                                          AlwaysStoppedAnimation(
+                                              const Color(0xFFFFB74D)
+                                                  .withValues(alpha: 0.95)),
                                     );
                                   },
                           ),
