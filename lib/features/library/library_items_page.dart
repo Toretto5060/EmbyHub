@@ -166,6 +166,7 @@ class _ItemTile extends ConsumerWidget {
         children: [
           Expanded(
             child: Stack(
+              fit: StackFit.expand,
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
@@ -291,41 +292,54 @@ class _Poster extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (itemId == null || itemId!.isEmpty) {
-      return Container(
-        color: CupertinoColors.systemGrey4,
-        child: const Center(
-          child: Icon(CupertinoIcons.film, size: 48),
-        ),
-      );
+      return _PosterSkeleton(itemType: itemType);
     }
 
-    return FutureBuilder(
+    return FutureBuilder<EmbyApi>(
       future: EmbyApi.create(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const ColoredBox(color: CupertinoColors.systemGrey4);
+          return _PosterSkeleton(itemType: itemType);
         }
 
         // 使用 Primary 类型获取海报
         final url =
             snapshot.data!.buildImageUrl(itemId: itemId!, type: 'Primary');
 
-        return EmbyFadeInImage(
-          imageUrl: url,
-          fit: BoxFit.cover,
-          placeholder: Container(
-            color: CupertinoColors.systemGrey4,
-            child: Center(
-              child: Icon(
-                itemType == 'Series' || itemType == 'Episode'
-                    ? CupertinoIcons.tv
-                    : CupertinoIcons.film,
-                size: 48,
-              ),
-            ),
+        return SizedBox.expand(
+          child: EmbyFadeInImage(
+            imageUrl: url,
+            fit: BoxFit.cover,
+            placeholder: _PosterSkeleton(itemType: itemType),
           ),
         );
       },
+    );
+  }
+}
+
+class _PosterSkeleton extends StatelessWidget {
+  const _PosterSkeleton({this.itemType});
+  final String? itemType;
+
+  IconData get _icon =>
+      (itemType == 'Series' || itemType == 'Episode')
+          ? CupertinoIcons.tv
+          : CupertinoIcons.film;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.expand(
+      child: ColoredBox(
+        color: CupertinoColors.systemGrey4,
+        child: Center(
+          child: Icon(
+            _icon,
+            color: CupertinoColors.systemGrey2,
+            size: 48,
+          ),
+        ),
+      ),
     );
   }
 }
