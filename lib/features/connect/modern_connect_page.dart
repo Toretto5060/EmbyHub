@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/emby_api.dart';
 import '../../providers/account_history_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../utils/status_bar_manager.dart';
 
 class ModernConnectPage extends ConsumerStatefulWidget {
   const ModernConnectPage({super.key, this.startAtLogin = false});
@@ -31,7 +32,6 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
 
   bool _serverConnected = false;
   bool _loading = false;
-  String? _error;
   String? _serverName;
   bool _rememberMe = false;  // ✅ 记住我选项，默认勾选
 
@@ -90,7 +90,6 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
     
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
       final port = _port.text.trim().isEmpty ? '8096' : _port.text.trim();
@@ -150,7 +149,6 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
     }
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
       final api = await EmbyApi.create();
@@ -218,7 +216,6 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
     setState(() {
       _serverConnected = false;
       _serverName = null;
-      _error = null;
       _user.clear();
       _pwd.clear();
     });
@@ -226,63 +223,66 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    const overlay = SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
       systemNavigationBarColor: Colors.transparent,
       systemNavigationBarIconBrightness: Brightness.light,
-    ));
+    );
 
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      extendBody: true,
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Colors.deepPurple.shade900,
-              Colors.purple.shade700,
-              Colors.pink.shade600,
-            ],
+    return StatusBarStyleScope(
+      style: overlay,
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        extendBody: true,
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.deepPurple.shade900,
+                Colors.purple.shade700,
+                Colors.pink.shade600,
+              ],
+            ),
           ),
-        ),
-        child: Stack(
-          children: [
-            SafeArea(
-              child: Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-                  child: FadeTransition(
-                    opacity: _fadeAnim,
-                    child: SlideTransition(
-                      position: _slideAnim,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildLogo(),
-                          const SizedBox(height: 40),
-                          if (!_serverConnected)
-                            _buildServerCard()
-                          else
-                            _buildLoginCard(),
-                        ],
+          child: Stack(
+            children: [
+              SafeArea(
+                child: Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+                    child: FadeTransition(
+                      opacity: _fadeAnim,
+                      child: SlideTransition(
+                        position: _slideAnim,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildLogo(),
+                            const SizedBox(height: 40),
+                            if (!_serverConnected)
+                              _buildServerCard()
+                            else
+                              _buildLoginCard(),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-            if (!_serverConnected)
-              Positioned(
-                top: 50,
-                right: 20,
-                child: SafeArea(
-                  child: TextButton.icon(
-                    onPressed: () => context.go('/'),
-                    icon: const Icon(Icons.home_rounded, color: Colors.white, size: 20),
-                    label: const Text('跳过', style: TextStyle(color: Colors.white, fontSize: 14)),
+              if (!_serverConnected)
+                Positioned(
+                  top: 50,
+                  right: 20,
+                  child: SafeArea(
+                    child: TextButton.icon(
+                      onPressed: () => context.go('/'),
+                      icon: const Icon(Icons.home_rounded, color: Colors.white, size: 20),
+                      label: const Text('跳过', style: TextStyle(color: Colors.white, fontSize: 14)),
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 backgroundColor: Colors.white.withOpacity(0.2),
@@ -290,10 +290,11 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                   borderRadius: BorderRadius.circular(20),
                 ),
               ),
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

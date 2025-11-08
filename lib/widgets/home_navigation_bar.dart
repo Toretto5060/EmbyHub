@@ -48,7 +48,6 @@ class HomeNavigationBar extends StatelessWidget
                 ? ImageFilter.blur(sigmaX: 30, sigmaY: 30)
                 : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
             child: Container(
-              // 从屏幕顶部开始，包含状态栏高度
               padding: EdgeInsets.only(top: statusBarHeight),
               decoration: BoxDecoration(
                 color: isDark
@@ -58,30 +57,26 @@ class HomeNavigationBar extends StatelessWidget
               child: SizedBox(
                 height: 44,
                 child: Stack(
-                  alignment: Alignment.center,  // ✅ 确保 Stack 内容垂直居中
+                  alignment: Alignment.center,
                   children: [
-                    // ✅ 中间：logo + 标题 整体居中
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.center,  // ✅ 垂直居中
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // logo
                         if (leading != null)
                           Padding(
                             padding: const EdgeInsets.only(right: 8),
-                            child: _wrapWithColorTransition(leading!, showBlur, isDark),
+                            child: _wrapWithColor(leading!, isDark),
                           ),
-                        // 标题
                         if (title != null)
-                          _wrapWithColorTransition(title!, showBlur, isDark),
+                          _wrapWithColor(title!, isDark),
                       ],
                     ),
-                    // ✅ 右侧：用户头像（绝对定位，垂直居中）
                     if (trailing != null)
                       Positioned(
                         right: 16,
-                        child: _wrapWithColorTransition(trailing!, showBlur, isDark),
+                        child: _wrapWithColor(trailing!, isDark),
                       ),
                   ],
                 ),
@@ -93,17 +88,13 @@ class HomeNavigationBar extends StatelessWidget
     );
   }
 
-  // 为子组件包裹颜色过渡效果
-  Widget _wrapWithColorTransition(Widget child, bool showBlur, bool isDark) {
-    // 滑动时：白色
-    // 未滑动时：根据深浅模式显示原色
-    final color =
-        showBlur ? Colors.white : (isDark ? Colors.white : Colors.black87);
+  Widget _wrapWithColor(Widget child, bool isDark) {
+    final color = isDark ? Colors.white : Colors.black87;
 
     return DefaultTextStyle(
       style: TextStyle(
         color: color,
-        fontWeight: FontWeight.w400,
+        fontWeight: FontWeight.w600,
       ),
       child: IconTheme(
         data: IconThemeData(
@@ -122,7 +113,7 @@ Widget buildHomeTitle(String title) {
     title,
     style: const TextStyle(
       fontSize: 17,
-      fontWeight: FontWeight.w500,
+      fontWeight: FontWeight.w600,
     ),
   );
 }

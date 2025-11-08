@@ -1,4 +1,9 @@
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +12,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/fade_in_image.dart';
+import '../../utils/status_bar_manager.dart';
 
 final itemProvider =
     FutureProvider.family<ItemInfo, String>((ref, itemId) async {
@@ -28,6 +34,19 @@ class ItemDetailPage extends ConsumerStatefulWidget {
 
 class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   final _scrollController = ScrollController();
+  static const SystemUiOverlayStyle _lightStatusBar = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    statusBarBrightness: Brightness.dark,
+  );
+  static const SystemUiOverlayStyle _darkStatusBar = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
+  );
+
+  SystemUiOverlayStyle _statusBarStyle = _lightStatusBar;
+  final Map<String, SystemUiOverlayStyle> _imageStyleCache = {};
 
   @override
   void dispose() {
@@ -39,107 +58,104 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   Widget build(BuildContext context) {
     final item = ref.watch(itemProvider(widget.itemId));
 
-    // 设置状态栏为亮色图标（因为背景图片通常较暗）
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarBrightness: Brightness.dark,
-      statusBarIconBrightness: Brightness.light,
-    ));
+    return StatusBarStyleScope(
+      style: _statusBarStyle,
+      child: CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.systemBackground,
+        child: item.when(
+          data: (data) {
+            final isPlayed = (data.userData?['Played'] as bool?) ?? false;
 
-    return CupertinoPageScaffold(
-      backgroundColor: CupertinoColors.systemBackground,
-      child: item.when(
-        data: (data) {
-          final isPlayed = (data.userData?['Played'] as bool?) ?? false;
-
-          return Stack(
-            children: [
-              // 背景和可滚动内容
-              CustomScrollView(
-                controller: _scrollController,
-                slivers: [
-                  // 顶部背景图片区域（从状态栏开始）
-                  SliverToBoxAdapter(
-                    child: _buildBackdropHeader(context, data, isPlayed),
-                  ),
-                  // 占位空间（预留给悬浮的内容卡片）
-                  const SliverToBoxAdapter(
-                    child: SizedBox(height: 100),
-                  ),
-                  // 后续内容（剧情简介等）
-                  SliverToBoxAdapter(
-                    child: Container(
-                      color: CupertinoColors.systemBackground.resolveFrom(context),
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // 剧情简介
-                          if ((data.overview ?? '').isNotEmpty) ...[
-                            Text(
-                              data.overview!,
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                            const SizedBox(height: 16),
+            return Stack(
+              children: [
+                // 背景和可滚动内容
+                CustomScrollView(
+                  controller: _scrollController,
+                  slivers: [
+                    // 顶部背景图片区域（从状态栏开始）
+                    SliverToBoxAdapter(
+                      child: _buildBackdropHeader(context, data, isPlayed),
+                    ),
+                    // 占位空间（预留给悬浮的内容卡片）
+                    const SliverToBoxAdapter(
+                      child: SizedBox(height: 100),
+                    ),
+                    // 后续内容（剧情简介等）
+                    SliverToBoxAdapter(
+                      child: Container(
+                        color: CupertinoColors.systemBackground.resolveFrom(context),
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 剧情简介
+                            if ((data.overview ?? '').isNotEmpty) ...[
+                              Text(
+                                data.overview!,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              // 悬浮的内容（无背景，左对齐）
-              Positioned(
-                top: 350 - 120, // 海报高度 - 向上偏移量
-                left: 20,
-                right: 20,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 标题
-                    Text(
-                      data.name,
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black54,
-                            blurRadius: 8,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    // 评分、年份、时长等信息
-                    DefaultTextStyle(
-                      style: const TextStyle(
-                        color: Colors.white,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black54,
-                            blurRadius: 8,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: _buildMetaInfo(data),
-                    ),
-                    const SizedBox(height: 8),
-                    // 类型、视频、音频信息
-                    _buildMediaInfo(data),
-                    const SizedBox(height: 16),
-                    // 播放按钮
-                    _buildPlayButton(context, data),
                   ],
                 ),
-              ),
-            ],
-          );
-        },
-        loading: () => const Center(child: CupertinoActivityIndicator()),
-        error: (e, _) => Center(child: Text('加载失败: $e')),
+                // 悬浮的内容（无背景，左对齐）
+                Positioned(
+                  top: 350 - 120, // 海报高度 - 向上偏移量
+                  left: 20,
+                  right: 20,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 标题
+                      Text(
+                        data.name,
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 8,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // 评分、年份、时长等信息
+                      DefaultTextStyle(
+                        style: const TextStyle(
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 8,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: _buildMetaInfo(data),
+                      ),
+                      const SizedBox(height: 8),
+                      // 类型、视频、音频信息
+                      _buildMediaInfo(data),
+                      const SizedBox(height: 16),
+                      // 播放按钮
+                      _buildPlayButton(context, data),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+          loading: () => const Center(child: CupertinoActivityIndicator()),
+          error: (e, _) => Center(child: Text('加载失败: $e')),
+        ),
       ),
     );
   }
@@ -171,6 +187,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                 return EmbyFadeInImage(
                   imageUrl: url,
                   fit: BoxFit.cover,
+                  onImageReady: (image) => _handleBackdropImage(image, item.id ?? url),
                 );
               },
             ),
@@ -352,5 +369,75 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
         ),
       ],
     );
+  }
+
+  Future<void> _handleBackdropImage(ui.Image image, String cacheKey) async {
+    if (_imageStyleCache.containsKey(cacheKey)) {
+      _applyStatusBarStyle(_imageStyleCache[cacheKey]!);
+      return;
+    }
+
+    final bool isDark = await _isTopAreaDark(image);
+    final style = isDark ? _lightStatusBar : _darkStatusBar;
+    _imageStyleCache[cacheKey] = style;
+    _applyStatusBarStyle(style);
+  }
+
+  Future<bool> _isTopAreaDark(ui.Image image) async {
+    try {
+      final int width = image.width;
+      final int height = image.height;
+      if (width == 0 || height == 0) {
+        return true;
+      }
+
+      final int sampleRows = math.max(1, math.min(height, (height * 0.25).round()));
+      final int rowStep = math.max(1, sampleRows ~/ 25);
+      final int colStep = math.max(1, width ~/ 40);
+
+      final ByteData? data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (data == null) {
+        return true;
+      }
+      final Uint8List bytes = data.buffer.asUint8List();
+
+      double totalLuminance = 0;
+      int samples = 0;
+
+      for (int y = 0; y < sampleRows; y += rowStep) {
+        final int rowOffset = y * width;
+        for (int x = 0; x < width; x += colStep) {
+          final int index = (rowOffset + x) * 4;
+          if (index + 3 >= bytes.length) {
+            continue;
+          }
+          final int r = bytes[index];
+          final int g = bytes[index + 1];
+          final int b = bytes[index + 2];
+          final double luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
+          totalLuminance += luminance;
+          samples++;
+        }
+      }
+
+      if (samples == 0) {
+        return true;
+      }
+
+      final double avg = totalLuminance / samples;
+      return avg < 0.5;
+    } catch (e) {
+      debugPrint('Failed to analyze image brightness: $e');
+      return true;
+    }
+  }
+
+  void _applyStatusBarStyle(SystemUiOverlayStyle style) {
+    if (!mounted || _statusBarStyle == style) {
+      return;
+    }
+    _statusBarStyle = style;
+    StatusBarStyleScope.of(context)?.update(style);
+    setState(() {});
   }
 }

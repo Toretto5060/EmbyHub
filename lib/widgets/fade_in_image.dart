@@ -96,6 +96,7 @@ class _ImageCache {
   }
   
   // 清空所有缓存
+  // ignore: unused_element
   static Future<void> clear() async {
     // 清空内存缓存
     for (var image in _memoryCache.values) {
@@ -129,6 +130,7 @@ class EmbyFadeInImage extends StatefulWidget {
     this.fadeDuration = const Duration(milliseconds: 500),
     this.timeout = const Duration(seconds: 10),
     this.retries = -1,  // -1 表示无限重试
+    this.onImageReady,
   });
 
   final String imageUrl;
@@ -137,6 +139,7 @@ class EmbyFadeInImage extends StatefulWidget {
   final Duration fadeDuration;
   final Duration timeout;
   final int retries;
+  final void Function(ui.Image image)? onImageReady;
 
   @override
   State<EmbyFadeInImage> createState() => _EmbyFadeInImageState();
@@ -190,6 +193,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
           _isLoading = false;
           _hasError = false;
         });
+        widget.onImageReady?.call(memoryCached);
       }
       return;
     }
@@ -204,6 +208,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
           _isLoading = false;
           _hasError = false;
         });
+        widget.onImageReady?.call(diskCached);
       }
       return;
     }
@@ -220,6 +225,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
             _isLoading = false;
             _hasError = false;
           });
+          widget.onImageReady?.call(image);
         }
       } catch (e) {
         // 加载失败，如果不是不可重试的错误，则重新尝试
@@ -268,6 +274,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
           _isLoading = false;
           _hasError = false;
         });
+        widget.onImageReady?.call(image);
       }
     } catch (e) {
       // ✅ 移除 loading 状态

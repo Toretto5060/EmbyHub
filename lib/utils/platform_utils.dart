@@ -19,5 +19,18 @@ class PlatformUtils {
     }
     // iOS 不做任何操作
   }
+
+  /// Android: 请求系统切换到最高可用刷新率（若设备支持）
+  static Future<void> requestHighRefreshRate() async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+    try {
+      await _channel.invokeMethod('setHighRefreshRate');
+      print('⚡ 已请求高刷新率显示模式');
+    } catch (e) {
+      print('❌ 请求高刷新率失败: $e');
+    }
+  }
 }
 

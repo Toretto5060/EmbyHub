@@ -10,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/emby_api.dart';
+import '../../utils/status_bar_manager.dart';
 
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({required this.itemId, super.key});
@@ -175,9 +176,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: _ready
+    const overlay = SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+    );
+
+    return StatusBarStyleScope(
+      style: overlay,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: _ready
           ? Stack(
               children: [
                 // ✅ 全屏视频播放器（从状态栏到底部）
@@ -283,6 +292,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 color: Colors.white,
               ),
             ),
+      ),
     );
   }
 }

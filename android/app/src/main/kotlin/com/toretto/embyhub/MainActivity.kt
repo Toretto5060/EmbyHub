@@ -33,6 +33,10 @@ class MainActivity: FlutterActivity() {
                     moveTaskToBack(true)
                     result.success(true)
                 }
+                "setHighRefreshRate" -> {
+                    setHighRefreshRate()
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -44,6 +48,32 @@ class MainActivity: FlutterActivity() {
                 .setAspectRatio(Rational(16, 9))
                 .build()
             enterPictureInPictureMode(params)
+        }
+    }
+
+    private fun setHighRefreshRate() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return
+        }
+
+        val displayCompat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay
+        }
+
+        if (displayCompat == null) {
+            return
+        }
+
+        val bestMode = displayCompat.supportedModes.maxByOrNull { it.refreshRate }
+        if (bestMode != null) {
+            val params = window.attributes
+            if (params.preferredDisplayModeId != bestMode.modeId) {
+                params.preferredDisplayModeId = bestMode.modeId
+                window.attributes = params
+            }
         }
     }
 }

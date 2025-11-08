@@ -841,6 +841,14 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              Text(
+                                '剩余 ${formatRemaining(remainingDuration)}',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.85),
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(999),
                                 child: TweenAnimationBuilder<double>(
@@ -861,14 +869,6 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                                               CupertinoColors.activeBlue),
                                     );
                                   },
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '剩余 ${formatRemaining(remainingDuration)}',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.85),
-                                  fontSize: 11,
                                 ),
                               ),
                             ],

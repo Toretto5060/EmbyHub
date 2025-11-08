@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../utils/platform_utils.dart';
+import '../../utils/status_bar_manager.dart';
 
 // InheritedWidget 用于向下传递当前选中的标签索引
 class BottomNavProvider extends InheritedWidget {
@@ -62,26 +63,27 @@ class _BottomNavWrapperState extends State<BottomNavWrapper> {
     final location = GoRouterState.of(context).uri.path;
     final isHomePage = location == '/';  // 判断是否在首页
 
-    return PopScope(
-      canPop: false,  // 拦截返回事件
-      onPopInvokedWithResult: (bool didPop, dynamic result) async {
-        if (!didPop) {
-          // 如果在首页，将应用移到后台
-          if (isHomePage) {
-            print('📱 首页返回：移到后台');
-            await PlatformUtils.moveToBackground();
-          } else {
-            // 如果在子页面，返回上一页
-            print('📱 子页面返回：返回上一页');
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
+    return StatusBarStyleScope.adaptive(
+      child: PopScope(
+        canPop: false,  // 拦截返回事件
+        onPopInvokedWithResult: (bool didPop, dynamic result) async {
+          if (!didPop) {
+            // 如果在首页，将应用移到后台
+            if (isHomePage) {
+              print('📱 首页返回：移到后台');
+              await PlatformUtils.moveToBackground();
             } else {
-              context.go('/');
+              // 如果在子页面，返回上一页
+              print('📱 子页面返回：返回上一页');
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              } else {
+                context.go('/');
+              }
             }
           }
-        }
-      },
-      child: Scaffold(
+        },
+        child: Scaffold(
         body: Stack(
         children: [
           // 内容区域 - 延伸到屏幕最底部，底部留出导航栏空间
@@ -157,6 +159,7 @@ class _BottomNavWrapperState extends State<BottomNavWrapper> {
         ],
         ),
       ),
+    ),
     );
   }
 
