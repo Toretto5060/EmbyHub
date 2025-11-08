@@ -607,6 +607,12 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
 
+    final hasBackdrop = (item.backdropImageTags?.isNotEmpty ?? false) ||
+        (item.parentBackdropImageTags?.isNotEmpty ?? false);
+    final aspectRatio = hasBackdrop ?  2 / 3 : 16 / 9;
+    final cardWidth = hasBackdrop ? 100.0 : 160.0;
+
+
     // 构建年份显示文本
     String? yearText;
     if (item.premiereDate != null || item.productionYear != null) {
@@ -632,7 +638,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     }
 
     return Container(
-      width: 100,
+      width: cardWidth,
       margin: const EdgeInsets.only(left: 6, right: 6),
       child: CupertinoButton(
         padding: EdgeInsets.zero,
@@ -666,8 +672,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: AspectRatio(
-                  aspectRatio: 2 / 3,
-                  child: _buildLatestPoster(context, ref, item.id),
+                  aspectRatio: aspectRatio,
+                  child: _buildLatestPoster(context, ref, item),
                 ),
               ),
             ),
@@ -1078,7 +1084,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   }
 
   Widget _buildLatestPoster(
-      BuildContext context, WidgetRef ref, String? itemId) {
+      BuildContext context, WidgetRef ref, ItemInfo item) {
+    final itemId = item.id;
     if (itemId == null || itemId.isEmpty) {
       return Container(
         color: CupertinoColors.systemGrey5,
@@ -1090,24 +1097,28 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
     return FutureBuilder<EmbyApi>(
       future: EmbyApi.create(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
           return Container(color: CupertinoColors.systemGrey5);
         }
-        final url = snapshot.data!.buildImageUrl(
-          itemId: itemId,
+
+        final api = snapshot.data!;
+        final url = api.buildImageUrl(
+          itemId: item.id!,
           type: 'Primary',
           maxWidth: 300,
         );
+
         if (url.isEmpty) {
-                            return Container(
-                              color: CupertinoColors.systemGrey5,
+          return Container(
+            color: CupertinoColors.systemGrey5,
             child: const Icon(CupertinoIcons.photo, size: 32),
           );
         }
+
         return EmbyFadeInImage(
           imageUrl: url,
-                            fit: BoxFit.cover,
+          fit: BoxFit.cover,
         );
       },
     );
@@ -1631,4 +1642,64 @@ class _ImageCandidate {
   final String? tag;
   final int? index;
   final bool allowWithoutTag;
+}
+
+bool _latestHasHorizontalArtwork(ItemInfo item) {
+  return (item.backdropImageTags?.isNotEmpty ?? false) ||
+      (item.parentBackdropImageTags?.isNotEmpty ?? false);
+}
+
+List<_ImageCandidate> _latestImageCandidates(ItemInfo item, bool hasBackdrop) {
+  final candidates = <_ImageCandidate>[];
+  final seen = <String>{};
+
+  void addCandidate({
+    required String? id,
+    required String type,
+    String? tag,
+    int? index,
+  }) {
+    if (id == null || id.isEmpty) return;
+    final key = '$id|$type|${tag ?? ''}|${index ?? -1}';
+    if (!seen.add(key)) return;
+    candidates.add(_ImageCandidate(
+      id: id,
+      type: type,
+      tag: tag,
+      index: index,
+    ));
+  }
+
+  final tags = item.imageTags ?? const <String, String>{};
+  final backdropTags = item.backdropImageTags ?? const <String>[];
+
+  if (hasBackdrop) {
+    if (backdropTags.isNotEmpty) {
+      addCandidate(
+        id: item.id,
+        type: 'Backdrop',
+        tag: backdropTags.first,
+        index: 0,
+      );
+    }
+    if (item.parentBackdropItemId != null &&
+        item.parentBackdropImageTags != null &&
+        item.parentBackdropImageTags!.isNotEmpty) {
+      addCandidate(
+        id: item.parentBackdropItemId,
+        type: 'Backdrop',
+        tag: item.parentBackdropImageTags!.first,
+        index: 0,
+      );
+    }
+  }
+
+  addCandidate(
+    id: item.id,
+    type: 'Primary',
+    tag: tags['Primary'],
+  );
+  addCandidate(id: item.id, type: 'Primary');
+
+  return candidates;
 }
