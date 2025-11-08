@@ -149,9 +149,9 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
         middle: buildNavTitle(widget.viewName, context),
         scrollController: _scrollController,
       ),
-      child: items.when(
-        data: (list) {
-          if (list.isEmpty) {
+        child: items.when(
+          data: (list) {
+            if (list.isEmpty) {
             return Center(
               child: Padding(
                 padding: EdgeInsets.only(
@@ -402,8 +402,8 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                   ),
                 ],
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
                 child: Stack(
                   fit: StackFit.expand,
                   children: [

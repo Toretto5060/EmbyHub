@@ -428,7 +428,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
                 mainAxisSize: MainAxisSize.min,
-                children: [
+        children: [
           if (icon != null) ...[
             Icon(
               icon,
@@ -488,9 +488,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         width: 150,
         margin: const EdgeInsets.only(left: 6, right: 6),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+                mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
+                children: [
             SizedBox(
               height: 100,
               child: ClipRRect(
@@ -531,9 +531,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                 textAlign: TextAlign.center,
               ),
             ),
-          ],
-        ),
-      ),
+                ],
+              ),
+            ),
     );
   }
 
@@ -674,7 +674,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: AspectRatio(
+                  child: AspectRatio(
                   aspectRatio: aspectRatio,
                   child:
                       _buildLatestPoster(context, ref, item, hasBackdrop: hasBackdrop),
@@ -831,35 +831,35 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                       child: _buildResumePoster(context, ref, item),
                     ),
                     if (totalTicks > 0 && normalizedProgress > 0)
-                      Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        child: Container(
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 6),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
                               begin: Alignment.bottomCenter,
                               end: Alignment.topCenter,
-                              colors: [
+                        colors: [
                                 Colors.black.withOpacity(0.8),
                                 Colors.black.withOpacity(0.0),
-                              ],
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        ],
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
-                            children: [
+                      children: [
                               Text(
                                 '剩余 ${formatRemaining(remainingDuration)}',
                                 style: TextStyle(
                                   color: Colors.white.withOpacity(0.85),
                                   fontSize: 11,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
+                            ),
+                          ),
+                        const SizedBox(height: 4),
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(999),
                                 child: TweenAnimationBuilder<double>(
@@ -880,13 +880,13 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                                               CupertinoColors.activeBlue),
                                     );
                                   },
-                                ),
-                              ),
-                            ],
                           ),
                         ),
-                      ),
-                  ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
                 ),
               ),
             ),
@@ -894,10 +894,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
             Center(
               child: Text(
                 titleText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 14,
+                fontSize: 14,
                   fontWeight: FontWeight.w400,
                   color: isDark ? Colors.white : Colors.black87,
                 ),
@@ -908,10 +908,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               Center(
                 child: Text(
                   subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 12,
+                  fontSize: 12,
                     color: isDark ? Colors.grey : Colors.grey.shade600,
                   ),
                   textAlign: TextAlign.center,
@@ -1094,7 +1094,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
       {required bool hasBackdrop}) {
     final itemId = item.id;
     if (itemId == null || itemId.isEmpty) {
-      return Container(
+    return Container(
         color: CupertinoColors.systemGrey5,
         child: const Center(
           child: Icon(CupertinoIcons.film, size: 48),
@@ -1104,8 +1104,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
     return FutureBuilder<EmbyApi>(
       future: EmbyApi.create(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
           return Container(color: CupertinoColors.systemGrey5);
         }
 
@@ -1117,15 +1117,15 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         );
 
         if (url.isEmpty) {
-          return Container(
-            color: CupertinoColors.systemGrey5,
+                            return Container(
+                              color: CupertinoColors.systemGrey5,
             child: const Icon(CupertinoIcons.photo, size: 32),
           );
         }
 
         return EmbyFadeInImage(
           imageUrl: url,
-          fit: BoxFit.cover,
+                            fit: BoxFit.cover,
         );
       },
     );

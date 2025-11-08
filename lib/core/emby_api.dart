@@ -334,7 +334,7 @@ class EmbyApi {
     final res =
         await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres,People',
     });
     return ItemInfo.fromJson(res.data as Map<String, dynamic>);
   }
@@ -484,6 +484,9 @@ class ItemInfo {
     this.parentThumbImageTag,
     this.parentBackdropItemId,
     this.parentBackdropImageTags,
+    this.genres,
+    this.mediaSources,
+    this.performers,
     this.premiereDate,
     this.endDate,
     this.productionYear,
@@ -511,6 +514,9 @@ class ItemInfo {
   final String? parentThumbImageTag;
   final String? parentBackdropItemId;
   final List<String>? parentBackdropImageTags;
+  final List<String>? genres;
+  final List<Map<String, dynamic>>? mediaSources;
+  final List<PerformerInfo>? performers;
   final String? premiereDate;
   final String? endDate;
   final int? productionYear;
@@ -565,6 +571,19 @@ class ItemInfo {
           ?.map((e) => e?.toString() ?? '')
           .where((element) => element.isNotEmpty)
           .toList(),
+      genres: (json['Genres'] as List?)
+          ?.map((e) => e?.toString() ?? '')
+          .where((element) => element.isNotEmpty)
+          .toList(),
+      mediaSources: (json['MediaSources'] as List?)
+          ?.whereType<Map<String, dynamic>>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList(),
+      performers: (json['People'] as List?)
+          ?.where((element) => element is Map)
+          .map((element) => PerformerInfo.fromJson(
+              Map<String, dynamic>.from(element as Map)))
+          .toList(),
       premiereDate: json['PremiereDate'] as String?,
       endDate: json['EndDate'] as String?,
       productionYear: (json['ProductionYear'] as num?)?.toInt(),
@@ -579,4 +598,30 @@ class MediaSourceUrl {
   MediaSourceUrl({required this.uri, required this.headers});
   final String uri;
   final Map<String, String> headers;
+}
+
+class PerformerInfo {
+  PerformerInfo({
+    required this.id,
+    required this.name,
+    this.role,
+    this.primaryImageTag,
+    this.raw,
+  });
+
+  final String id;
+  final String name;
+  final String? role;
+  final String? primaryImageTag;
+  final Map<String, dynamic>? raw;
+
+  factory PerformerInfo.fromJson(Map<String, dynamic> map) {
+    return PerformerInfo(
+      id: map['Id']?.toString() ?? '',
+      name: map['Name']?.toString() ?? '',
+      role: map['Role']?.toString(),
+      primaryImageTag: map['PrimaryImageTag']?.toString(),
+      raw: map,
+    );
+  }
 }
