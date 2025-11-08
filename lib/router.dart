@@ -1,7 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart' as sp;
 
 import 'features/connect/modern_connect_page.dart';
 import 'features/home/home_page.dart';
@@ -14,6 +13,7 @@ import 'features/library/series_detail_page.dart';
 import 'features/library/season_episodes_page.dart';
 import 'features/player/player_page.dart';
 import 'features/splash/splash_page.dart';
+import 'utils/app_route_observer.dart';
 
 // 用于全局访问 navigator key
 final GlobalKey<NavigatorState> _rootNavigatorKey =
@@ -36,6 +36,7 @@ GoRouter createRouter() {
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/splash',
+    observers: [appRouteObserver],
     routes: [
       // 启动页
       GoRoute(

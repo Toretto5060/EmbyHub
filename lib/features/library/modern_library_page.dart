@@ -12,6 +12,7 @@ import '../../providers/library_provider.dart';
 import '../../providers/account_history_provider.dart';
 import '../../widgets/home_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
+import '../../utils/app_route_observer.dart';
 
 class ModernLibraryPage extends ConsumerStatefulWidget {
   const ModernLibraryPage({super.key});
@@ -20,9 +21,11 @@ class ModernLibraryPage extends ConsumerStatefulWidget {
   ConsumerState<ModernLibraryPage> createState() => _ModernLibraryPageState();
 }
 
-class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
+class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
+    with RouteAware {
   final _scrollController = ScrollController();
   bool _isRefreshing = false;  // ✅ 独立的刷新状态
+  bool _isRouteSubscribed = false;
 
   // 统一管理间距
   static const double _sectionTitleToContentSpacing = 5.0; // 模块标题距离下方卡片的高度
@@ -123,7 +126,41 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (!_isRouteSubscribed && route != null) {
+      appRouteObserver.subscribe(this, route);
+      _isRouteSubscribed = true;
+      _scheduleHomeRefresh();
+    }
+  }
+
+  void _scheduleHomeRefresh() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.invalidate(viewsProvider);
+      ref.invalidate(resumeProvider);
+      ref.invalidate(latestByViewProvider);
+    });
+  }
+
+  @override
+  void didPush() {
+    _scheduleHomeRefresh();
+  }
+
+  @override
+  void didPopNext() {
+    _scheduleHomeRefresh();
+  }
+
+  @override
   void dispose() {
+    if (_isRouteSubscribed) {
+      appRouteObserver.unsubscribe(this);
+      _isRouteSubscribed = false;
+    }
     _scrollController.dispose();
     super.dispose();
   }
@@ -434,7 +471,6 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
     return GestureDetector(
       onTap: view.id != null && view.id!.isNotEmpty
           ? () {
-              // 根据媒体库类型跳转到不同页面
               if (view.collectionType == 'livetv') {
                 context.push(
                     '/livetv/${view.id}?name=${Uri.encodeComponent(view.name)}');
@@ -451,95 +487,64 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
         width: 150,
         margin: const EdgeInsets.only(left: 6, right: 6),
         child: Column(
-                mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-              child: Stack(
-                children: [
-                  // Background image from Emby - try Primary type for library views
-                  if (view.id != null && view.id!.isNotEmpty)
-                    FutureBuilder<EmbyApi>(
-                      future: EmbyApi.create(),
-                            builder: (context, snapshot) {
-                              if (!snapshot.hasData) {
-                                return Container(
-                            height: 100,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [
-                                  Colors.blue.shade300,
-                                  Colors.purple.shade400,
-                                ],
-                              ),
-                            ),
-                          );
-                        }
-                        final imageUrl = snapshot.data!.buildImageUrl(
-                          itemId: view.id!,
-                                  type: 'Primary',
-                          maxWidth: 400,
-                        );
-                        if (imageUrl.isEmpty) {
-                          return Container(
-                            height: 100,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [
-                                  Colors.blue.shade300,
-                                  Colors.purple.shade400,
-                                ],
-                              ),
-                            ),
-                          );
-                        }
-                        return SizedBox(
-                          height: 100,
-                          width: 150,
-                          child: EmbyFadeInImage(
-                            imageUrl: imageUrl,
-                                fit: BoxFit.cover,
-                                ),
-                              );
-                            },
-                          )
-                  else
-                    Container(
-                      height: 100,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        colors: [
-                            Colors.blue.shade300,
-                            Colors.purple.shade400,
-                          ],
-                        ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-            // 标题显示在图片下方，居中
-            const SizedBox(height: 4),
+          children: [
+            SizedBox(
+              height: 100,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: FutureBuilder<EmbyApi>(
+                  future: EmbyApi.create(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData || view.id == null) {
+                      return _buildLibraryPlaceholder();
+                    }
+
+                    final url = snapshot.data!
+                        .buildImageUrl(itemId: view.id!, type: 'Primary');
+                    if (url.isEmpty) {
+                      return _buildLibraryPlaceholder();
+                    }
+
+                    return EmbyFadeInImage(
+                      imageUrl: url,
+                      fit: BoxFit.cover,
+                      placeholder: _buildLibraryPlaceholder(),
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             DefaultTextStyle(
               style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.normal,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
                 color: isDark ? Colors.white : Colors.black87,
               ),
               child: Text(
                 view.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLibraryPlaceholder() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.blue.shade300,
+            Colors.purple.shade400,
           ],
         ),
       ),
@@ -636,7 +641,6 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
                   context.push(
                       '/series/${item.id}?name=${Uri.encodeComponent(item.name)}');
                 } else if (item.type == 'Movie') {
-                  // 电影类型跳转到详情页
                   context.push('/item/${item.id}');
                 } else {
                   context.push('/player/${item.id}');
@@ -647,96 +651,24 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
           crossAxisAlignment: CrossAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Stack(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: AspectRatio(
-                    aspectRatio: 2 / 3,
-                    child: _buildLatestPoster(context, ref, item.id),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isDark ? 0.18 : 0.12),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
-                ),
-                // 评分显示在右下角（优先豆瓣，否则IMDb等）
-                if (item.getRating() != null)
-                  Positioned(
-                    bottom: 4,
-                    right: 4,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 4, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // 根据评分来源显示不同图标
-                          if (item.getRatingSource() == 'douban')
-                            Container(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 2),
-                              child: const Text(
-                                '豆',
-                                style: TextStyle(
-                                  color: Colors.green,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            )
-                          else
-                            const Icon(
-                              CupertinoIcons.star_fill,
-                              color: Colors.amber,
-                              size: 12,
-                            ),
-                          const SizedBox(width: 2),
-            Text(
-                            item.getRating()!.toStringAsFixed(1),
-              style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
+                ],
               ),
-            ),
-          ],
-        ),
-      ),
-                  ),
-                // 剧集未看集数显示在右上角
-                if (item.type == 'Series' && item.userData != null)
-                  Builder(
-                    builder: (context) {
-                      final unplayedCount =
-                          (item.userData!['UnplayedItemCount'] as num?)
-                              ?.toInt();
-                      if (unplayedCount == null || unplayedCount == 0) {
-        return const SizedBox.shrink();
-                      }
-                      return Positioned(
-                        top: 4,
-                        right: 4,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: CupertinoColors.destructiveRed,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            '$unplayedCount',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-              ],
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: _buildLatestPoster(context, ref, item.id),
+                ),
+              ),
             ),
             const SizedBox(height: 6),
             Text(
@@ -788,20 +720,37 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
 
     final progress =
         (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
+    final normalizedProgress = (progress / 100).clamp(0.0, 1.0);
     final positionTicks =
         (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
     final totalTicks = item.runTimeTicks ?? 0;
-    final remainingSeconds =
-        totalTicks > 0 ? ((totalTicks - positionTicks) / 10000000).floor() : 0;
-    final remainingMinutes = (remainingSeconds / 60).floor();
-    final remainingSecondsDisplay = remainingSeconds % 60;
+    final remainingTicks = totalTicks > positionTicks
+        ? totalTicks - positionTicks
+        : 0;
+    final remainingDuration = totalTicks > 0
+        ? Duration(microseconds: remainingTicks ~/ 10)
+        : Duration.zero;
+
+    String formatRemaining(Duration duration) {
+      if (duration <= Duration.zero) return '0s';
+      if (duration.inHours >= 1) {
+        final minutes = duration.inMinutes.remainder(60);
+        return minutes > 0
+            ? '${duration.inHours}h ${minutes}m'
+            : '${duration.inHours}h';
+      }
+      if (duration.inMinutes >= 1) {
+        return '${duration.inMinutes}m';
+      }
+      return '${duration.inSeconds}s';
+    }
 
     // 构建标题文本
     String titleText;
     String? subtitleText;
 
     try {
-      titleText = item.seriesName ?? item.name ?? '未知';
+      titleText = item.seriesName ?? item.name;
       // 如果是剧集，添加季数信息（如果大于1季）
       if (item.seriesName != null &&
           item.parentIndexNumber != null &&
@@ -811,9 +760,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
 
       // 构建副标题文本（集数信息）
       if (item.seriesName != null && item.indexNumber != null) {
-        final episodeName = item.name ?? '';
+        final episodeName = item.name;
         final episodeNum = item.indexNumber!;
-        // 检查集名是否和集数重复（例如："第6集"）
+        // 检查集名是否和集数重复（例如："第6集")
         if (episodeName.contains('$episodeNum') ||
             episodeName.contains('${episodeNum}集')) {
           subtitleText = '第${episodeNum}集';
@@ -823,12 +772,14 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
       }
     } catch (e) {
       // 解析失败，显示原始格式
-      titleText = item.seriesName ?? item.name ?? '未知';
+      titleText = item.seriesName ?? item.name;
       if (item.seriesName != null) {
         subtitleText =
-            'S${item.parentIndexNumber ?? 0}E${item.indexNumber ?? 0} ${item.name ?? ''}';
+            'S${item.parentIndexNumber ?? 0}E${item.indexNumber ?? 0} ${item.name}';
       }
     }
+
+    final subtitle = subtitleText;
 
     return Container(
       width: 180,
@@ -849,99 +800,84 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Stack(
-          children: [
-            ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-              child: AspectRatio(
-                    aspectRatio: 16 / 9,
-                child: item.id != null
-                    ? FutureBuilder<EmbyApi>(
-                        future: ref.read(embyApiProvider.future),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
-                            return Container(
-                              color: CupertinoColors.systemGrey5,
-                              child: const Icon(CupertinoIcons.film),
-                            );
-                          }
-                              final imageUrl = snapshot.data!.buildImageUrl(
-                              itemId: item.id!,
-                              type: 'Primary',
-                                  maxWidth: 600,
-                              );
-                              if (imageUrl.isEmpty) {
-                                return Container(
-                              color: CupertinoColors.systemGrey5,
-                              child: const Icon(CupertinoIcons.film),
-                                );
-                              }
-                              return EmbyFadeInImage(
-                                imageUrl: imageUrl,
-                                fit: BoxFit.cover,
-                          );
-                        },
-                      )
-                    : Container(
-                        color: CupertinoColors.systemGrey5,
-                        child: const Icon(CupertinoIcons.film),
-                      ),
-              ),
-            ),
-                // 剩余时间文字显示在左下角
-                Positioned(
-                  bottom: 8,
-                  left: 8,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.6),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: DefaultTextStyle(
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                          ),
-                      child: Text(
-                        '剩余 ${remainingMinutes}分${remainingSecondsDisplay}秒',
-                      ),
-                    ),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isDark ? 0.18 : 0.12),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
-                ),
-                // 进度条显示在图片底部（缩小宽度，避开圆角，居中）
-                if (progress > 0)
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(2),
-                        child: SizedBox(
-                          width: 160, // 缩小宽度，避开圆角
-                          child: TweenAnimationBuilder<double>(
-                            key: ValueKey(
-                                'progress_${item.id}'), // 使用唯一key避免重复动画
-                            duration: const Duration(seconds: 1),
-                            curve: Curves.easeOutCubic,
-                            tween: Tween<double>(begin: 0, end: progress / 100),
-                            builder: (context, value, child) {
-                              return LinearProgressIndicator(
-                                value: value,
-                                minHeight: 3,
-                                backgroundColor: Colors.black.withOpacity(0.3),
-                                valueColor: const AlwaysStoppedAnimation(
-                                    CupertinoColors.activeBlue),
-                              );
-                            },
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Stack(
+                  children: [
+                    AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: _buildLatestPoster(context, ref, item.id),
+                    ),
+                    if (totalTicks > 0 && normalizedProgress > 0)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.8),
+                                Colors.black.withOpacity(0.0),
+                              ],
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(
+                                    begin: 0,
+                                    end: normalizedProgress,
+                                  ),
+                                  duration: const Duration(milliseconds: 500),
+                                  curve: Curves.easeOut,
+                                  builder: (context, value, child) {
+                                    return LinearProgressIndicator(
+                                      value: value,
+                                      minHeight: 3,
+                                      backgroundColor:
+                                          Colors.white.withOpacity(0.25),
+                                      valueColor:
+                                          const AlwaysStoppedAnimation(
+                                              CupertinoColors.activeBlue),
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '剩余 ${formatRemaining(remainingDuration)}',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.85),
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                    ),
-                  ),
+                      ),
+                  ],
                 ),
-              ],
+              ),
             ),
             const SizedBox(height: 8),
             DefaultTextStyle(
@@ -953,21 +889,21 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage> {
               child: Text(
                 titleText,
                 maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (subtitleText != null)
+            if (subtitle != null)
               DefaultTextStyle(
                 style: TextStyle(
                   fontSize: 12,
                   color: isDark ? Colors.grey : Colors.grey.shade600,
                 ),
                 child: Text(
-                  subtitleText,
+                  subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-            ),
+              ),
           ],
         ),
       ),

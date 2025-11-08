@@ -110,10 +110,6 @@ class SettingsPage extends ConsumerWidget {
                         ),
                       );
                       if (confirm == true && context.mounted) {
-                        // ✅ 清空所有缓存的数据
-                        ref.read(cachedViewsProvider.notifier).state = {};
-                        ref.read(cachedResumeProvider.notifier).state = {};
-                        
                         // ✅ 使所有 provider 失效
                         ref.invalidate(viewsProvider);
                         ref.invalidate(resumeProvider);
