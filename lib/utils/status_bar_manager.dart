@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -48,12 +47,6 @@ class StatusBarManager {
 
   static void _notify() {
     final nextStyle = _stack.isEmpty ? null : _stack.last.style;
-    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle ||
-        SchedulerBinding.instance.schedulerPhase == SchedulerPhase.postFrameCallbacks) {
-      _notifier.value = nextStyle;
-      return;
-    }
-
     _pendingStyle = nextStyle;
     if (_updateScheduled) {
       return;
