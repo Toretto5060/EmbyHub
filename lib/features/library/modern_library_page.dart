@@ -589,8 +589,12 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
   Widget _buildLatestList(
       BuildContext context, WidgetRef ref, List<ItemInfo> items) {
+    final listHeight =
+        items.isNotEmpty && items.every(_latestHasHorizontalArtwork)
+            ? 190.0
+            : 130.0;
     return SizedBox(
-      height: 190,
+      height: listHeight,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -607,10 +611,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
 
-    final hasBackdrop = (item.backdropImageTags?.isNotEmpty ?? false) ||
-        (item.parentBackdropImageTags?.isNotEmpty ?? false);
-    final aspectRatio = hasBackdrop ?  2 / 3 : 16 / 9;
-    final cardWidth = hasBackdrop ? 100.0 : 160.0;
+    final hasBackdrop = _latestHasHorizontalArtwork(item);
+    final aspectRatio = hasBackdrop ? 2 / 3 : 16 / 9;
+    final cardWidth = hasBackdrop ? 100.0  : 160.0;
 
 
     // 构建年份显示文本
@@ -673,11 +676,12 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                 borderRadius: BorderRadius.circular(8),
                 child: AspectRatio(
                   aspectRatio: aspectRatio,
-                  child: _buildLatestPoster(context, ref, item),
+                  child:
+                      _buildLatestPoster(context, ref, item, hasBackdrop: hasBackdrop),
                 ),
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(
               item.name,
               maxLines: 1,
@@ -689,16 +693,16 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                 color: isDark ? Colors.white : Colors.black87,
               ),
             ),
-            if (yearText != null) ...[
-              const SizedBox(height: 2),
-              Text(
-                yearText,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: isDark ? Colors.grey : Colors.grey.shade600,
-                ),
+            const SizedBox(height: 2),
+            Text(
+              yearText ?? '',
+              style: TextStyle(
+                fontSize: 10,
+                color: isDark ? Colors.grey : Colors.grey.shade600,
               ),
-            ],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
       ),
@@ -887,28 +891,30 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               ),
             ),
             const SizedBox(height: 8),
-            DefaultTextStyle(
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
+            Center(
               child: Text(
                 titleText,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
             if (subtitle != null)
-              DefaultTextStyle(
-                style: TextStyle(
-                  fontSize: 12,
-                  color: isDark ? Colors.grey : Colors.grey.shade600,
-                ),
+              Center(
                 child: Text(
                   subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.grey : Colors.grey.shade600,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ),
           ],
@@ -1084,7 +1090,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   }
 
   Widget _buildLatestPoster(
-      BuildContext context, WidgetRef ref, ItemInfo item) {
+      BuildContext context, WidgetRef ref, ItemInfo item,
+      {required bool hasBackdrop}) {
     final itemId = item.id;
     if (itemId == null || itemId.isEmpty) {
       return Container(
@@ -1106,7 +1113,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         final url = api.buildImageUrl(
           itemId: item.id!,
           type: 'Primary',
-          maxWidth: 300,
+          maxWidth: hasBackdrop ? 720 : 300,
         );
 
         if (url.isEmpty) {
@@ -1647,59 +1654,4 @@ class _ImageCandidate {
 bool _latestHasHorizontalArtwork(ItemInfo item) {
   return (item.backdropImageTags?.isNotEmpty ?? false) ||
       (item.parentBackdropImageTags?.isNotEmpty ?? false);
-}
-
-List<_ImageCandidate> _latestImageCandidates(ItemInfo item, bool hasBackdrop) {
-  final candidates = <_ImageCandidate>[];
-  final seen = <String>{};
-
-  void addCandidate({
-    required String? id,
-    required String type,
-    String? tag,
-    int? index,
-  }) {
-    if (id == null || id.isEmpty) return;
-    final key = '$id|$type|${tag ?? ''}|${index ?? -1}';
-    if (!seen.add(key)) return;
-    candidates.add(_ImageCandidate(
-      id: id,
-      type: type,
-      tag: tag,
-      index: index,
-    ));
-  }
-
-  final tags = item.imageTags ?? const <String, String>{};
-  final backdropTags = item.backdropImageTags ?? const <String>[];
-
-  if (hasBackdrop) {
-    if (backdropTags.isNotEmpty) {
-      addCandidate(
-        id: item.id,
-        type: 'Backdrop',
-        tag: backdropTags.first,
-        index: 0,
-      );
-    }
-    if (item.parentBackdropItemId != null &&
-        item.parentBackdropImageTags != null &&
-        item.parentBackdropImageTags!.isNotEmpty) {
-      addCandidate(
-        id: item.parentBackdropItemId,
-        type: 'Backdrop',
-        tag: item.parentBackdropImageTags!.first,
-        index: 0,
-      );
-    }
-  }
-
-  addCandidate(
-    id: item.id,
-    type: 'Primary',
-    tag: tags['Primary'],
-  );
-  addCandidate(id: item.id, type: 'Primary');
-
-  return candidates;
 }
