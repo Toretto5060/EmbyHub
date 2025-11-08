@@ -196,7 +196,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
             bottom: 0,
             left: 0,
             right: 0,
-            height: 120,
+            height: 180,
             child: Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -204,10 +204,10 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                   end: Alignment.bottomCenter,
                   colors: [
                     Colors.transparent,
-                    bgColor.withOpacity(0.5),
+                    bgColor.withOpacity(0.65),
                     bgColor,
                   ],
-                  stops: const [0.0, 0.5, 1.0],
+                  stops: const [0.0, 0.6, 1.0],
                 ),
               ),
             ),

@@ -183,13 +183,13 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
                 final row = rows[rowIndex];
                 return Padding(
                   padding: EdgeInsets.only(
-                    bottom: rowIndex == rows.length - 1 ? 0 : 12,
+                    bottom: rowIndex == rows.length - 1 ? 0 : 16,
                   ),
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final hasHorizontal = row.any((entry) => entry.hasHorizontalArtwork);
                       final columns = hasHorizontal ? 3 : 2;
-                      final spacing = columns > 1 ? 8.0 : 0.0;
+                      final spacing = columns > 1 ? 16.0 : 0.0;
                       final availableWidth = constraints.maxWidth;
                       final totalSpacing = spacing * (columns - 1);
                       final cardWidth = (availableWidth - totalSpacing) / columns;
@@ -370,7 +370,7 @@ class _ItemTileState extends ConsumerState<_ItemTile>
     }
 
     final ratingChip = buildRatingChip();
-    final aspectRatio = widget.hasHorizontalArtwork ? 9 / 16 : 16 / 9;
+    final aspectRatio = widget.hasHorizontalArtwork ? 9 / 14 : 16 / 9;
 
     return CupertinoButton(
       padding: EdgeInsets.zero,
