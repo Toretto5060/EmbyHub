@@ -43,7 +43,7 @@ class _BottomNavWrapperState extends State<BottomNavWrapper> {
   int _index = 0;
 
   int get currentIndex => _index;
-  
+
   // ✅ 切换到指定的 tab
   void switchToTab(int index) {
     if (_index != index) {
@@ -61,11 +61,11 @@ class _BottomNavWrapperState extends State<BottomNavWrapper> {
     final bottomNavHeight =
         navBarHeight + MediaQuery.of(context).padding.bottom;
     final location = GoRouterState.of(context).uri.path;
-    final isHomePage = location == '/';  // 判断是否在首页
+    final isHomePage = location == '/'; // 判断是否在首页
 
     return StatusBarStyleScope.adaptive(
       child: PopScope(
-        canPop: false,  // 拦截返回事件
+        canPop: false, // 拦截返回事件
         onPopInvokedWithResult: (bool didPop, dynamic result) async {
           if (!didPop) {
             // 如果在首页，将应用移到后台
@@ -84,82 +84,82 @@ class _BottomNavWrapperState extends State<BottomNavWrapper> {
           }
         },
         child: Scaffold(
-        body: Stack(
-        children: [
-          // 内容区域 - 延伸到屏幕最底部，底部留出导航栏空间
-          Positioned.fill(
-            bottom: bottomNavHeight,
-            child: BottomNavProvider(
-              currentIndex: _index,
-              child: widget.child,
-            ),
-          ),
-          // 底部导航栏 - 悬浮在内容上方
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 30, sigmaY: 40),
-                child: Container(
-                  height: bottomNavHeight,
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1C1C1E).withOpacity(0)
-                        : const Color(0xFFF2F2F7).withOpacity(0),
-                    // 上阴影效果 - 向上投影，增强层次感
-                    // boxShadow: [
-                    //   BoxShadow(
-                    //     color: isDark
-                    //         ? Colors.black.withOpacity(0.1)
-                    //         : Colors.black.withOpacity(0.1),
-                    //     offset: const Offset(0, -2),  // 向上投影 2px
-                    //     blurRadius: 8,                 // 模糊半径 8px
-                    //     spreadRadius: 0,
-                    //   ),
-                    // ],
-                  ),
-                  child: SafeArea(
-                    top: false,
-                    child: SizedBox(
-                      height: navBarHeight,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _buildTabItem(
-                            context: context,
-                            icon: CupertinoIcons.square_grid_2x2,
-                            label: '媒体库',
-                            index: 0,
-                            isActive: _index == 0,
+          body: Stack(
+            children: [
+              // 内容区域 - 延伸到屏幕最底部，底部留出导航栏空间
+              Positioned.fill(
+                bottom: bottomNavHeight,
+                child: BottomNavProvider(
+                  currentIndex: _index,
+                  child: widget.child,
+                ),
+              ),
+              // 底部导航栏 - 悬浮在内容上方
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                    child: Container(
+                      height: bottomNavHeight,
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? const Color(0xFF1C1C1E).withOpacity(0)
+                            : const Color(0xFFF2F2F7).withOpacity(0),
+                        // 上阴影效果 - 向上投影，增强层次感
+                        // boxShadow: [
+                        //   BoxShadow(
+                        //     color: isDark
+                        //         ? Colors.black.withOpacity(0.1)
+                        //         : Colors.black.withOpacity(0.1),
+                        //     offset: const Offset(0, -2),  // 向上投影 2px
+                        //     blurRadius: 8,                 // 模糊半径 8px
+                        //     spreadRadius: 0,
+                        //   ),
+                        // ],
+                      ),
+                      child: SafeArea(
+                        top: false,
+                        child: SizedBox(
+                          height: navBarHeight,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              _buildTabItem(
+                                context: context,
+                                icon: CupertinoIcons.square_grid_2x2,
+                                label: '媒体库',
+                                index: 0,
+                                isActive: _index == 0,
+                              ),
+                              _buildTabItem(
+                                context: context,
+                                icon: CupertinoIcons.heart,
+                                label: '收藏/下载',
+                                index: 1,
+                                isActive: _index == 1,
+                              ),
+                              _buildTabItem(
+                                context: context,
+                                icon: CupertinoIcons.settings,
+                                label: '设置',
+                                index: 2,
+                                isActive: _index == 2,
+                              ),
+                            ],
                           ),
-                          _buildTabItem(
-                            context: context,
-                            icon: CupertinoIcons.heart,
-                            label: '收藏/下载',
-                            index: 1,
-                            isActive: _index == 1,
-                          ),
-                          _buildTabItem(
-                            context: context,
-                            icon: CupertinoIcons.settings,
-                            label: '设置',
-                            index: 2,
-                            isActive: _index == 2,
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
         ),
       ),
-    ),
     );
   }
 

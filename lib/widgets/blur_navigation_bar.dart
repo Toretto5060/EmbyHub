@@ -14,6 +14,10 @@ class BlurNavigationBar extends StatelessWidget
     this.middle,
     this.trailing,
     this.scrollController,
+    this.forceBlur,
+    this.expandedForegroundColor,
+    this.collapsedForegroundColor,
+    this.enableTransition = true,
     super.key,
   });
 
@@ -21,6 +25,10 @@ class BlurNavigationBar extends StatelessWidget
   final Widget? middle;
   final Widget? trailing;
   final ScrollController? scrollController;
+  final bool? forceBlur;
+  final Color? expandedForegroundColor;
+  final Color? collapsedForegroundColor;
+  final bool enableTransition;
 
   @override
   Size get preferredSize {
@@ -39,7 +47,6 @@ class BlurNavigationBar extends StatelessWidget
       valueListenable: StatusBarManager.listenable,
       builder: (context, style, _) {
         final brightness = MediaQuery.of(context).platformBrightness;
-        final resolvedColor = _resolveColor(style, brightness);
 
         return AnimatedBuilder(
           animation: scrollController ?? ScrollController(),
@@ -47,40 +54,65 @@ class BlurNavigationBar extends StatelessWidget
             final scrollOffset = scrollController?.hasClients == true
                 ? scrollController!.offset
                 : 0.0;
-            final showBlur = scrollOffset > 10;
+            final showBlur = forceBlur ?? (scrollOffset > 10);
+            final baseColor = brightness == Brightness.dark
+                ? const Color(0xFF1C1C1E)
+                : const Color(0xFFF2F2F7);
+            final Color expandedColor =
+                expandedForegroundColor ?? _resolveColor(style, brightness);
+            final Color collapsedColor =
+                collapsedForegroundColor ?? expandedColor;
 
-            return ClipRect(
-              child: BackdropFilter(
-                filter: showBlur
-                    ? ImageFilter.blur(sigmaX: 30, sigmaY: 30)
-                    : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
-                child: Container(
-                  padding: EdgeInsets.only(top: statusBarHeight),
-                  decoration: BoxDecoration(
-                    color: brightness == Brightness.dark
-                        ? const Color(0xFF1C1C1E).withOpacity(0)
-                        : const Color(0xFFF2F2F7).withOpacity(0),
-                  ),
-                  child: SizedBox(
-                    height: 44,
-                    child: NavigationToolbar(
-                      leading: leading != null
-                          ? Padding(
-                              padding: const EdgeInsets.only(left: 4),
-                              child: _wrapWithColor(leading!, resolvedColor),
-                            )
-                          : null,
-                      middle: middle != null
-                          ? _wrapWithColor(middle!, resolvedColor)
-                          : null,
-                      trailing: trailing != null
-                          ? _wrapWithColor(trailing!, resolvedColor)
-                          : null,
-                      middleSpacing: 16,
+            Widget buildContent(double value) {
+              final sigma = 30 * value;
+              final backgroundOpacity = 0 * value;
+              final Color currentColor =
+                  Color.lerp(expandedColor, collapsedColor, value)!;
+
+              return ClipRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+                  child: Container(
+                    padding: EdgeInsets.only(top: statusBarHeight),
+                    decoration: BoxDecoration(
+                      color: baseColor.withOpacity(backgroundOpacity),
+                    ),
+                    child: SizedBox(
+                      height: 44,
+                      child: NavigationToolbar(
+                        leading: leading != null
+                            ? Padding(
+                                padding: const EdgeInsets.only(left: 4),
+                                child: _wrapWithColor(leading!, currentColor),
+                              )
+                            : null,
+                        middle: middle != null
+                            ? _wrapWithColor(middle!, currentColor)
+                            : null,
+                        trailing: trailing != null
+                            ? _wrapWithColor(trailing!, currentColor)
+                            : null,
+                        middleSpacing: 16,
+                      ),
                     ),
                   ),
                 ),
+              );
+            }
+
+            if (!enableTransition) {
+              final double value = showBlur ? 1.0 : 0.0;
+              return buildContent(value);
+            }
+
+            return TweenAnimationBuilder<double>(
+              tween: Tween<double>(
+                begin: 0.0,
+                end: showBlur ? 1.0 : 0.0,
               ),
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeInOut,
+              builder: (context, value, _) => buildContent(value),
             );
           },
         );
