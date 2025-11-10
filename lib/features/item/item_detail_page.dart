@@ -137,7 +137,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                     // 后续内容（剧情简介等）
                     SliverToBoxAdapter(
                       child: Transform.translate(
-                        offset: const Offset(0, -20),
+                        offset: const Offset(0, -180),
                         child: Container(
                           padding: const EdgeInsets.fromLTRB(20, 60, 20, 20),
                           decoration: BoxDecoration(
