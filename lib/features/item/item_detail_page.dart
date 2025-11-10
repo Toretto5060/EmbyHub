@@ -70,11 +70,35 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   static const Color _resumeButtonColor = Color(0xFFFFB74D);
   static const Color _playButtonColor = Color(0xFF3F8CFF);
   bool _showCollapsedNav = false;
+  static const double _backdropHeight = 300;
+  static const double _headerTopOffset = 250;
+  static const double _headerBaseHeight = 180;
+  static const double _heroBaseHeight =
+      _backdropHeight + (_headerTopOffset + _headerBaseHeight - _backdropHeight);
+  double _headerHeight = _headerBaseHeight;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_handleScroll);
+  }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _handleScroll() {
+    final shouldShow = _scrollController.hasClients
+        ? _scrollController.offset > 200
+        : false;
+    if (shouldShow != _showCollapsedNav) {
+      setState(() {
+        _showCollapsedNav = shouldShow;
+      });
+    }
   }
 
   @override
@@ -99,180 +123,120 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                 CustomScrollView(
                   controller: _scrollController,
                   slivers: [
-                    SliverAppBar(
-                      pinned: false,
-                      expandedHeight: 350,
-                      backgroundColor: Colors.transparent,
-                      automaticallyImplyLeading: false,
-                      leadingWidth: 0,
-                      leading: const SizedBox.shrink(),
-                      actions: const [],
-                      flexibleSpace: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final collapsedHeight =
-                              MediaQuery.of(context).padding.top +
-                                  kToolbarHeight;
-                          final isCollapsed =
-                              constraints.maxHeight <= collapsedHeight + 8;
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (!mounted) return;
-                            if (_showCollapsedNav != isCollapsed) {
-                              setState(() {
-                                _showCollapsedNav = isCollapsed;
-                              });
-                            }
-                          });
-                          return Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              _buildBackdropBackground(context, data),
-                            ],
-                          );
-                        },
-                      ),
-                      systemOverlayStyle: isDark
-                          ? SystemUiOverlayStyle.light
-                          : SystemUiOverlayStyle.dark,
-                    ),
-                    // 后续内容（剧情简介等）
                     SliverToBoxAdapter(
-                      child: Transform.translate(
-                        offset: const Offset(0, -180),
-                        child: Container(
-                          padding: const EdgeInsets.fromLTRB(20, 60, 20, 20),
-                          decoration: BoxDecoration(
-                            color: CupertinoColors.systemBackground
-                                .resolveFrom(context),
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(24),
+                      child: SizedBox(
+                        height: _heroBaseHeight + (_headerHeight - _headerBaseHeight),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              height: _backdropHeight,
+                              child: _buildBackdropBackground(context, data),
                             ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                data.name,
-                                style: TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                  shadows: isDark
-                                      ? const [
-                                          Shadow(
-                                            color: Colors.black54,
-                                            blurRadius: 8,
-                                            offset: Offset(0, 2),
-                                          ),
-                                        ]
-                                      : null,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              _buildMetaInfo(data, isDark),
-                              const SizedBox(height: 8),
-                              _buildMediaInfo(data, isDark),
-                              const SizedBox(height: 16),
-                              _buildPlaySection(context, data, isDark),
-                              const SizedBox(height: 24),
-                              if ((data.overview ?? '').isNotEmpty) ...[
-                                GestureDetector(
-                                  onTap: () => _showOverviewDialog(data),
-                                  child: Text(
-                                    data.overview!,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 14, height: 1.4),
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                              ],
-                              if (performers.isNotEmpty) ...[
-                                const SizedBox(height: 12),
-                                const Text(
-                                  '演员',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                SizedBox(
-                                  height: 190,
-                                  child: ListView.separated(
-                                    padding: const EdgeInsets.only(right: 12),
-                                    scrollDirection: Axis.horizontal,
-                                    itemCount: performers.length,
-                                    separatorBuilder: (_, __) =>
-                                        const SizedBox(width: 12),
-                                    itemBuilder: (context, index) {
-                                      return _PerformerCard(
-                                        performer: performers[index],
-                                        isDark: isDark,
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
-                              similarItems.when(
-                                data: (items) {
-                                  if (items.isEmpty) {
-                                    debugPrint('[Similar] no items to display');
-                                    return const SizedBox.shrink();
-                                  }
-                                  return Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const SizedBox(height: 24),
-                                      const Text(
-                                        '其他类似影片',
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      SizedBox(
-                                        height: 190,
-                                        child: ListView.separated(
-                                          padding:
-                                              const EdgeInsets.only(right: 12),
-                                          scrollDirection: Axis.horizontal,
-                                          itemCount: items.length,
-                                          separatorBuilder: (_, __) =>
-                                              const SizedBox(width: 12),
-                                          itemBuilder: (context, index) {
-                                            return _SimilarCard(
-                                              item: items[index],
-                                              isDark: isDark,
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  );
-                                },
-                                loading: () => const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 24),
-                                  child: Center(
-                                    child: CupertinoActivityIndicator(),
-                                  ),
-                                ),
-                                error: (_, __) => const SizedBox.shrink(),
-                              ),
-                              if (externalLinks.isNotEmpty) ...[
-                                const SizedBox(height: 24),
-                                _buildExternalLinks(externalLinks, isDark),
-                              ],
-                              const SizedBox(height: 24),
-                              _buildDetailedMediaModules(data, isDark),
-                            ],
-                          ),
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              top: _headerTopOffset,
+                              child: _buildHeaderCard(context, data, isDark),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 4)),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (performers.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              const Text(
+                                '演员',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                height: 190,
+                                child: ListView.separated(
+                                  padding: const EdgeInsets.only(right: 12),
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: performers.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(width: 12),
+                                  itemBuilder: (context, index) {
+                                    return _PerformerCard(
+                                      performer: performers[index],
+                                      isDark: isDark,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                            similarItems.when(
+                              data: (items) {
+                                if (items.isEmpty) {
+                                  debugPrint('[Similar] no items to display');
+                                  return const SizedBox.shrink();
+                                }
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    const SizedBox(height: 24),
+                                    const Text(
+                                      '其他类似影片',
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    SizedBox(
+                                      height: 190,
+                                      child: ListView.separated(
+                                        padding:
+                                            const EdgeInsets.only(right: 12),
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: items.length,
+                                        separatorBuilder: (_, __) =>
+                                            const SizedBox(width: 12),
+                                        itemBuilder: (context, index) {
+                                          return _SimilarCard(
+                                            item: items[index],
+                                            isDark: isDark,
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                              loading: () => const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 24),
+                                child: Center(
+                                  child: CupertinoActivityIndicator(),
+                                ),
+                              ),
+                              error: (_, __) => const SizedBox.shrink(),
+                            ),
+                            if (externalLinks.isNotEmpty) ...[
+                              const SizedBox(height: 24),
+                              _buildExternalLinks(externalLinks, isDark),
+                            ],
+                            const SizedBox(height: 24),
+                            _buildDetailedMediaModules(data, isDark),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SliverToBoxAdapter(child: SizedBox(height: 20)),
                   ],
                 ),
                 Positioned(
@@ -371,81 +335,76 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   }
 
   Widget _buildBackdropBackground(BuildContext context, ItemInfo item) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+     final brightness = MediaQuery.of(context).platformBrightness;
+     final isDark = brightness == Brightness.dark;
+     final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+ 
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (item.id != null)
+          FutureBuilder<EmbyApi>(
+            future: EmbyApi.create(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return Container(color: CupertinoColors.systemGrey5);
+              }
+              final api = snapshot.data!;
+              String? backdropUrl;
 
-    return SizedBox(
-      height: 350,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 背景图片（从顶部开始，包含状态栏区域）
-          if (item.id != null)
-            FutureBuilder<EmbyApi>(
-              future: EmbyApi.create(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return Container(color: CupertinoColors.systemGrey5);
-                }
-                final api = snapshot.data!;
-                String? backdropUrl;
+              if ((item.backdropImageTags?.isNotEmpty ?? false) ||
+                  (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+                backdropUrl = api.buildImageUrl(
+                  itemId: item.id!,
+                  type: 'Backdrop',
+                  maxWidth: 1200,
+                );
+              }
 
-                if ((item.backdropImageTags?.isNotEmpty ?? false) ||
-                    (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+              if (backdropUrl == null || backdropUrl.isEmpty) {
+                final primaryTag = item.imageTags?['Primary'] ?? '';
+                if (primaryTag.isNotEmpty) {
                   backdropUrl = api.buildImageUrl(
                     itemId: item.id!,
-                    type: 'Backdrop',
+                    type: 'Primary',
                     maxWidth: 800,
                   );
                 }
+              }
 
-                if (backdropUrl == null || backdropUrl.isEmpty) {
-                  final primaryTag = item.imageTags?['Primary'] ?? '';
-                  if (primaryTag.isNotEmpty) {
-                    backdropUrl = api.buildImageUrl(
-                      itemId: item.id!,
-                      type: 'Primary',
-                      maxWidth: 600,
-                    );
-                  }
-                }
+              if (backdropUrl == null || backdropUrl.isEmpty) {
+                return Container(color: CupertinoColors.systemGrey5);
+              }
 
-                if (backdropUrl == null || backdropUrl.isEmpty) {
-                  return Container(color: CupertinoColors.systemGrey5);
-                }
-
-                return EmbyFadeInImage(
-                  imageUrl: backdropUrl,
-                  fit: BoxFit.cover,
-                  onImageReady: (image) =>
-                      _handleBackdropImage(image, item.id ?? backdropUrl!),
-                );
-              },
-            ),
-          // 底部虚化渐变（轻微虚化，自然过渡）
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: 180,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    bgColor.withOpacity(0.65),
-                    bgColor,
-                  ],
-                  stops: const [0.0, 0.6, 1.0],
-                ),
+              return EmbyFadeInImage(
+                imageUrl: backdropUrl,
+                fit: BoxFit.cover,
+                onImageReady: (image) =>
+                    _handleBackdropImage(image, item.id ?? backdropUrl!),
+              );
+            },
+          ),
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 160,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  bgColor.withOpacity(0.65),
+                  bgColor,
+                ],
+                stops: const [0.0, 0.6, 1.0],
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -507,6 +466,68 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
         ),
       ),
     ];
+  }
+
+  Widget _buildHeaderCard(BuildContext context, ItemInfo item, bool isDark) {
+     final Color textColor = isDark ? Colors.white : Colors.black87;
+    return _MeasureSize(
+      onChange: (size) {
+        if (size == null) return;
+        final height = size.height;
+        if (height <= 0) return;
+        if ((_headerHeight - height).abs() > 0.5) {
+          setState(() {
+            _headerHeight = height;
+          });
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              item.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 30,
+                fontWeight: FontWeight.w700,
+                color: textColor,
+                height: 1.2,
+                shadows: isDark
+                    ? const [
+                        Shadow(
+                          color: Colors.black54,
+                          blurRadius: 8,
+                          offset: Offset(0, 2),
+                        ),
+                      ]
+                    : null,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _buildMetaInfo(item, isDark),
+            const SizedBox(height: 10),
+            _buildMediaInfo(item, isDark),
+            const SizedBox(height: 18),
+            _buildPlaySection(context, item, isDark),
+            if ((item.overview ?? '').isNotEmpty) ...[
+              const SizedBox(height: 22),
+              GestureDetector(
+                onTap: () => _showOverviewDialog(item),
+                child: Text(
+                  item.overview!,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14, height: 1.4),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildMetaInfo(ItemInfo item, bool isDark) {
@@ -707,7 +728,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+              children: [
         Row(
           children: [
             Expanded(
@@ -2083,6 +2104,42 @@ class _MediaModuleCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _MeasureSize extends SingleChildRenderObjectWidget {
+  const _MeasureSize({required this.onChange, required Widget child})
+      : super(child: child);
+
+  final ValueChanged<Size?> onChange;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return _MeasureSizeRenderObject(onChange);
+  }
+
+  @override
+  void updateRenderObject(
+      BuildContext context, covariant _MeasureSizeRenderObject renderObject) {
+    renderObject.onChange = onChange;
+  }
+}
+
+class _MeasureSizeRenderObject extends RenderProxyBox {
+  _MeasureSizeRenderObject(this.onChange);
+
+  ValueChanged<Size?> onChange;
+  Size? _oldSize;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final size = child?.size;
+    if (_oldSize == size) return;
+    _oldSize = size;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      onChange(size);
+    });
   }
 }
 
