@@ -70,6 +70,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   static const Color _resumeButtonColor = Color(0xFFFFB74D);
   static const Color _playButtonColor = Color(0xFF3F8CFF);
   bool _showCollapsedNav = false;
+  bool _forceBlur = false;
   static const double _backdropHeight = 300;
   static const double _headerTopOffset = 250;
   static const double _headerBaseHeight = 180;
@@ -91,12 +92,15 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   }
 
   void _handleScroll() {
-    final shouldShow = _scrollController.hasClients
-        ? _scrollController.offset > 200
-        : false;
-    if (shouldShow != _showCollapsedNav) {
+    final offset =
+        _scrollController.hasClients ? _scrollController.offset : 0.0;
+    final shouldShow = offset > 200;
+    final shouldBlur = offset > 0.5;
+
+    if (shouldShow != _showCollapsedNav || shouldBlur != _forceBlur) {
       setState(() {
         _showCollapsedNav = shouldShow;
+        _forceBlur = shouldBlur;
       });
     }
   }
@@ -330,30 +334,48 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     final actions =
         data != null ? _buildTopActions(isPlayed) : const <Widget>[];
 
+    final Widget leadingContent = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        buildBlurBackButton(context),
+        if (data != null)
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            switchInCurve: Curves.easeIn,
+            switchOutCurve: Curves.easeOut,
+            child: _showCollapsedNav
+                ? Padding(
+                    key: const ValueKey('title-visible'),
+                    padding: const EdgeInsets.only(left: 8),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 220),
+                      child: Text(
+                        data.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(key: ValueKey('title-hidden')),
+          ),
+      ],
+    );
+
     return BlurNavigationBar(
+      forceBlur: _forceBlur,
       scrollController: _scrollController,
-      leading: buildBlurBackButton(context),
-      middle: data != null
-          ? AnimatedOpacity(
-              opacity: _showCollapsedNav ? 1 : 0,
-              duration: const Duration(milliseconds: 200),
-              child: Text(
-                data.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            )
-          : null,
+      leading: leadingContent,
+      middle: null,
       trailing: actions.isEmpty
           ? null
           : Row(
               mainAxisSize: MainAxisSize.min,
               children: actions,
             ),
-      forceBlur: _showCollapsedNav,
       expandedForegroundColor: expandedColor,
       collapsedForegroundColor: collapsedColor,
       enableTransition: false,
