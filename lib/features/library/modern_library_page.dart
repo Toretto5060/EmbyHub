@@ -798,14 +798,92 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
       child: CupertinoButton(
         padding: EdgeInsets.zero,
         onPressed: item.id != null && item.id!.isNotEmpty
-            ? () {
+            ? () async {
+                final itemId = item.id!;
                 if (item.type == 'Movie') {
-                  // 电影类型跳转到详情页
-                  context.push('/item/${item.id}');
-                } else {
-                  // 其他类型（剧集等）跳转到播放器
-                  context.push('/player/${item.id}');
+                  context.push('/item/$itemId');
+                  return;
                 }
+
+                final seriesId = item.seriesId;
+                if (seriesId != null && seriesId.isNotEmpty) {
+                  final userId = ref.read(currentUserIdProvider);
+                  try {
+                    if (userId != null) {
+                      final api = await ref.read(embyApiProvider.future);
+                      final seasons = await api.getSeasons(
+                        userId: userId,
+                        seriesId: seriesId,
+                      );
+
+                      final filteredSeasons =
+                          seasons.where((season) => season.id != null).toList();
+
+                      if (filteredSeasons.length <= 1) {
+                        final seriesName = item.seriesName;
+                        final uri = Uri(
+                          path: '/series/$seriesId',
+                          queryParameters: (seriesName != null &&
+                                  seriesName.isNotEmpty)
+                              ? {'name': seriesName}
+                              : null,
+                        );
+                        context.push(uri.toString());
+                        return;
+                      }
+
+                      final targetSeasonId = item.seasonId ??
+                          (filteredSeasons.isNotEmpty
+                              ? filteredSeasons.first.id
+                              : null);
+
+                      if (targetSeasonId != null) {
+                        ItemInfo? matchedSeason;
+                        for (final season in filteredSeasons) {
+                          if (season.id == targetSeasonId) {
+                            matchedSeason = season;
+                            break;
+                          }
+                        }
+
+                        String? seasonName = matchedSeason?.name;
+                        seasonName ??= item.parentIndexNumber != null
+                            ? '第${item.parentIndexNumber}季'
+                            : null;
+
+                        final queryParams = <String, String>{};
+                        if ((item.seriesName ?? '').isNotEmpty) {
+                          queryParams['seriesName'] = item.seriesName!;
+                        }
+                        if (seasonName != null && seasonName.isNotEmpty) {
+                          queryParams['seasonName'] = seasonName;
+                        }
+
+                        final uri = Uri(
+                          path: '/series/$seriesId/season/$targetSeasonId',
+                          queryParameters:
+                              queryParams.isEmpty ? null : queryParams,
+                        );
+                        context.push(uri.toString());
+                        return;
+                      }
+                    }
+                  } catch (e) {
+                    print('Failed to resolve seasons for $seriesId: $e');
+                  }
+
+                  final seriesName = item.seriesName;
+                  final fallbackUri = Uri(
+                    path: '/series/$seriesId',
+                    queryParameters: (seriesName != null &&
+                            seriesName.isNotEmpty)
+                        ? {'name': seriesName}
+                        : null,
+                  );
+                  context.push(fallbackUri.toString());
+                  return;
+                }
+
               }
             : null,
         child: Column(

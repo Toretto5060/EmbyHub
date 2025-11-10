@@ -147,93 +147,119 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                       ),
                     ),
                     SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (performers.isNotEmpty) ...[
-                              const SizedBox(height: 12),
-                              const Text(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (performers.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 20),
+                              child: Text(
                                 '演员',
                                 style: TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                height: 190,
-                                child: ListView.separated(
-                                  padding: const EdgeInsets.only(right: 12),
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: performers.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(width: 12),
-                                  itemBuilder: (context, index) {
-                                    return _PerformerCard(
-                                      performer: performers[index],
-                                      isDark: isDark,
-                                    );
-                                  },
-                                ),
+                            ),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              height: 190,
+                              child: ListView.builder(
+                                padding: EdgeInsets.zero,
+                                scrollDirection: Axis.horizontal,
+                                itemCount: performers.length,
+                                itemBuilder: (context, index) {
+                                  final card = _PerformerCard(
+                                    performer: performers[index],
+                                    isDark: isDark,
+                                  );
+                                  final bool isFirst = index == 0;
+                                  final bool isLast =
+                                      index == performers.length - 1;
+                                  return Padding(
+                                    padding: EdgeInsets.only(
+                                      left: isFirst ? 20 : 12,
+                                      right: isLast ? 20 : 0,
+                                    ),
+                                    child: card,
+                                  );
+                                },
                               ),
-                            ],
-                            similarItems.when(
-                              data: (items) {
-                                if (items.isEmpty) {
-                                  debugPrint('[Similar] no items to display');
-                                  return const SizedBox.shrink();
-                                }
-                                return Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    const SizedBox(height: 24),
-                                    const Text(
+                            ),
+                          ],
+                          similarItems.when(
+                            data: (items) {
+                              if (items.isEmpty) {
+                                debugPrint('[Similar] no items to display');
+                                return const SizedBox.shrink();
+                              }
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(height: 24),
+                                  const Padding(
+                                    padding:
+                                        EdgeInsets.symmetric(horizontal: 20),
+                                    child: Text(
                                       '其他类似影片',
                                       style: TextStyle(
                                         fontSize: 20,
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),
-                                    const SizedBox(height: 12),
-                                    SizedBox(
-                                      height: 190,
-                                      child: ListView.separated(
-                                        padding:
-                                            const EdgeInsets.only(right: 12),
-                                        scrollDirection: Axis.horizontal,
-                                        itemCount: items.length,
-                                        separatorBuilder: (_, __) =>
-                                            const SizedBox(width: 12),
-                                        itemBuilder: (context, index) {
-                                          return _SimilarCard(
-                                            item: items[index],
-                                            isDark: isDark,
-                                          );
-                                        },
-                                      ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  SizedBox(
+                                    height: 190,
+                                    child: ListView.builder(
+                                      padding: EdgeInsets.zero,
+                                      scrollDirection: Axis.horizontal,
+                                      itemCount: items.length,
+                                      itemBuilder: (context, index) {
+                                        final card = _SimilarCard(
+                                          item: items[index],
+                                          isDark: isDark,
+                                        );
+                                        final bool isFirst = index == 0;
+                                        final bool isLast =
+                                            index == items.length - 1;
+                                        return Padding(
+                                          padding: EdgeInsets.only(
+                                            left: isFirst ? 20 : 12,
+                                            right: isLast ? 20 : 0,
+                                          ),
+                                          child: card,
+                                        );
+                                      },
                                     ),
-                                  ],
-                                );
-                              },
-                              loading: () => const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 24),
-                                child: Center(
-                                  child: CupertinoActivityIndicator(),
-                                ),
+                                  ),
+                                ],
+                              );
+                            },
+                            loading: () => const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 24),
+                              child: Center(
+                                child: CupertinoActivityIndicator(),
                               ),
-                              error: (_, __) => const SizedBox.shrink(),
                             ),
-                            if (externalLinks.isNotEmpty) ...[
-                              const SizedBox(height: 24),
-                              _buildExternalLinks(externalLinks, isDark),
-                            ],
+                            error: (_, __) => const SizedBox.shrink(),
+                          ),
+                          if (externalLinks.isNotEmpty) ...[
                             const SizedBox(height: 24),
-                            _buildDetailedMediaModules(data, isDark),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              child: _buildExternalLinks(externalLinks, isDark),
+                            ),
                           ],
-                        ),
+                          const SizedBox(height: 24),
+                          _buildDetailedMediaModules(
+                            data,
+                            isDark,
+                            horizontalPadding: 20,
+                          ),
+                        ],
                       ),
                     ),
                     const SliverToBoxAdapter(child: SizedBox(height: 20)),
@@ -495,15 +521,6 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                 fontWeight: FontWeight.w700,
                 color: textColor,
                 height: 1.2,
-                shadows: isDark
-                    ? const [
-                        Shadow(
-                          color: Colors.black54,
-                          blurRadius: 8,
-                          offset: Offset(0, 2),
-                        ),
-                      ]
-                    : null,
               ),
             ),
             const SizedBox(height: 10),
@@ -1132,17 +1149,22 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       context: context,
       position: position,
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.35,
+        maxHeight: MediaQuery.of(context).size.height * 0.26,
       ),
       items: List.generate(audioStreams.length, (index) {
         final data = audioStreams[index];
         final label = _formatAudioStream(data);
         final isDefault = (data['IsDefault'] as bool?) == true;
+        final hasDefaultTag = label.contains('默认');
         return PopupMenuItem<int>(
           value: index,
           child: Row(
             children: [
-              Expanded(child: Text(isDefault ? '$label (默认)' : label)),
+              Expanded(
+                child: Text(
+                  isDefault && !hasDefaultTag ? '$label (默认)' : label,
+                ),
+              ),
               if (index == selected)
                 const Icon(Icons.check, size: 18, color: Colors.blue),
             ],
@@ -1178,17 +1200,22 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       context: context,
       position: position,
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.35,
+        maxHeight: MediaQuery.of(context).size.height * 0.26,
       ),
       items: List.generate(subtitleStreams.length, (index) {
         final label = _formatSubtitleStream(subtitleStreams[index]);
         final isDefault =
             (subtitleStreams[index]['IsDefault'] as bool?) == true;
+        final hasDefaultTag = label.contains('默认');
         return PopupMenuItem<int>(
           value: index,
           child: Row(
             children: [
-              Expanded(child: Text(isDefault ? '$label (默认)' : label)),
+              Expanded(
+                child: Text(
+                  isDefault && !hasDefaultTag ? '$label (默认)' : label,
+                ),
+              ),
               if (index == selected)
                 const Icon(Icons.check, size: 18, color: Colors.blue),
             ],
@@ -1380,14 +1407,14 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                   color: bgColor,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: borderColor),
-                  boxShadow: [
-                    BoxShadow(
-                      color:
-                          Colors.black.withValues(alpha: isDark ? 0.25 : 0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
+                  // boxShadow: [
+                  //   BoxShadow(
+                  //     color:
+                  //         Colors.black.withValues(alpha: isDark ? 0.25 : 0.08),
+                  //     blurRadius: 12,
+                  //     offset: const Offset(0, 6),
+                  //   ),
+                  // ],
                 ),
                 child: CupertinoButton(
                   padding: const EdgeInsets.symmetric(
@@ -1510,7 +1537,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     return results;
   }
 
-  Widget _buildDetailedMediaModules(ItemInfo item, bool isDark) {
+  Widget _buildDetailedMediaModules(ItemInfo item, bool isDark,
+      {double horizontalPadding = 0}) {
     final media = _getPrimaryMediaSource(item);
     if (media == null) {
       return const SizedBox.shrink();
@@ -1567,6 +1595,11 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
         ? Colors.white.withValues(alpha: 0.07)
         : Colors.black.withValues(alpha: 0.04);
     final borderColor = textColor.withValues(alpha: 0.08);
+    final double edgePadding = horizontalPadding;
+    const double betweenSpacing = 12;
+    final EdgeInsets? textPadding = horizontalPadding > 0
+        ? EdgeInsets.symmetric(horizontal: horizontalPadding)
+        : null;
 
     final hasStreamModules =
         modules.any((module) => module.visibleFields.isNotEmpty);
@@ -1575,47 +1608,61 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       return const SizedBox.shrink();
     }
 
+    Widget buildTextSection() {
+      final content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '媒体信息',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: textColor,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (resourcePath.isNotEmpty)
+            SelectableText(
+              resourcePath,
+              style: TextStyle(
+                fontSize: 12,
+                color: textColor,
+                height: 1.35,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          if (resourceMeta.isNotEmpty) ...[
+            if (resourcePath.isNotEmpty) const SizedBox(height: 6),
+            Text(
+              resourceMeta,
+              style: TextStyle(
+                fontSize: 12,
+                color: textColor,
+                height: 1.35,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      );
+
+      if (textPadding != null) {
+        return Padding(padding: textPadding, child: content);
+      }
+      return content;
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '媒体信息',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: textColor,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (resourcePath.isNotEmpty)
-          SelectableText(
-            resourcePath,
-            style: TextStyle(
-              fontSize: 12,
-              color: textColor,
-              height: 1.35,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        if (resourceMeta.isNotEmpty) ...[
-          if (resourcePath.isNotEmpty) const SizedBox(height: 6),
-          Text(
-            resourceMeta,
-            style: TextStyle(
-              fontSize: 12,
-              color: textColor,
-              height: 1.35,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+        buildTextSection(),
         if ((resourcePath.isNotEmpty || resourceMeta.isNotEmpty) &&
             hasStreamModules)
           const SizedBox(height: 16),
         if (hasStreamModules)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.only(right: 12),
+            padding: EdgeInsets.zero,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1623,8 +1670,12 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                   if (modules[i].visibleFields.isNotEmpty)
                     Padding(
                       padding: EdgeInsets.only(
-                        left: _isFirstVisible(modules, i) ? 0 : 12,
-                        right: _nextVisibleIndex(modules, i) == null ? 0 : 12,
+                        left: _isFirstVisible(modules, i)
+                            ? edgePadding
+                            : betweenSpacing,
+                        right: _nextVisibleIndex(modules, i) == null
+                            ? edgePadding
+                            : 0,
                       ),
                       child: _MediaModuleCard(
                         module: modules[i],

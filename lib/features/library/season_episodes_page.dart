@@ -9,15 +9,16 @@ import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 
 // Provider 获取某一季的集列表
-final episodesProvider = FutureProvider.family
-    .autoDispose<List<ItemInfo>, Map<String, String>>((ref, params) async {
+final episodesProvider = FutureProvider.autoDispose
+    .family<List<ItemInfo>, (String seriesId, String seasonId)>(
+        (ref, params) async {
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
   final api = await EmbyApi.create();
   return api.getEpisodes(
     userId: auth.userId!,
-    seriesId: params['seriesId']!,
-    seasonId: params['seasonId']!,
+    seriesId: params.$1,
+    seasonId: params.$2,
   );
 });
 
@@ -50,10 +51,9 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage> {
 
   @override
   Widget build(BuildContext context) {
-    final episodes = ref.watch(episodesProvider({
-      'seriesId': widget.seriesId,
-      'seasonId': widget.seasonId,
-    }));
+    final episodes = ref.watch(
+      episodesProvider((widget.seriesId, widget.seasonId)),
+    );
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
 
@@ -94,7 +94,9 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage> {
             displacement: 20,
             edgeOffset: MediaQuery.of(context).padding.top + 44,
             onRefresh: () async {
-              ref.invalidate(episodesProvider);
+              ref.invalidate(
+                episodesProvider((widget.seriesId, widget.seasonId)),
+              );
               await Future.delayed(const Duration(milliseconds: 500));
             },
             child: ListView.builder(
@@ -171,7 +173,9 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage> {
                   CupertinoButton(
                     child: const Text('重试'),
                     onPressed: () {
-                      ref.invalidate(episodesProvider);
+                      ref.invalidate(
+                        episodesProvider((widget.seriesId, widget.seasonId)),
+                      );
                     },
                   ),
                 ],
