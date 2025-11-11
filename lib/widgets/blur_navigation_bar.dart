@@ -18,6 +18,9 @@ class BlurNavigationBar extends StatelessWidget
     this.expandedForegroundColor,
     this.collapsedForegroundColor,
     this.enableTransition = true,
+    this.useDynamicOpacity = false,
+    this.blurStart = 10.0,
+    this.blurEnd = 200.0,
     super.key,
   });
 
@@ -29,6 +32,9 @@ class BlurNavigationBar extends StatelessWidget
   final Color? expandedForegroundColor;
   final Color? collapsedForegroundColor;
   final bool enableTransition;
+  final bool useDynamicOpacity;
+  final double blurStart;
+  final double blurEnd;
 
   @override
   Size get preferredSize {
@@ -43,18 +49,18 @@ class BlurNavigationBar extends StatelessWidget
   Widget build(BuildContext context) {
     final statusBarHeight = MediaQuery.of(context).padding.top;
 
+    final brightness = MediaQuery.of(context).platformBrightness;
+
     return ValueListenableBuilder<SystemUiOverlayStyle?>(
       valueListenable: StatusBarManager.listenable,
       builder: (context, style, _) {
-        final brightness = MediaQuery.of(context).platformBrightness;
-
         return AnimatedBuilder(
           animation: scrollController ?? ScrollController(),
           builder: (context, child) {
             final scrollOffset = scrollController?.hasClients == true
                 ? scrollController!.offset
                 : 0.0;
-            final showBlur = forceBlur ?? (scrollOffset > 10);
+
             final baseColor = brightness == Brightness.dark
                 ? const Color(0xFF1C1C1E)
                 : const Color(0xFFF2F2F7);
@@ -63,56 +69,54 @@ class BlurNavigationBar extends StatelessWidget
             final Color collapsedColor =
                 collapsedForegroundColor ?? expandedColor;
 
-            Widget buildContent(double value) {
-              final sigma = 30 * value;
-              final backgroundOpacity = 0 * value;
-              final Color currentColor =
-                  Color.lerp(expandedColor, collapsedColor, value)!;
+            double progress;
+            if (forceBlur == true) {
+              progress = 1.0;
+            } else if (!useDynamicOpacity) {
+              progress = scrollOffset > blurStart ? 1.0 : 0.0;
+            } else {
+              if (scrollOffset <= blurStart) {
+                progress = 0.0;
+              } else {
+                final effectiveOffset =
+                    (scrollOffset - blurStart).clamp(0.0, blurEnd);
+                progress = (effectiveOffset / blurEnd).clamp(0.0, 1.0);
+              }
+            }
 
-              return ClipRect(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-                  child: Container(
-                    padding: EdgeInsets.only(top: statusBarHeight),
-                    decoration: BoxDecoration(
-                      color: baseColor.withOpacity(backgroundOpacity),
-                    ),
-                    child: SizedBox(
-                      height: 44,
-                      child: NavigationToolbar(
-                        leading: leading != null
-                            ? Padding(
-                                padding: const EdgeInsets.only(left: 4),
-                                child: _wrapWithColor(leading!, currentColor),
-                              )
-                            : null,
-                        middle: middle != null
-                            ? _wrapWithColor(middle!, currentColor)
-                            : null,
-                        trailing: trailing != null
-                            ? _wrapWithColor(trailing!, currentColor)
-                            : null,
-                        middleSpacing: 16,
-                      ),
+            final sigma = 30 * progress;
+            final backgroundOpacity = 0.7 * progress;
+            final Color currentColor =
+                Color.lerp(expandedColor, collapsedColor, progress)!;
+
+            return ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+                child: Container(
+                  padding: EdgeInsets.only(top: statusBarHeight),
+                  decoration: BoxDecoration(
+                    color: baseColor.withOpacity(backgroundOpacity),
+                  ),
+                  child: SizedBox(
+                    height: 44,
+                    child: NavigationToolbar(
+                      leading: leading != null
+                          ? Padding(
+                              padding: const EdgeInsets.only(left: 4),
+                              child: _wrapWithColor(leading!, currentColor),
+                            )
+                          : null,
+                      middle: middle != null
+                          ? _wrapWithColor(middle!, currentColor)
+                          : null,
+                      trailing: trailing != null
+                          ? _wrapWithColor(trailing!, currentColor)
+                          : null,
+                      middleSpacing: 16,
                     ),
                   ),
                 ),
-              );
-            }
-
-            if (!enableTransition) {
-              final double value = showBlur ? 1.0 : 0.0;
-              return buildContent(value);
-            }
-
-            return TweenAnimationBuilder<double>(
-              tween: Tween<double>(
-                begin: 0.0,
-                end: showBlur ? 1.0 : 0.0,
               ),
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeInOut,
-              builder: (context, value, _) => buildContent(value),
             );
           },
         );

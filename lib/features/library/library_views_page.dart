@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -19,11 +18,6 @@ class LibraryViewsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-    ));
-    
     final auth = ref.watch(authStateProvider);
     final views = ref.watch(_viewsProvider);
     return CupertinoPageScaffold(
@@ -56,7 +50,8 @@ class LibraryViewsPage extends ConsumerWidget {
                     const SizedBox(height: 16),
                     Text('加载失败: $e',
                         textAlign: TextAlign.center,
-                        style: const TextStyle(color: CupertinoColors.systemGrey)),
+                        style:
+                            const TextStyle(color: CupertinoColors.systemGrey)),
                     const SizedBox(height: 16),
                     CupertinoButton.filled(
                       onPressed: () => ref.refresh(_viewsProvider),

@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../library/modern_library_page.dart';
 import '../settings/settings_page.dart';
@@ -15,12 +14,12 @@ class HomePage extends StatelessWidget {
     final currentIndex = BottomNavProvider.of(context)?.currentIndex ?? 0;
 
     return IndexedStack(
-        index: currentIndex,
-        children: const [
-          ModernLibraryPage(),
-          _PlaceholderPage(title: '收藏/下载'),
-          SettingsPage(),
-        ],
+      index: currentIndex,
+      children: const [
+        ModernLibraryPage(),
+        _PlaceholderPage(title: '收藏/下载'),
+        SettingsPage(),
+      ],
     );
   }
 }
@@ -31,12 +30,6 @@ class _PlaceholderPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-      statusBarBrightness: Brightness.light,
-    ));
-
     return CupertinoPageScaffold(
       child: SafeArea(
         top: true,

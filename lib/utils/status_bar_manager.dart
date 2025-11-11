@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'status_bar_util.dart';
 
 /// 全局状态栏样式管理器，支持嵌套覆盖。
 class StatusBarManager {
@@ -10,10 +12,13 @@ class StatusBarManager {
       ValueNotifier<SystemUiOverlayStyle?>(null);
   static final List<_StatusBarEntry> _stack = <_StatusBarEntry>[];
   static int _nextToken = 0;
+  static bool _observerRegistered = false;
+  static final _BrightnessObserver _brightnessObserver = _BrightnessObserver();
 
   static ValueListenable<SystemUiOverlayStyle?> get listenable => _notifier;
 
   static int push(SystemUiOverlayStyle style) {
+    _ensureObserver();
     final entry = _StatusBarEntry(_nextToken++, style);
     _stack.add(entry);
     _notify();
@@ -27,7 +32,7 @@ class StatusBarManager {
     }
     _stack[index] = _StatusBarEntry(token, style);
     if (index == _stack.length - 1) {
-      _notifier.value = style;
+      _notify();
     }
   }
 
@@ -42,25 +47,52 @@ class StatusBarManager {
 
   static SystemUiOverlayStyle? get currentStyle => _notifier.value;
 
-  static bool _updateScheduled = false;
-  static SystemUiOverlayStyle? _pendingStyle;
+  static void _ensureObserver() {
+    if (_observerRegistered) return;
+    WidgetsBinding.instance.addObserver(_brightnessObserver);
+    _observerRegistered = true;
+  }
+
+  static void refresh() {
+    _notify();
+  }
 
   static void _notify() {
     final nextStyle = _stack.isEmpty ? null : _stack.last.style;
-    _pendingStyle = nextStyle;
-    if (_updateScheduled) {
+    final styleToApply = nextStyle ??
+        StatusBarUtil.styleForBrightness(
+            WidgetsBinding.instance.platformDispatcher.platformBrightness);
+    StatusBarUtil.applyStyle(styleToApply);
+    if (_notifier.value == nextStyle) {
       return;
     }
-    _updateScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _updateScheduled = false;
-      final latestStyle = _stack.isEmpty ? null : _stack.last.style;
-      if (_pendingStyle != latestStyle) {
-        _pendingStyle = latestStyle;
+      if (_notifier.value != nextStyle) {
+        _notifier.value = nextStyle;
       }
-      _notifier.value = _pendingStyle;
-      _pendingStyle = null;
     });
+  }
+}
+
+class _BrightnessObserver extends WidgetsBindingObserver {
+  @override
+  void didChangePlatformBrightness() {
+    super.didChangePlatformBrightness();
+    StatusBarManager._notify();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      StatusBarManager._notify();
+    }
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    StatusBarManager._notify();
   }
 }
 
@@ -103,7 +135,8 @@ class StatusBarStyleScope extends StatefulWidget {
     );
   }
 
-  factory StatusBarStyleScope.transparentLight({required Widget child, Key? key}) {
+  factory StatusBarStyleScope.transparentLight(
+      {required Widget child, Key? key}) {
     return StatusBarStyleScope(
       key: key,
       style: const SystemUiOverlayStyle(
@@ -124,7 +157,9 @@ class StatusBarStyleScope extends StatefulWidget {
   final SystemUiOverlayStyle style;
 
   static StatusBarStyleController? of(BuildContext context) {
-    return context.dependOnInheritedWidgetOfExactType<_StatusBarScopeInherited>()?.controller;
+    return context
+        .dependOnInheritedWidgetOfExactType<_StatusBarScopeInherited>()
+        ?.controller;
   }
 
   @override
@@ -193,18 +228,52 @@ class _StatusBarScopeInherited extends InheritedWidget {
   bool updateShouldNotify(_StatusBarScopeInherited oldWidget) => false;
 }
 
-class _AdaptiveStatusBarStyleScope extends StatelessWidget {
+class _AdaptiveStatusBarStyleScope extends StatefulWidget {
   const _AdaptiveStatusBarStyleScope({required this.child, super.key});
 
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
-    final brightness = MediaQuery.maybeOf(context)?.platformBrightness ??
+  State<_AdaptiveStatusBarStyleScope> createState() =>
+      _AdaptiveStatusBarStyleScopeState();
+}
+
+class _AdaptiveStatusBarStyleScopeState
+    extends State<_AdaptiveStatusBarStyleScope> with WidgetsBindingObserver {
+  Brightness? _platformBrightness;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _platformBrightness =
         WidgetsBinding.instance.platformDispatcher.platformBrightness;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    final newBrightness =
+        WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    if (newBrightness != _platformBrightness) {
+      setState(() {
+        _platformBrightness = newBrightness;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final brightness =
+        MediaQuery.maybeOf(context)?.platformBrightness ?? _platformBrightness;
     final style = brightness == Brightness.dark
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
-    return StatusBarStyleScope(style: style, child: child);
+    return StatusBarStyleScope(style: style, child: widget.child);
   }
 }

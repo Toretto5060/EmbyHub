@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -25,7 +24,7 @@ class ModernLibraryPage extends ConsumerStatefulWidget {
 class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     with RouteAware {
   final _scrollController = ScrollController();
-  bool _isRefreshing = false;  // ✅ 独立的刷新状态
+  bool _isRefreshing = false; // ✅ 独立的刷新状态
   bool _isRouteSubscribed = false;
 
   // 统一管理间距
@@ -40,12 +39,12 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
       if (savedName != null && savedName.isNotEmpty) {
         return savedName;
       }
-      
+
       // 缓存未命中，请求获取
-  final api = await EmbyApi.create();
+      final api = await EmbyApi.create();
       final info = await api.systemInfo();
       final serverName = info['ServerName'] as String?;
-      
+
       if (serverName != null && serverName.isNotEmpty) {
         await prefs.setString('server_name', serverName);
         return serverName;
@@ -53,14 +52,14 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     } catch (e) {
       print('获取服务器名称失败: $e');
     }
-    
+
     return fallback;
   }
 
   // ✅ 构建带 loading 的标题（标题固定居中，loading紧贴右侧）
   Widget _buildTitleWithLoading(String title, bool isLoading) {
     final titleWidget = buildHomeTitle(title);
-    
+
     return Center(
       child: IntrinsicWidth(
         child: Stack(
@@ -71,8 +70,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
             // loading 定位在标题右侧（使用 Positioned.fill 的技巧）
             if (isLoading)
               Positioned(
-                left: null,  // 不限制左侧
-                right: -24,  // 相对于标题右边缘向右24px（8px间距 + 16px loading）
+                left: null, // 不限制左侧
+                right: -24, // 相对于标题右边缘向右24px（8px间距 + 16px loading）
                 top: 0,
                 bottom: 0,
                 child: const Align(
@@ -96,21 +95,21 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         ref.read(resumeProvider.future),
         ref.read(viewsProvider.future),
       ];
-      
+
       if (viewList != null) {
         for (final view in viewList) {
-          if (view.collectionType != 'livetv' && 
-              view.collectionType != 'music' && 
+          if (view.collectionType != 'livetv' &&
+              view.collectionType != 'music' &&
               view.id != null) {
             futures.add(ref.read(latestByViewProvider(view.id!).future));
           }
         }
       }
-      
+
       print('🔄 后台等待 ${futures.length} 个请求完成...');
       await Future.wait(futures);
       print('✅ 所有刷新请求已完成');
-      
+
       if (mounted) {
         setState(() {
           _isRefreshing = false;
@@ -170,38 +169,34 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   Widget build(BuildContext context) {
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
-
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-      statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
-    ));
+    final backgroundColor =
+        isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7);
 
     final auth = ref.watch(authStateProvider);
     final server = ref.watch(serverSettingsProvider);
-    
+
     // ✅ 从缓存读取（启动页已预加载）
     print('build: 📖 读取缓存数据: resumeProvider + viewsProvider');
     final resumeItems = ref.watch(resumeProvider);
     final views = ref.watch(viewsProvider);
-    
+
     // ✅ 检测是否有任何请求正在加载（不包括下拉刷新）
-    final isAnyLoading = !_isRefreshing && (
-      resumeItems.isLoading || 
-      views.isLoading
-    );
-    
+    final isAnyLoading =
+        !_isRefreshing && (resumeItems.isLoading || views.isLoading);
+
     // ✅ 第二波并行请求：预加载所有媒体库的最新内容
     // 当 views 有数据后，立即触发所有 latest 请求（不等待渲染）
     final viewIds = views.whenData((viewList) {
-      return viewList
-          .where((v) => v.collectionType != 'livetv' && 
-                        v.collectionType != 'music' && 
-                        v.id != null)
-          .map((v) => v.id!)
-          .toList();
-    }).value ?? [];
-    
+          return viewList
+              .where((v) =>
+                  v.collectionType != 'livetv' &&
+                  v.collectionType != 'music' &&
+                  v.id != null)
+              .map((v) => v.id!)
+              .toList();
+        }).value ??
+        [];
+
     // 立即触发所有媒体库的最新内容请求（并行）
     final latestProviders = <AsyncValue<List<ItemInfo>>>[];
     if (viewIds.isNotEmpty) {
@@ -211,38 +206,59 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         latestProviders.add(latestAsync);
       }
     }
-    
+
     // ✅ 检测是否有最新内容正在加载
     final isLatestLoading = latestProviders.any((p) => p.isLoading);
-    
+
     // ✅ 综合加载状态（任何数据正在加载都显示 loading）
     final shouldShowLoading = _isRefreshing || isAnyLoading || isLatestLoading;
 
     return CupertinoPageScaffold(
+      backgroundColor: backgroundColor,
       navigationBar: HomeNavigationBar(
         scrollController: _scrollController,
-        // ✅ Emby logo（会和标题一起居中）
-        leading: const _EmbyLogo(size: 28),  // ✅ 与用户头像大小一致
-        // ✅ 中间服务器名称
         title: server.when(
           data: (serverData) {
-            // ✅ 优先从 SharedPreferences 读取服务器名称（启动页已保存）
             return FutureBuilder<String>(
               future: _getServerName(serverData.host),
               builder: (context, snapshot) {
                 final serverName = snapshot.data ?? serverData.host;
-                return _buildTitleWithLoading(serverName, shouldShowLoading);
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const _EmbyLogo(size: 28),
+                    const SizedBox(width: 6),
+                    _buildTitleWithLoading(serverName, shouldShowLoading),
+                  ],
+                );
               },
             );
           },
-          loading: () => _buildTitleWithLoading('EmbyHub', shouldShowLoading),
-          error: (_, __) => _buildTitleWithLoading('EmbyHub', shouldShowLoading),
+          loading: () => Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const _EmbyLogo(size: 28),
+              const SizedBox(width: 6),
+              _buildTitleWithLoading('EmbyHub', shouldShowLoading),
+            ],
+          ),
+          error: (_, __) => Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const _EmbyLogo(size: 28),
+              const SizedBox(width: 6),
+              _buildTitleWithLoading('EmbyHub', shouldShowLoading),
+            ],
+          ),
         ),
         // ✅ 右侧用户头像
         trailing: auth.when(
           data: (authData) => authData.userId != null
               ? _UserAvatarMenu(
-                  key: ValueKey(authData.userId),  // ✅ 添加 key 以确保切换用户后更新
+                  key: ValueKey(authData.userId), // ✅ 添加 key 以确保切换用户后更新
                   userId: authData.userId!,
                   username: authData.userName ?? 'User',
                 )
@@ -251,44 +267,44 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
           error: (_, __) => null,
         ),
       ),
-        child: auth.when(
-          data: (authData) {
-            if (!authData.isLoggedIn) {
-              return _buildEmptyState(context, isLoggedIn: false);
-            }
+      child: auth.when(
+        data: (authData) {
+          if (!authData.isLoggedIn) {
+            return _buildEmptyState(context, isLoggedIn: false);
+          }
           return RefreshIndicator(
             displacement: 20,
             edgeOffset: MediaQuery.of(context).padding.top + 44,
-              onRefresh: () async {
+            onRefresh: () async {
               print('🔄 下拉刷新：开始刷新所有数据');
-              
+
               setState(() {
                 _isRefreshing = true;
               });
-              
+
               // ✅ 获取当前的媒体库列表（用于刷新最新内容）
               final currentViewList = ref.read(viewsProvider).value;
-              
+
               // ✅ 刷新继续观看和媒体库列表
               ref.invalidate(resumeProvider);
               ref.invalidate(viewsProvider);
-              
+
               // ✅ 刷新所有媒体库的最新内容（并行）
               if (currentViewList != null) {
                 for (final view in currentViewList) {
-                  if (view.collectionType != 'livetv' && 
-                      view.collectionType != 'music' && 
+                  if (view.collectionType != 'livetv' &&
+                      view.collectionType != 'music' &&
                       view.id != null) {
                     ref.invalidate(latestByViewProvider(view.id!));
                     print('  - 刷新: ${view.name}');
                   }
                 }
               }
-              
+
               // ✅ 固定时间后结束下拉动画
               await Future.delayed(const Duration(milliseconds: 1000));
               print('✅ 下拉刷新：动画结束（后台继续加载）');
-              
+
               // ✅ 在后台继续等待所有请求完成
               _waitForAllRefreshComplete(currentViewList);
             },
@@ -310,21 +326,21 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                         // 我的媒体模块
                         _buildMyLibrariesSection(context, viewList),
                         // 继续观看模块（放在我的媒体之后）
-                resumeItems.when(
-                  data: (items) {
-                    if (items.isEmpty) return const SizedBox.shrink();
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                        resumeItems.when(
+                          data: (items) {
+                            if (items.isEmpty) return const SizedBox.shrink();
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 _buildSectionHeader(context, '继续观看'),
                                 const SizedBox(
                                     height: _sectionTitleToContentSpacing),
-                        _buildResumeList(context, ref, items),
+                                _buildResumeList(context, ref, items),
                                 const SizedBox(height: _sectionSpacing),
-                      ],
-                    );
-                  },
-                  loading: () => const SizedBox.shrink(),
+                              ],
+                            );
+                          },
+                          loading: () => const SizedBox.shrink(),
                           error: (e, st) => const SizedBox.shrink(),
                         ),
                         // 显示各个媒体库的最新内容（每个section内部已有底部间距）
@@ -361,7 +377,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                             DefaultTextStyle(
                               style: TextStyle(
                                 fontSize: 16,
-                                color: isDark ? Colors.white.withValues(alpha: 0.7) : Colors.black.withValues(alpha: 0.7),
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.7)
+                                    : Colors.black.withValues(alpha: 0.7),
                               ),
                               child: const Text(
                                 '加载媒体库失败\n请检查网络连接',
@@ -427,7 +445,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
-                mainAxisSize: MainAxisSize.min,
+        mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
             Icon(
@@ -444,7 +462,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               color: isDark ? Colors.white : Colors.black87,
             ),
             child: Text(title),
-            ),
+          ),
         ],
       ),
     );
@@ -488,9 +506,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         width: 150,
         margin: const EdgeInsets.only(left: 6, right: 6),
         child: Column(
-                mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
+          children: [
             SizedBox(
               height: 100,
               child: ClipRRect(
@@ -531,9 +549,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                 textAlign: TextAlign.center,
               ),
             ),
-                ],
-              ),
-            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -613,8 +631,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
     final hasBackdrop = _latestHasHorizontalArtwork(item);
     final aspectRatio = hasBackdrop ? 2 / 3 : 16 / 9;
-    final cardWidth = hasBackdrop ? 100.0  : 160.0;
-
+    final cardWidth = hasBackdrop ? 100.0 : 160.0;
 
     // 构建年份显示文本
     String? yearText;
@@ -674,10 +691,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                  child: AspectRatio(
+                child: AspectRatio(
                   aspectRatio: aspectRatio,
-                  child:
-                      _buildLatestPoster(context, ref, item, hasBackdrop: hasBackdrop),
+                  child: _buildLatestPoster(context, ref, item,
+                      hasBackdrop: hasBackdrop),
                 ),
               ),
             ),
@@ -735,9 +752,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     final positionTicks =
         (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
     final totalTicks = item.runTimeTicks ?? 0;
-    final remainingTicks = totalTicks > positionTicks
-        ? totalTicks - positionTicks
-        : 0;
+    final remainingTicks =
+        totalTicks > positionTicks ? totalTicks - positionTicks : 0;
     final remainingDuration = totalTicks > 0
         ? Duration(microseconds: remainingTicks ~/ 10)
         : Duration.zero;
@@ -823,10 +839,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                         final seriesName = item.seriesName;
                         final uri = Uri(
                           path: '/series/$seriesId',
-                          queryParameters: (seriesName != null &&
-                                  seriesName.isNotEmpty)
-                              ? {'name': seriesName}
-                              : null,
+                          queryParameters:
+                              (seriesName != null && seriesName.isNotEmpty)
+                                  ? {'name': seriesName}
+                                  : null,
                         );
                         context.push(uri.toString());
                         return;
@@ -875,15 +891,14 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                   final seriesName = item.seriesName;
                   final fallbackUri = Uri(
                     path: '/series/$seriesId',
-                    queryParameters: (seriesName != null &&
-                            seriesName.isNotEmpty)
-                        ? {'name': seriesName}
-                        : null,
+                    queryParameters:
+                        (seriesName != null && seriesName.isNotEmpty)
+                            ? {'name': seriesName}
+                            : null,
                   );
                   context.push(fallbackUri.toString());
                   return;
                 }
-
               }
             : null,
         child: Column(
@@ -909,35 +924,35 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                       child: _buildResumePoster(context, ref, item),
                     ),
                     if (totalTicks > 0 && normalizedProgress > 0)
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 6),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
                               begin: Alignment.bottomCenter,
                               end: Alignment.topCenter,
-                        colors: [
+                              colors: [
                                 Colors.black.withOpacity(0.8),
                                 Colors.black.withOpacity(0.0),
-                        ],
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                              ],
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
-                      children: [
+                            children: [
                               Text(
                                 '剩余 ${formatRemaining(remainingDuration)}',
                                 style: TextStyle(
                                   color: Colors.white.withOpacity(0.85),
                                   fontSize: 11,
-                            ),
-                          ),
-                        const SizedBox(height: 4),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(999),
                                 child: TweenAnimationBuilder<double>(
@@ -953,19 +968,18 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                                       minHeight: 3,
                                       backgroundColor:
                                           Colors.white.withValues(alpha: 0.2),
-                                      valueColor:
-                                          AlwaysStoppedAnimation(
-                                              const Color(0xFFFFB74D)
-                                                  .withValues(alpha: 0.95)),
+                                      valueColor: AlwaysStoppedAnimation(
+                                          const Color(0xFFFFB74D)
+                                              .withValues(alpha: 0.95)),
                                     );
                                   },
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -973,10 +987,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
             Center(
               child: Text(
                 titleText,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                fontSize: 14,
+                  fontSize: 14,
                   fontWeight: FontWeight.w400,
                   color: isDark ? Colors.white : Colors.black87,
                 ),
@@ -987,10 +1001,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               Center(
                 child: Text(
                   subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                  fontSize: 12,
+                    fontSize: 12,
                     color: isDark ? Colors.grey : Colors.grey.shade600,
                   ),
                   textAlign: TextAlign.center,
@@ -1072,8 +1086,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
             type: 'Thumb',
             tag: item.parentThumbImageTag,
           );
-          final parentBackdropTags = item.parentBackdropImageTags ?? const <String>[];
-          if (item.parentBackdropItemId != null && parentBackdropTags.isNotEmpty) {
+          final parentBackdropTags =
+              item.parentBackdropImageTags ?? const <String>[];
+          if (item.parentBackdropItemId != null &&
+              parentBackdropTags.isNotEmpty) {
             addCandidate(
               id: item.parentBackdropItemId,
               type: 'Backdrop',
@@ -1168,12 +1184,11 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     );
   }
 
-  Widget _buildLatestPoster(
-      BuildContext context, WidgetRef ref, ItemInfo item,
+  Widget _buildLatestPoster(BuildContext context, WidgetRef ref, ItemInfo item,
       {required bool hasBackdrop}) {
     final itemId = item.id;
     if (itemId == null || itemId.isEmpty) {
-    return Container(
+      return Container(
         color: CupertinoColors.systemGrey5,
         child: const Center(
           child: Icon(CupertinoIcons.film, size: 48),
@@ -1183,8 +1198,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
     return FutureBuilder<EmbyApi>(
       future: EmbyApi.create(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
           return Container(color: CupertinoColors.systemGrey5);
         }
 
@@ -1196,15 +1211,15 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         );
 
         if (url.isEmpty) {
-                            return Container(
-                              color: CupertinoColors.systemGrey5,
+          return Container(
+            color: CupertinoColors.systemGrey5,
             child: const Icon(CupertinoIcons.photo, size: 32),
           );
         }
 
         return EmbyFadeInImage(
           imageUrl: url,
-                            fit: BoxFit.cover,
+          fit: BoxFit.cover,
         );
       },
     );
@@ -1260,9 +1275,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 // ✅ Emby Logo 组件
 class _EmbyLogo extends StatelessWidget {
   const _EmbyLogo({this.size = 24});
-  
+
   final double size;
-  
+
   @override
   Widget build(BuildContext context) {
     return Image.asset(
@@ -1301,7 +1316,7 @@ class _UserAvatarMenu extends ConsumerWidget {
 
           return ClipOval(
             child: SizedBox(
-              width: 28,  // ✅ 缩小到 28
+              width: 28, // ✅ 缩小到 28
               height: 28,
               child: EmbyFadeInImage(
                 imageUrl: avatarUrl,
@@ -1318,13 +1333,13 @@ class _UserAvatarMenu extends ConsumerWidget {
 
   Widget _buildDefaultAvatar() {
     return CircleAvatar(
-      radius: 14,  // ✅ 缩小到 14
+      radius: 14, // ✅ 缩小到 14
       backgroundColor: Colors.blue.shade100,
       child: Text(
         username[0].toUpperCase(),
         style: TextStyle(
           color: Colors.blue.shade700,
-          fontSize: 12,  // ✅ 缩小字体
+          fontSize: 12, // ✅ 缩小字体
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -1333,30 +1348,31 @@ class _UserAvatarMenu extends ConsumerWidget {
 
   Future<void> _showUserMenu(BuildContext context, WidgetRef ref) async {
     print('👤 User avatar tapped');
-    
+
     // ✅ 保存外部 context 和 ref
     final outerContext = context;
     final outerRef = ref;
-    
+
     final server = ref.read(serverSettingsProvider).value;
     if (server == null) return;
-    
+
     final serverUrl = '${server.protocol}://${server.host}:${server.port}';
     final allAccounts = ref.read(accountHistoryProvider);
-    final accounts = allAccounts.where((a) => a.serverUrl == serverUrl).toList();
-    
+    final accounts =
+        allAccounts.where((a) => a.serverUrl == serverUrl).toList();
+
     // ✅ 如果只有1个账号，不显示下拉菜单
     if (accounts.length <= 1) {
       print('👤 Only one account, skip menu');
       return;
     }
-    
+
     final currentUserId = userId;
-    
+
     // ✅ 计算最长用户名的宽度
     double maxTextWidth = 0;
-    final textStyle = const TextStyle(fontSize: 14);  // 使用默认字体大小
-    
+    final textStyle = const TextStyle(fontSize: 14); // 使用默认字体大小
+
     for (final account in accounts) {
       final textPainter = TextPainter(
         text: TextSpan(text: account.username, style: textStyle),
@@ -1367,31 +1383,31 @@ class _UserAvatarMenu extends ConsumerWidget {
         maxTextWidth = textPainter.width;
       }
     }
-    
+
     // ✅ 计算菜单宽度：头像(28) + 间距(12) + 最长文字宽度 + 最小间距(8) + 对号(20) + PopupMenuItem左右padding(32)
     // PopupMenuItem 默认左右 padding 各 16px，共 32px
     // 对号靠右对齐，文字和对号之间至少有 8px 间距
-    final contentWidth = 28 + 12 + maxTextWidth + 8 + 20;  // 内容宽度
-    final menuWidth = contentWidth + 20;  // 加上 PopupMenuItem 的 padding
-    
+    final contentWidth = 28 + 12 + maxTextWidth + 8 + 20; // 内容宽度
+    final menuWidth = contentWidth + 20; // 加上 PopupMenuItem 的 padding
+
     // ✅ 显示用户下拉菜单（根据最长用户名动态计算宽度）
     await showMenu(
       context: context,
       position: RelativeRect.fromLTRB(
-        MediaQuery.of(context).size.width - menuWidth,  // ✅ 根据计算出的宽度定位
-        MediaQuery.of(context).padding.top + 44,  // 顶部导航栏下方
+        MediaQuery.of(context).size.width - menuWidth, // ✅ 根据计算出的宽度定位
+        MediaQuery.of(context).padding.top + 44, // 顶部导航栏下方
         16,
         0,
       ),
       constraints: BoxConstraints(
-        minWidth: menuWidth,  // ✅ 固定宽度
-        maxWidth: menuWidth,  // ✅ 固定宽度
+        minWidth: menuWidth, // ✅ 固定宽度
+        maxWidth: menuWidth, // ✅ 固定宽度
       ),
       items: [
         ...accounts.map((account) {
           final isCurrent = account.userId == currentUserId;
           return PopupMenuItem(
-            enabled: !isCurrent,  // 当前用户禁用点击
+            enabled: !isCurrent, // 当前用户禁用点击
             child: Row(
               children: [
                 // 用户头像
@@ -1407,7 +1423,7 @@ class _UserAvatarMenu extends ConsumerWidget {
                     fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
-                const Spacer(),  // ✅ 填充剩余空间，让对号靠右
+                const Spacer(), // ✅ 填充剩余空间，让对号靠右
                 // 当前标识（靠右对齐）
                 if (isCurrent)
                   const Icon(
@@ -1417,32 +1433,34 @@ class _UserAvatarMenu extends ConsumerWidget {
                   ),
               ],
             ),
-            onTap: isCurrent ? null : () {
-              // ✅ 菜单会自动关闭，延迟后用外部 context 切换
-              Future.delayed(const Duration(milliseconds: 300), () async {
-                if (outerContext.mounted) {
-                  await _switchToAccount(outerContext, outerRef, account);
-                }
-              });
-            },
+            onTap: isCurrent
+                ? null
+                : () {
+                    // ✅ 菜单会自动关闭，延迟后用外部 context 切换
+                    Future.delayed(const Duration(milliseconds: 300), () async {
+                      if (outerContext.mounted) {
+                        await _switchToAccount(outerContext, outerRef, account);
+                      }
+                    });
+                  },
           );
         }),
       ],
     );
   }
-  
+
   // ✅ 切换账号逻辑（从设置页复制）
   Future<void> _switchToAccount(
       BuildContext context, WidgetRef ref, AccountRecord account) async {
     print('🔄 [Menu] Switching to account: ${account.username}');
-    
+
     // ✅ 显示居中loading，保存 dialog context
     BuildContext? dialogContext;
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        dialogContext = ctx;  // ✅ 保存 dialog 的 context
+        dialogContext = ctx; // ✅ 保存 dialog 的 context
         return const Center(
           child: Card(
             child: Padding(
@@ -1460,38 +1478,40 @@ class _UserAvatarMenu extends ConsumerWidget {
         );
       },
     );
-    
+
     try {
       // ✅ 优先使用保存的 token 和 userId
-      if (account.lastToken != null && account.lastToken!.isNotEmpty &&
-          account.userId != null && account.userId!.isNotEmpty) {
+      if (account.lastToken != null &&
+          account.lastToken!.isNotEmpty &&
+          account.userId != null &&
+          account.userId!.isNotEmpty) {
         print('🔑 [Menu] Using saved token for ${account.username}');
-        
+
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('emby_token', account.lastToken!);
         await prefs.setString('emby_user_id', account.userId!);
         await prefs.setString('emby_user_name', account.username);
-        
+
         // 验证 token
         final api = await EmbyApi.create();
         try {
           await api.getUserViews(account.userId!);
-          
+
           print('✅ [Menu] Token valid, switching');
-          
+
           // 使所有 provider 失效
           ref.invalidate(viewsProvider);
           ref.invalidate(resumeProvider);
           ref.invalidate(latestByViewProvider);
-          
+
           await ref.read(authStateProvider.notifier).load();
           await Future.delayed(const Duration(milliseconds: 300));
-          
+
           // ✅ 关闭 loading dialog
           if (dialogContext != null && dialogContext!.mounted) {
             Navigator.of(dialogContext!).pop();
           }
-          
+
           if (context.mounted) {
             // ✅ 显示成功提示（简化版，1秒后自动消失）
             ScaffoldMessenger.of(context).showSnackBar(
@@ -1513,26 +1533,26 @@ class _UserAvatarMenu extends ConsumerWidget {
           print('❌ [Menu] Token invalid: $e');
         }
       }
-      
+
       // Token 失效，要求输入密码
       // ✅ 关闭第一个 loading dialog
       if (dialogContext != null && dialogContext!.mounted) {
         Navigator.of(dialogContext!).pop();
       }
-      
+
       if (context.mounted) {
         final password = await _showPasswordDialog(context, account.username);
         if (password == null || password.isEmpty) {
           return;
         }
-        
+
         // ✅ 重新显示loading，保存新的 dialog context
         dialogContext = null;
         showDialog(
           context: context,
           barrierDismissible: false,
           builder: (ctx) {
-            dialogContext = ctx;  // ✅ 保存新的 dialog context
+            dialogContext = ctx; // ✅ 保存新的 dialog context
             return const Center(
               child: Card(
                 child: Padding(
@@ -1550,32 +1570,32 @@ class _UserAvatarMenu extends ConsumerWidget {
             );
           },
         );
-        
+
         final api = await EmbyApi.create();
         final loginResult = await api.authenticate(
             username: account.username, password: password);
-        
+
         // 更新账号历史
         await ref.read(accountHistoryProvider.notifier).addAccount(
-          account.serverUrl,
-          loginResult.userName,
-          loginResult.token,
-          userId: loginResult.userId,
-        );
-        
+              account.serverUrl,
+              loginResult.userName,
+              loginResult.token,
+              userId: loginResult.userId,
+            );
+
         // 使所有 provider 失效
         ref.invalidate(viewsProvider);
         ref.invalidate(resumeProvider);
         ref.invalidate(latestByViewProvider);
-        
+
         await ref.read(authStateProvider.notifier).load();
         await Future.delayed(const Duration(milliseconds: 300));
-        
+
         // ✅ 关闭 loading dialog
         if (dialogContext != null && dialogContext!.mounted) {
           Navigator.of(dialogContext!).pop();
         }
-        
+
         if (context.mounted) {
           // ✅ 显示成功提示
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1596,7 +1616,7 @@ class _UserAvatarMenu extends ConsumerWidget {
     } catch (e, stack) {
       print('❌ [Menu] Switch failed: $e');
       print('Stack: $stack');
-      
+
       // ✅ 尝试关闭 loading dialog（如果还在显示）
       if (dialogContext != null && dialogContext!.mounted) {
         try {
@@ -1605,7 +1625,7 @@ class _UserAvatarMenu extends ConsumerWidget {
           print('❌ Failed to close loading dialog');
         }
       }
-      
+
       if (context.mounted) {
         // ✅ 显示错误（使用 SnackBar）
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1624,8 +1644,9 @@ class _UserAvatarMenu extends ConsumerWidget {
       }
     }
   }
-  
-  Future<String?> _showPasswordDialog(BuildContext context, String username) async {
+
+  Future<String?> _showPasswordDialog(
+      BuildContext context, String username) async {
     final passwordController = TextEditingController();
     return showDialog<String>(
       context: context,
@@ -1684,7 +1705,7 @@ class _UserAvatarSmall extends StatelessWidget {
 
         return ClipOval(
           child: SizedBox(
-            width: 28,  // ✅ 与当前用户头像大小一致
+            width: 28, // ✅ 与当前用户头像大小一致
             height: 28,
             child: EmbyFadeInImage(
               imageUrl: avatarUrl,
@@ -1700,13 +1721,13 @@ class _UserAvatarSmall extends StatelessWidget {
 
   Widget _buildDefaultAvatar() {
     return CircleAvatar(
-      radius: 14,  // ✅ 28 / 2 = 14
+      radius: 14, // ✅ 28 / 2 = 14
       backgroundColor: Colors.blue.shade100,
       child: Text(
         username[0].toUpperCase(),
         style: TextStyle(
           color: Colors.blue.shade700,
-          fontSize: 12,  // ✅ 缩小字体
+          fontSize: 12, // ✅ 缩小字体
           fontWeight: FontWeight.bold,
         ),
       ),

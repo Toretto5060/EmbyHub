@@ -10,6 +10,7 @@ class HomeNavigationBar extends StatelessWidget
     this.title,
     this.trailing,
     this.scrollController,
+    this.forceBlur,
     super.key,
   });
 
@@ -17,12 +18,10 @@ class HomeNavigationBar extends StatelessWidget
   final Widget? title;
   final Widget? trailing;
   final ScrollController? scrollController;
+  final bool? forceBlur;
 
   @override
-  Size get preferredSize {
-    // 返回一个较大的固定高度，实际高度在 build 中动态计算
-    return const Size.fromHeight(100.0);
-  }
+  Size get preferredSize => const Size.fromHeight(100.0);
 
   @override
   bool shouldFullyObstruct(BuildContext context) => false;
@@ -30,55 +29,50 @@ class HomeNavigationBar extends StatelessWidget
   @override
   Widget build(BuildContext context) {
     final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
     final statusBarHeight = MediaQuery.of(context).padding.top;
+    final baseColor = brightness == Brightness.dark
+        ? const Color(0xFF1C1C1E)
+        : const Color(0xFFF2F2F7);
 
     return AnimatedBuilder(
       animation: scrollController ?? ScrollController(),
       builder: (context, child) {
-        // 计算滚动偏移量，超过 10px 时显示毛玻璃效果
         final scrollOffset = scrollController?.hasClients == true
             ? scrollController!.offset
             : 0.0;
-        final showBlur = scrollOffset > 10;
+        final bool blur = forceBlur ?? (scrollOffset > 10);
+        final double sigma = blur ? 30 : 0;
+        final double backgroundOpacity = blur ? 0.7 : 1.0;
+        final Color currentColor =
+            brightness == Brightness.dark ? Colors.white : Colors.black87;
 
         return ClipRect(
           child: BackdropFilter(
-            filter: showBlur
-                ? ImageFilter.blur(sigmaX: 30, sigmaY: 30)
-                : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+            filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
             child: Container(
               padding: EdgeInsets.only(top: statusBarHeight),
               decoration: BoxDecoration(
-                color: isDark
-                    ? const Color(0xFF1C1C1E).withOpacity(0)
-                    : const Color(0xFFF2F2F7).withOpacity(0),
+                color: baseColor.withOpacity(backgroundOpacity),
               ),
               child: SizedBox(
                 height: 44,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        if (leading != null)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: _wrapWithColor(leading!, isDark),
-                          ),
-                        if (title != null)
-                          _wrapWithColor(title!, isDark),
-                      ],
-                    ),
-                    if (trailing != null)
-                      Positioned(
-                        right: 16,
-                        child: _wrapWithColor(trailing!, isDark),
-                      ),
-                  ],
+                child: NavigationToolbar(
+                  leading: leading != null
+                      ? Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child: _wrapWithColor(leading!, currentColor),
+                        )
+                      : null,
+                  middle: title != null
+                      ? _wrapWithColor(title!, currentColor)
+                      : null,
+                  trailing: trailing != null
+                      ? Padding(
+                          padding: const EdgeInsets.only(right: 16),
+                          child: _wrapWithColor(trailing!, currentColor),
+                        )
+                      : null,
+                  middleSpacing: 16,
                 ),
               ),
             ),
@@ -88,9 +82,7 @@ class HomeNavigationBar extends StatelessWidget
     );
   }
 
-  Widget _wrapWithColor(Widget child, bool isDark) {
-    final color = isDark ? Colors.white : Colors.black87;
-
+  Widget _wrapWithColor(Widget child, Color color) {
     return DefaultTextStyle(
       style: TextStyle(
         color: color,

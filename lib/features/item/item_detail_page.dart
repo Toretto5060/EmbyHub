@@ -70,22 +70,28 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   static const Color _resumeButtonColor = Color(0xFFFFB74D);
   static const Color _playButtonColor = Color(0xFF3F8CFF);
   bool _showCollapsedNav = false;
-  bool _forceBlur = false;
   static const double _backdropHeight = 300;
   static const double _headerTopOffset = 250;
   static const double _headerBaseHeight = 180;
-  static const double _heroBaseHeight =
-      _backdropHeight + (_headerTopOffset + _headerBaseHeight - _backdropHeight);
+  static const double _heroBaseHeight = _backdropHeight +
+      (_headerTopOffset + _headerBaseHeight - _backdropHeight);
   double _headerHeight = _headerBaseHeight;
+  SystemUiOverlayStyle? _navSyncedStyle;
+  SystemUiOverlayStyle? _initialStatusStyle;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_handleScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _initialStatusStyle = StatusBarManager.currentStyle;
+    });
   }
 
   @override
   void dispose() {
+    _resetStatusBarOnExit();
     _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
     super.dispose();
@@ -95,14 +101,12 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     final offset =
         _scrollController.hasClients ? _scrollController.offset : 0.0;
     final shouldShow = offset > 200;
-    final shouldBlur = offset > 0.5;
-
-    if (shouldShow != _showCollapsedNav || shouldBlur != _forceBlur) {
+    if (shouldShow != _showCollapsedNav) {
       setState(() {
         _showCollapsedNav = shouldShow;
-        _forceBlur = shouldBlur;
       });
     }
+    // _syncStatusBarWithNavigation(offset);
   }
 
   @override
@@ -129,7 +133,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                   slivers: [
                     SliverToBoxAdapter(
                       child: SizedBox(
-                        height: _heroBaseHeight + (_headerHeight - _headerBaseHeight),
+                        height: _heroBaseHeight +
+                            (_headerHeight - _headerBaseHeight),
                         child: Stack(
                           clipBehavior: Clip.none,
                           children: [
@@ -314,22 +319,13 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     SystemUiOverlayStyle? styleOverride,
     bool isPlayed,
   ) {
-    final Brightness platformBrightness =
-        MediaQuery.of(context).platformBrightness;
-    final SystemUiOverlayStyle? style = styleOverride;
-    final Brightness? iconBrightness = style?.statusBarIconBrightness;
-    final Color expandedColor;
-    if (iconBrightness == Brightness.light) {
-      expandedColor = Colors.white;
-    } else if (iconBrightness == Brightness.dark) {
-      expandedColor = Colors.black87;
-    } else {
-      expandedColor =
-          platformBrightness == Brightness.dark ? Colors.white : Colors.black87;
-    }
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final SystemUiOverlayStyle baseStyle = _statusBarStyle;
+    final SystemUiOverlayStyle targetStyle =
+        _defaultStyleForBrightness(brightness);
 
-    final Color collapsedColor =
-        platformBrightness == Brightness.dark ? Colors.white : Colors.black87;
+    final Color expandedColor = _colorForStatusStyle(baseStyle, brightness);
+    final Color collapsedColor = _colorForStatusStyle(targetStyle, brightness);
 
     final actions =
         data != null ? _buildTopActions(isPlayed) : const <Widget>[];
@@ -344,19 +340,17 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
             switchInCurve: Curves.easeIn,
             switchOutCurve: Curves.easeOut,
             child: _showCollapsedNav
-                ? Padding(
+                ? Transform.translate(
                     key: const ValueKey('title-visible'),
-                    padding: const EdgeInsets.only(left: 8),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 220),
-                      child: Text(
-                        data.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
+                    offset: const Offset(-12, 0),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: 220,
+                          minHeight: 24,
                         ),
+                        child: _CollapsedTitle(item: data),
                       ),
                     ),
                   )
@@ -366,7 +360,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     );
 
     return BlurNavigationBar(
-      forceBlur: _forceBlur,
+      forceBlur: false,
       scrollController: _scrollController,
       leading: leadingContent,
       middle: null,
@@ -379,14 +373,31 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       expandedForegroundColor: expandedColor,
       collapsedForegroundColor: collapsedColor,
       enableTransition: false,
+      useDynamicOpacity: true,
+      blurStart: 10.0,
+      blurEnd: _headerTopOffset,
     );
   }
 
+  Color _colorForStatusStyle(
+      SystemUiOverlayStyle style, Brightness fallbackBrightness) {
+    final brightness = style.statusBarIconBrightness;
+    if (brightness == Brightness.light) return Colors.white;
+    if (brightness == Brightness.dark) return Colors.black87;
+    return fallbackBrightness == Brightness.dark
+        ? Colors.white
+        : Colors.black87;
+  }
+
+  SystemUiOverlayStyle _defaultStyleForBrightness(Brightness brightness) {
+    return brightness == Brightness.dark ? _lightStatusBar : _darkStatusBar;
+  }
+
   Widget _buildBackdropBackground(BuildContext context, ItemInfo item) {
-     final brightness = MediaQuery.of(context).platformBrightness;
-     final isDark = brightness == Brightness.dark;
-     final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
- 
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+    final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -517,7 +528,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   }
 
   Widget _buildHeaderCard(BuildContext context, ItemInfo item, bool isDark) {
-     final Color textColor = isDark ? Colors.white : Colors.black87;
+    final Color textColor = isDark ? Colors.white : Colors.black87;
     return _MeasureSize(
       onChange: (size) {
         if (size == null) return;
@@ -534,17 +545,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              item.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 30,
-                fontWeight: FontWeight.w700,
-                color: textColor,
-                height: 1.2,
-              ),
-            ),
+            _buildFallbackTitleText(item.name, textColor),
             const SizedBox(height: 10),
             _buildMetaInfo(item, isDark),
             const SizedBox(height: 10),
@@ -565,6 +566,20 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildFallbackTitleText(String title, Color textColor) {
+    return Text(
+      title,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 30,
+        fontWeight: FontWeight.w700,
+        color: textColor,
+        height: 1.2,
       ),
     );
   }
@@ -767,7 +782,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+      children: [
         Row(
           children: [
             Expanded(
@@ -933,8 +948,49 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       return;
     }
     _statusBarStyle = style;
+    _navSyncedStyle = null;
     StatusBarStyleScope.of(context)?.update(style);
     setState(() {});
+    // _syncStatusBarWithNavigation(
+    //     _scrollController.hasClients ? _scrollController.offset : 0.0);
+  }
+
+  void _syncStatusBarWithNavigation(double offset) {
+    if (!mounted) return;
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final Color expandedColor =
+        _colorForStatusStyle(_statusBarStyle, brightness);
+    final Color collapsedColor = _colorForStatusStyle(
+        _defaultStyleForBrightness(brightness), brightness);
+
+    final double blurStart = 10.0;
+    final double blurEnd = _headerTopOffset;
+    final double progress;
+    if (offset <= blurStart) {
+      progress = 0.0;
+    } else {
+      final double effective = (offset - blurStart).clamp(0.0, blurEnd);
+      progress = (effective / blurEnd).clamp(0.0, 1.0);
+    }
+
+    final Color currentColor =
+        Color.lerp(expandedColor, collapsedColor, progress) ?? expandedColor;
+    final Brightness colorBrightness =
+        ThemeData.estimateBrightnessForColor(currentColor);
+    final SystemUiOverlayStyle targetStyle =
+        colorBrightness == Brightness.light ? _darkStatusBar : _lightStatusBar;
+    if (_navSyncedStyle == targetStyle) {
+      return;
+    }
+    _navSyncedStyle = targetStyle;
+    StatusBarStyleScope.of(context)?.update(targetStyle);
+  }
+
+  void _resetStatusBarOnExit() {
+    final restoredStyle = _initialStatusStyle ?? StatusBarManager.currentStyle;
+    if (restoredStyle == null) return;
+    _navSyncedStyle = restoredStyle;
+    StatusBarStyleScope.of(context)?.update(restoredStyle);
   }
 
   Map<String, dynamic>? _getPrimaryMediaSource(ItemInfo item) {
@@ -2175,6 +2231,69 @@ class _MediaModuleCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _CollapsedTitle extends StatelessWidget {
+  const _CollapsedTitle({required this.item});
+
+  final ItemInfo item;
+
+  @override
+  Widget build(BuildContext context) {
+    final logoTag = item.imageTags?['Logo']?.toString();
+    if (item.id == null ||
+        item.id!.isEmpty ||
+        logoTag == null ||
+        logoTag.isEmpty) {
+      return _buildTextTitle();
+    }
+    return FutureBuilder<EmbyApi>(
+      future: EmbyApi.create(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return _buildTextTitle();
+        }
+        final api = snapshot.data!;
+        final logoUrl = api.buildImageUrl(
+          itemId: item.id!,
+          type: 'Logo',
+          tag: logoTag,
+          maxWidth: 300,
+        );
+        if (logoUrl.isEmpty) {
+          return _buildTextTitle();
+        }
+        return SizedBox(
+          height: 32,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 0),
+              child: SizedBox(
+                height: 32,
+                child: EmbyFadeInImage(
+                  imageUrl: logoUrl,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTextTitle() {
+    return Text(
+      item.name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        fontSize: 17,
+        fontWeight: FontWeight.w600,
       ),
     );
   }
