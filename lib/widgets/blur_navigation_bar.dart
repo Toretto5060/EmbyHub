@@ -50,6 +50,8 @@ class BlurNavigationBar extends StatelessWidget
     final statusBarHeight = MediaQuery.of(context).padding.top;
 
     final brightness = MediaQuery.of(context).platformBrightness;
+    final Color systemColor =
+        brightness == Brightness.dark ? Colors.white : Colors.black87;
 
     return ValueListenableBuilder<SystemUiOverlayStyle?>(
       valueListenable: StatusBarManager.listenable,
@@ -64,10 +66,10 @@ class BlurNavigationBar extends StatelessWidget
             final baseColor = brightness == Brightness.dark
                 ? const Color(0xFF1C1C1E)
                 : const Color(0xFFF2F2F7);
-            final Color expandedColor =
-                expandedForegroundColor ?? _resolveColor(style, brightness);
+            final Color expandedColor = expandedForegroundColor ??
+                _resolveColor(style, brightness, systemColor);
             final Color collapsedColor =
-                collapsedForegroundColor ?? expandedColor;
+                collapsedForegroundColor ?? systemColor;
 
             double progress;
             if (forceBlur == true) {
@@ -124,7 +126,8 @@ class BlurNavigationBar extends StatelessWidget
     );
   }
 
-  Color _resolveColor(SystemUiOverlayStyle? style, Brightness brightness) {
+  Color _resolveColor(
+      SystemUiOverlayStyle? style, Brightness brightness, Color systemColor) {
     final iconBrightness = style?.statusBarIconBrightness;
     if (iconBrightness == Brightness.light) {
       return Colors.white;
@@ -132,7 +135,7 @@ class BlurNavigationBar extends StatelessWidget
     if (iconBrightness == Brightness.dark) {
       return Colors.black87;
     }
-    return brightness == Brightness.dark ? Colors.white : Colors.black87;
+    return systemColor;
   }
 
   Widget _wrapWithColor(Widget child, Color color) {

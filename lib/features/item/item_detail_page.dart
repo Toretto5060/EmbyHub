@@ -16,7 +16,6 @@ import '../../providers/settings_provider.dart';
 import '../../providers/emby_api_provider.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/status_bar_manager.dart';
-import '../../utils/status_bar_util.dart';
 import '../../widgets/blur_navigation_bar.dart';
 
 final itemProvider =
@@ -84,8 +83,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       (_headerTopOffset + _headerBaseHeight - _backdropHeight);
   double _headerHeight = _headerBaseHeight;
   SystemUiOverlayStyle? _navSyncedStyle;
-  SystemUiOverlayStyle? _initialStatusStyle;
   StatusBarStyleController? _statusBarController;
+  ModalRoute<dynamic>? _modalRoute;
+  Animation<double>? _routeAnimation;
 
   @override
   void initState() {
@@ -97,17 +97,40 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     _scrollController.addListener(_handleScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _initialStatusStyle = StatusBarManager.currentStyle;
       _syncStatusBarWithNavigation(
           _scrollController.hasClients ? _scrollController.offset : 0.0);
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final newRoute = ModalRoute.of(context);
+    if (newRoute != _modalRoute) {
+      _removeRouteListener();
+      _modalRoute = newRoute;
+      _routeAnimation = newRoute?.animation;
+      _routeAnimation?.addStatusListener(_handleRouteAnimationStatus);
+    }
+  }
+
+  @override
+  void deactivate() {
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      _statusBarController?.release();
+      _statusBarController = null;
+    }
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
-    _resetStatusBarOnExit();
+    _statusBarController?.release();
+    _statusBarController = null;
     _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
+    _removeRouteListener();
     super.dispose();
   }
 
@@ -132,6 +155,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       child: Builder(
         builder: (context) {
           _statusBarController = StatusBarStyleScope.of(context);
+          _statusBarController?.update(_navSyncedStyle ?? _statusBarStyle);
           return CupertinoPageScaffold(
             backgroundColor: CupertinoColors.systemBackground,
             child: item.when(
@@ -1014,13 +1038,22 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     }
   }
 
-  void _resetStatusBarOnExit() {
-    final restoredStyle = _initialStatusStyle ?? StatusBarManager.currentStyle;
-    if (restoredStyle != null) {
-      StatusBarUtil.applyStyle(restoredStyle);
-    } else {
-      StatusBarManager.refresh();
+  void _handleRouteAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.reverse) {
+      _statusBarController?.release();
+      _statusBarController = null;
+    } else if (status == AnimationStatus.completed ||
+        status == AnimationStatus.forward) {
+      if (mounted) {
+        _statusBarController?.update(_navSyncedStyle ?? _statusBarStyle);
+      }
     }
+  }
+
+  void _removeRouteListener() {
+    _routeAnimation?.removeStatusListener(_handleRouteAnimationStatus);
+    _routeAnimation = null;
+    _modalRoute = null;
   }
 
   Map<String, dynamic>? _getPrimaryMediaSource(ItemInfo item) {

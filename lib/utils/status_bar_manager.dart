@@ -109,6 +109,10 @@ class StatusBarStyleController {
   void update(SystemUiOverlayStyle style) {
     _state._setStyle(style);
   }
+
+  void release() {
+    _state._releaseToken();
+  }
 }
 
 /// 包裹页面并设置状态栏样式，支持嵌套覆盖。
@@ -170,13 +174,14 @@ class _StatusBarStyleScopeState extends State<StatusBarStyleScope> {
   late SystemUiOverlayStyle _currentStyle;
   late final StatusBarStyleController _controller;
   int? _token;
+  bool _tokenReleased = false;
 
   @override
   void initState() {
     super.initState();
     _currentStyle = widget.style;
     _controller = StatusBarStyleController(this);
-    _token = StatusBarManager.push(_currentStyle);
+    _ensureToken();
   }
 
   @override
@@ -189,16 +194,13 @@ class _StatusBarStyleScopeState extends State<StatusBarStyleScope> {
 
   @override
   void dispose() {
-    if (_token != null) {
-      StatusBarManager.remove(_token!);
-    }
+    _releaseToken();
     super.dispose();
   }
 
   void _setStyle(SystemUiOverlayStyle style, {bool fromWidgetUpdate = false}) {
-    if (_token == null) {
-      return;
-    }
+    _ensureToken();
+    if (_token == null) return;
     if (!fromWidgetUpdate && style == _currentStyle) {
       return;
     }
@@ -207,8 +209,28 @@ class _StatusBarStyleScopeState extends State<StatusBarStyleScope> {
     setState(() {});
   }
 
+  void _ensureToken() {
+    if (_token != null) {
+      return;
+    }
+    _token = StatusBarManager.push(_currentStyle);
+    _tokenReleased = false;
+  }
+
+  void _releaseToken() {
+    if (_token == null) {
+      return;
+    }
+    StatusBarManager.remove(_token!);
+    _token = null;
+    _tokenReleased = true;
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_token == null && !_tokenReleased) {
+      _ensureToken();
+    }
     return _StatusBarScopeInherited(
       controller: _controller,
       child: widget.child,
