@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,6 +15,13 @@ import '../../widgets/home_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/app_route_observer.dart';
 
+const bool _kModernLibraryLogging = false;
+void _homeLog(String message) {
+  if (_kModernLibraryLogging) {
+    debugPrint(message);
+  }
+}
+
 class ModernLibraryPage extends ConsumerStatefulWidget {
   const ModernLibraryPage({super.key});
 
@@ -26,6 +34,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   final _scrollController = ScrollController();
   bool _isRefreshing = false; // ✅ 独立的刷新状态
   bool _isRouteSubscribed = false;
+  String? _serverNameHost;
+  Future<String>? _serverNameFuture;
 
   // 统一管理间距
   static const double _sectionTitleToContentSpacing = 5.0; // 模块标题距离下方卡片的高度
@@ -50,10 +60,18 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         return serverName;
       }
     } catch (e) {
-      print('获取服务器名称失败: $e');
+      _homeLog('获取服务器名称失败: $e');
     }
 
     return fallback;
+  }
+
+  Future<String> _serverNameFutureFor(String host) {
+    if (_serverNameFuture == null || _serverNameHost != host) {
+      _serverNameHost = host;
+      _serverNameFuture = _getServerName(host);
+    }
+    return _serverNameFuture!;
   }
 
   // ✅ 构建带 loading 的标题（标题固定居中，loading紧贴右侧）
@@ -106,9 +124,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         }
       }
 
-      print('🔄 后台等待 ${futures.length} 个请求完成...');
+      _homeLog('🔄 后台等待 ${futures.length} 个请求完成...');
       await Future.wait(futures);
-      print('✅ 所有刷新请求已完成');
+      _homeLog('✅ 所有刷新请求已完成');
 
       if (mounted) {
         setState(() {
@@ -116,7 +134,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         });
       }
     } catch (e) {
-      print('❌ 刷新请求出错: $e');
+      _homeLog('❌ 刷新请求出错: $e');
       if (mounted) {
         setState(() {
           _isRefreshing = false;
@@ -176,7 +194,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     final server = ref.watch(serverSettingsProvider);
 
     // ✅ 从缓存读取（启动页已预加载）
-    print('build: 📖 读取缓存数据: resumeProvider + viewsProvider');
+    _homeLog('build: 📖 读取缓存数据: resumeProvider + viewsProvider');
     final resumeItems = ref.watch(resumeProvider);
     final views = ref.watch(viewsProvider);
 
@@ -200,7 +218,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     // 立即触发所有媒体库的最新内容请求（并行）
     final latestProviders = <AsyncValue<List<ItemInfo>>>[];
     if (viewIds.isNotEmpty) {
-      print('build: 🚀 并行请求所有媒体库最新内容: ${viewIds.length} 个');
+      _homeLog('build: 🚀 并行请求所有媒体库最新内容: ${viewIds.length} 个');
       for (final viewId in viewIds) {
         final latestAsync = ref.watch(latestByViewProvider(viewId));
         latestProviders.add(latestAsync);
@@ -220,7 +238,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         title: server.when(
           data: (serverData) {
             return FutureBuilder<String>(
-              future: _getServerName(serverData.host),
+              future: _serverNameFutureFor(serverData.host),
               builder: (context, snapshot) {
                 final serverName = snapshot.data ?? serverData.host;
                 return Row(
@@ -276,7 +294,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
             displacement: 20,
             edgeOffset: MediaQuery.of(context).padding.top + 44,
             onRefresh: () async {
-              print('🔄 下拉刷新：开始刷新所有数据');
+              _homeLog('🔄 下拉刷新：开始刷新所有数据');
 
               setState(() {
                 _isRefreshing = true;
@@ -296,14 +314,14 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                       view.collectionType != 'music' &&
                       view.id != null) {
                     ref.invalidate(latestByViewProvider(view.id!));
-                    print('  - 刷新: ${view.name}');
+                    _homeLog('  - 刷新: ${view.name}');
                   }
                 }
               }
 
               // ✅ 固定时间后结束下拉动画
               await Future.delayed(const Duration(milliseconds: 1000));
-              print('✅ 下拉刷新：动画结束（后台继续加载）');
+              _homeLog('✅ 下拉刷新：动画结束（后台继续加载）');
 
               // ✅ 在后台继续等待所有请求完成
               _waitForAllRefreshComplete(currentViewList);
@@ -878,7 +896,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                       }
                     }
                   } catch (e) {
-                    print('Failed to resolve seasons for $seriesId: $e');
+                    _homeLog('Failed to resolve seasons for $seriesId: $e');
                   }
 
                   final seriesName = item.seriesName;
@@ -1319,7 +1337,7 @@ class _UserAvatarMenu extends ConsumerWidget {
   }
 
   Future<void> _showUserMenu(BuildContext context, WidgetRef ref) async {
-    print('👤 User avatar tapped');
+    _homeLog('👤 User avatar tapped');
 
     // ✅ 保存外部 context 和 ref
     final outerContext = context;
@@ -1335,7 +1353,7 @@ class _UserAvatarMenu extends ConsumerWidget {
 
     // ✅ 如果只有1个账号，不显示下拉菜单
     if (accounts.length <= 1) {
-      print('👤 Only one account, skip menu');
+      _homeLog('👤 Only one account, skip menu');
       return;
     }
 
@@ -1424,7 +1442,7 @@ class _UserAvatarMenu extends ConsumerWidget {
   // ✅ 切换账号逻辑（从设置页复制）
   Future<void> _switchToAccount(
       BuildContext context, WidgetRef ref, AccountRecord account) async {
-    print('🔄 [Menu] Switching to account: ${account.username}');
+    _homeLog('🔄 [Menu] Switching to account: ${account.username}');
 
     // ✅ 显示居中loading，保存 dialog context
     BuildContext? dialogContext;
@@ -1457,7 +1475,7 @@ class _UserAvatarMenu extends ConsumerWidget {
           account.lastToken!.isNotEmpty &&
           account.userId != null &&
           account.userId!.isNotEmpty) {
-        print('🔑 [Menu] Using saved token for ${account.username}');
+        _homeLog('🔑 [Menu] Using saved token for ${account.username}');
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('emby_token', account.lastToken!);
@@ -1469,7 +1487,7 @@ class _UserAvatarMenu extends ConsumerWidget {
         try {
           await api.getUserViews(account.userId!);
 
-          print('✅ [Menu] Token valid, switching');
+          _homeLog('✅ [Menu] Token valid, switching');
 
           // 使所有 provider 失效
           ref.invalidate(viewsProvider);
@@ -1502,7 +1520,7 @@ class _UserAvatarMenu extends ConsumerWidget {
           }
           return;
         } catch (e) {
-          print('❌ [Menu] Token invalid: $e');
+          _homeLog('❌ [Menu] Token invalid: $e');
         }
       }
 
@@ -1586,15 +1604,15 @@ class _UserAvatarMenu extends ConsumerWidget {
         }
       }
     } catch (e, stack) {
-      print('❌ [Menu] Switch failed: $e');
-      print('Stack: $stack');
+      _homeLog('❌ [Menu] Switch failed: $e');
+      _homeLog('Stack: $stack');
 
       // ✅ 尝试关闭 loading dialog（如果还在显示）
       if (dialogContext != null && dialogContext!.mounted) {
         try {
           Navigator.of(dialogContext!).pop();
         } catch (_) {
-          print('❌ Failed to close loading dialog');
+          _homeLog('❌ Failed to close loading dialog');
         }
       }
 

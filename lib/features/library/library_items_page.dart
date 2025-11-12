@@ -9,9 +9,11 @@ import '../../providers/emby_api_provider.dart';
 import '../../utils/app_route_observer.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
+import '../../providers/library_provider.dart';
 
 final itemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
+  ref.watch(libraryRefreshTickerProvider);
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];

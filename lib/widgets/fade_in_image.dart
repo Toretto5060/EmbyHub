@@ -6,15 +6,24 @@ import 'dart:ui' as ui;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+
+const bool _kImageCacheLogging = false;
+
+void _log(String message) {
+  if (_kImageCacheLogging) {
+    debugPrint(message);
+  }
+}
 
 // ✅ 不可重试的异常（如404等客户端错误）
 class _NonRetryableException implements Exception {
   final String message;
   _NonRetryableException(this.message);
-  
+
   @override
   String toString() => 'NonRetryableException: $message';
 }
@@ -27,7 +36,7 @@ class _ImageCache {
       Queue<_PendingRequest>();
   static bool _isProcessingQueue = false;
   static Directory? _cacheDir;
-  
+
   // 初始化缓存目录
   static Future<void> init() async {
     if (_cacheDir == null) {
@@ -36,61 +45,61 @@ class _ImageCache {
       if (!_cacheDir!.existsSync()) {
         _cacheDir!.createSync(recursive: true);
       }
-      print('📁 Image cache directory: ${_cacheDir!.path}');
+      _log('📁 Image cache directory: ${_cacheDir!.path}');
     }
   }
-  
+
   // 从内存缓存获取
   static ui.Image? getFromMemory(String url) => _memoryCache[url];
-  
+
   // 保存到内存缓存
   static void putToMemory(String url, ui.Image image) {
     _memoryCache[url] = image;
   }
-  
+
   // 从持久化缓存获取
   static Future<ui.Image?> getFromDisk(String url) async {
     try {
       await init();
       final file = _getCacheFile(url);
       if (await file.exists()) {
-        print('💾 Loading from disk cache: $url');
+        _log('💾 Loading from disk cache: $url');
         final bytes = await file.readAsBytes();
         final codec = await ui.instantiateImageCodec(bytes);
         final frame = await codec.getNextFrame();
         final image = frame.image;
-        
+
         // 同时保存到内存缓存
         putToMemory(url, image);
         return image;
       }
     } catch (e) {
-      print('❌ Failed to load from disk cache: $e');
+      _log('❌ Failed to load from disk cache: $e');
     }
     return null;
   }
-  
+
   // 保存到持久化缓存
   static Future<void> saveToDisk(String url, Uint8List bytes) async {
     try {
       await init();
       final file = _getCacheFile(url);
       await file.writeAsBytes(bytes);
-      print('💾 Saved to disk cache: $url');
+      _log('💾 Saved to disk cache: $url');
     } catch (e) {
-      print('❌ Failed to save to disk cache: $e');
+      _log('❌ Failed to save to disk cache: $e');
     }
   }
-  
+
   // 获取缓存文件
   static File _getCacheFile(String url) {
     final hash = md5.convert(url.codeUnits).toString();
     return File('${_cacheDir!.path}/$hash');
   }
-  
+
   // 正在加载的图片
   static Future<ui.Image>? getLoading(String url) => _loading[url];
-  
+
   static Future<ui.Image> enqueueNetworkLoad(
       String url, Future<ui.Image> Function() loader) {
     final existing = _loading[url];
@@ -129,7 +138,7 @@ class _ImageCache {
       }
     });
   }
-  
+
   // 清空所有缓存
   // ignore: unused_element
   static Future<void> clear() async {
@@ -139,7 +148,7 @@ class _ImageCache {
     }
     _memoryCache.clear();
     _loading.clear();
-    
+
     // 清空持久化缓存
     try {
       await init();
@@ -147,9 +156,9 @@ class _ImageCache {
         await _cacheDir!.delete(recursive: true);
         await _cacheDir!.create(recursive: true);
       }
-      print('🗑️ All image cache cleared');
+      _log('🗑️ All image cache cleared');
     } catch (e) {
-      print('❌ Failed to clear disk cache: $e');
+      _log('❌ Failed to clear disk cache: $e');
     }
   }
 }
@@ -164,7 +173,7 @@ class EmbyFadeInImage extends StatefulWidget {
     this.placeholder,
     this.fadeDuration = const Duration(milliseconds: 500),
     this.timeout = const Duration(seconds: 10),
-    this.retries = -1,  // -1 表示无限重试
+    this.retries = -1, // -1 表示无限重试
     this.onImageReady,
   });
 
@@ -185,7 +194,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
   bool _isLoading = true;
   bool _hasError = false;
   int _currentRetry = 0;
-  String? _currentUrl;  // 记录当前显示的图片URL
+  String? _currentUrl; // 记录当前显示的图片URL
 
   @override
   void initState() {
@@ -199,7 +208,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
     super.didUpdateWidget(oldWidget);
     // URL 变化时重新加载，但先保留旧图片
     if (oldWidget.imageUrl != widget.imageUrl) {
-      print('🔄 Image URL changed: ${oldWidget.imageUrl} -> ${widget.imageUrl}');
+      _log('🔄 Image URL changed: ${oldWidget.imageUrl} -> ${widget.imageUrl}');
       _currentUrl = widget.imageUrl;
       // 先保留旧图片，后台加载新图片
       _loadImageWithCache(keepOldImage: true);
@@ -209,7 +218,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
   Future<void> _loadImageWithCache({bool keepOldImage = false}) async {
     // ✅ 重置重试计数器（每次加载新URL时）
     _currentRetry = 0;
-    
+
     // 如果不保留旧图片，先显示加载状态
     if (!keepOldImage) {
       setState(() {
@@ -217,11 +226,11 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
         _hasError = false;
       });
     }
-    
+
     // ✅ 1. 先检查内存缓存
     final memoryCached = _ImageCache.getFromMemory(widget.imageUrl);
     if (memoryCached != null) {
-      print('✅ Image from memory cache: ${widget.imageUrl}');
+      _log('✅ Image from memory cache: ${widget.imageUrl}');
       if (mounted && _currentUrl == widget.imageUrl) {
         setState(() {
           _image = memoryCached;
@@ -232,11 +241,11 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       }
       return;
     }
-    
+
     // ✅ 2. 检查持久化缓存
     final diskCached = await _ImageCache.getFromDisk(widget.imageUrl);
     if (diskCached != null) {
-      print('✅ Image from disk cache: ${widget.imageUrl}');
+      _log('✅ Image from disk cache: ${widget.imageUrl}');
       if (mounted && _currentUrl == widget.imageUrl) {
         setState(() {
           _image = diskCached;
@@ -247,11 +256,11 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       }
       return;
     }
-    
+
     // ✅ 3. 检查是否正在加载（避免重复请求）
     final loading = _ImageCache.getLoading(widget.imageUrl);
     if (loading != null) {
-      print('⏳ Image already loading: ${widget.imageUrl}');
+      _log('⏳ Image already loading: ${widget.imageUrl}');
       try {
         final image = await loading;
         if (mounted && _currentUrl == widget.imageUrl) {
@@ -264,7 +273,9 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
         }
       } catch (e) {
         // 加载失败，如果不是不可重试的错误，则重新尝试
-        if (mounted && _currentUrl == widget.imageUrl && e is! _NonRetryableException) {
+        if (mounted &&
+            _currentUrl == widget.imageUrl &&
+            e is! _NonRetryableException) {
           _loadImage();
         } else {
           // 不可重试的错误，直接显示错误占位符
@@ -278,7 +289,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       }
       return;
     }
-    
+
     // ✅ 4. 缓存未命中，从网络加载
     _loadImage();
   }
@@ -297,13 +308,13 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       widget.imageUrl,
       _loadImageFromNetwork,
     );
-    
+
     try {
       final image = await loadFuture;
-      
+
       // ✅ 保存到内存缓存
       _ImageCache.putToMemory(widget.imageUrl, image);
-      
+
       if (mounted && _currentUrl == widget.imageUrl) {
         setState(() {
           _image = image;
@@ -315,9 +326,9 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
     } catch (e) {
       // ✅ 检查是否是不可重试的错误
       if (e is _NonRetryableException) {
-        print('🚫 Non-retryable error, showing placeholder: $e');
+        _log('🚫 Non-retryable error, showing placeholder: $e');
       }
-      
+
       if (mounted && _currentUrl == widget.imageUrl) {
         setState(() {
           _isLoading = false;
@@ -329,38 +340,38 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
 
   Future<ui.Image> _loadImageFromNetwork() async {
     try {
-      print('📷 Loading image from network: ${widget.imageUrl} (retry: $_currentRetry)');
-      
+      _log(
+          '📷 Loading image from network: ${widget.imageUrl} (retry: $_currentRetry)');
+
       // 使用超时控制
-      final response = await http
-          .get(Uri.parse(widget.imageUrl))
-          .timeout(
-            widget.timeout,
-            onTimeout: () {
-              throw TimeoutException('图片加载超时（${widget.timeout.inSeconds}秒）');
-            },
-          );
+      final response = await http.get(Uri.parse(widget.imageUrl)).timeout(
+        widget.timeout,
+        onTimeout: () {
+          throw TimeoutException('图片加载超时（${widget.timeout.inSeconds}秒）');
+        },
+      );
 
       if (response.statusCode == 200) {
         final bytes = response.bodyBytes;
-        
+
         // ✅ 先保存到持久化缓存
         await _ImageCache.saveToDisk(widget.imageUrl, bytes);
-        
+
         // 解码图片
         final codec = await ui.instantiateImageCodec(bytes);
         final frame = await codec.getNextFrame();
-        
-        print('✅ Image loaded from network: ${widget.imageUrl}');
+
+        _log('✅ Image loaded from network: ${widget.imageUrl}');
         return frame.image;
       } else {
         // ❌ 不可重试的HTTP错误（404, 403, 401等客户端错误）
         if (response.statusCode >= 400 && response.statusCode < 500) {
-          print('❌ Image not found or forbidden (${response.statusCode}): ${widget.imageUrl}');
-          print('🚫 Will not retry, showing default placeholder');
+          _log(
+              '❌ Image not found or forbidden (${response.statusCode}): ${widget.imageUrl}');
+          _log('🚫 Will not retry, showing default placeholder');
           throw _NonRetryableException('HTTP ${response.statusCode}');
         }
-        
+
         // 5xx 服务器错误可以重试
         throw Exception('HTTP ${response.statusCode}');
       }
@@ -369,21 +380,21 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       if (e is _NonRetryableException) {
         rethrow;
       }
-      
-      print('❌ Image load failed: ${widget.imageUrl}, error: $e');
-      
+
+      _log('❌ Image load failed: ${widget.imageUrl}, error: $e');
+
       // 无限重试机制（仅针对网络错误和服务器错误）
       if (widget.retries == -1 || _currentRetry < widget.retries) {
         _currentRetry++;
-        final retryText = widget.retries == -1 
-            ? '$_currentRetry/∞' 
+        final retryText = widget.retries == -1
+            ? '$_currentRetry/∞'
             : '$_currentRetry/${widget.retries}';
-        print('🔄 Retrying image load ($retryText)');
-        
+        _log('🔄 Retrying image load ($retryText)');
+
         // 重试间隔：最长5秒
         final delay = (_currentRetry * 500).clamp(500, 5000);
         await Future.delayed(Duration(milliseconds: delay));
-        
+
         // 递归重试
         return _loadImageFromNetwork();
       } else {
@@ -401,7 +412,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
         fit: widget.fit,
       );
     }
-    
+
     // 如果加载失败，显示错误占位符
     if (_hasError) {
       return widget.placeholder ??

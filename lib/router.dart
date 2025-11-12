@@ -163,10 +163,20 @@ GoRouter createRouter() {
       GoRoute(
         parentNavigatorKey: _rootNavigatorKey,
         path: '/player/:itemId',
-        pageBuilder: (context, state) => buildCupertinoPage(
-          child: PlayerPage(itemId: state.pathParameters['itemId'] ?? ''),
-          state: state,
-        ),
+        pageBuilder: (context, state) {
+          final itemId = state.pathParameters['itemId'] ?? '';
+          final params = state.uri.queryParameters;
+          final fromStart = params['fromStart'] == 'true';
+          final positionTicks = int.tryParse(params['positionTicks'] ?? '');
+          final initialTicks = fromStart ? 0 : (positionTicks ?? 0);
+          return buildCupertinoPage(
+            child: PlayerPage(
+              itemId: itemId,
+              initialPositionTicks: initialTicks > 0 ? initialTicks : null,
+            ),
+            state: state,
+          );
+        },
       ),
     ],
   );

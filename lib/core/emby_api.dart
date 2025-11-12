@@ -3,6 +3,14 @@ import 'dart:io';
 import 'package:dio/dio.dart' as dio;
 import 'package:shared_preferences/shared_preferences.dart' as sp;
 
+const bool _kEmbyApiLogging = false;
+void _apiLog(String message) {
+  if (_kEmbyApiLogging) {
+    // ignore: avoid_print
+    print(message);
+  }
+}
+
 class EmbyApi {
   EmbyApi(this._dio);
 
@@ -19,10 +27,10 @@ class EmbyApi {
     final baseUrl = _buildBaseUrl(protocol, host, port);
     final dioClient = dio.Dio(dio.BaseOptions(
         baseUrl: baseUrl,
-        connectTimeout: const Duration(seconds: 30),  // 增加到30秒
-        receiveTimeout: const Duration(seconds: 60),  // 增加到60秒
-        sendTimeout: const Duration(seconds: 60)));   // 增加发送超时
-    
+        connectTimeout: const Duration(seconds: 30), // 增加到30秒
+        receiveTimeout: const Duration(seconds: 60), // 增加到60秒
+        sendTimeout: const Duration(seconds: 60))); // 增加发送超时
+
     // 添加请求头拦截器
     dioClient.interceptors
         .add(dio.InterceptorsWrapper(onRequest: (options, handler) async {
@@ -36,50 +44,54 @@ class EmbyApi {
       }
       handler.next(options);
     }));
-    
+
     // 添加重试拦截器（仅对非登录接口，最多重试2次）
     dioClient.interceptors.add(
       dio.InterceptorsWrapper(
         onError: (error, handler) async {
-          final retryCount = error.requestOptions.extra['retryCount'] as int? ?? 0;
-          
+          final retryCount =
+              error.requestOptions.extra['retryCount'] as int? ?? 0;
+
           // 对于网络错误进行重试（除了登录接口，最多重试2次）
           if (_shouldRetry(error) && retryCount < 2) {
-            print('🔄 Retry ${retryCount + 1}/2 for: ${error.requestOptions.uri}');
-            
+            _apiLog(
+                '🔄 Retry ${retryCount + 1}/2 for: ${error.requestOptions.uri}');
+
             // 等待一段时间后重试
-            await Future.delayed(Duration(milliseconds: 500 * (retryCount + 1)));
-            
+            await Future.delayed(
+                Duration(milliseconds: 500 * (retryCount + 1)));
+
             try {
               // 更新重试计数
               error.requestOptions.extra['retryCount'] = retryCount + 1;
               final response = await dioClient.fetch(error.requestOptions);
-              print('✅ Retry successful for: ${error.requestOptions.uri}');
+              _apiLog('✅ Retry successful for: ${error.requestOptions.uri}');
               handler.resolve(response);
             } catch (e) {
-              print('❌ Retry ${retryCount + 1} failed: $e');
+              _apiLog('❌ Retry ${retryCount + 1} failed: $e');
               handler.next(error);
             }
           } else {
             if (retryCount >= 2) {
-              print('❌ Max retries (2) reached for: ${error.requestOptions.uri}');
+              _apiLog(
+                  '❌ Max retries (2) reached for: ${error.requestOptions.uri}');
             }
             handler.next(error);
           }
         },
       ),
     );
-    
+
     return EmbyApi(dioClient);
   }
-  
+
   // 判断是否应该重试
   static bool _shouldRetry(dio.DioException error) {
     // 登录接口不重试
     if (error.requestOptions.path.contains('AuthenticateByName')) {
       return false;
     }
-    
+
     // 只对网络错误和超时错误重试
     return error.type == dio.DioExceptionType.connectionTimeout ||
         error.type == dio.DioExceptionType.receiveTimeout ||
@@ -143,32 +155,32 @@ class EmbyApi {
 
   Future<List<ViewInfo>> getUserViews(String userId) async {
     try {
-      print('getUserViews: userId=$userId');
+      _apiLog('getUserViews: userId=$userId');
       final res = await _dio.get('/Users/$userId/Views');
-      print('getUserViews response type: ${res.data.runtimeType}');
-      print('getUserViews response: ${res.data}');
+      _apiLog('getUserViews response type: ${res.data.runtimeType}');
+      _apiLog('getUserViews response: ${res.data}');
 
       if (res.data is! Map<String, dynamic>) {
-        print('getUserViews: Response is not a Map');
+        _apiLog('getUserViews: Response is not a Map');
         return [];
       }
 
       final items = res.data['Items'];
       if (items == null) {
-        print('getUserViews: No Items field in response');
+        _apiLog('getUserViews: No Items field in response');
         return [];
       }
 
       if (items is! List) {
-        print('getUserViews: Items is not a List');
+        _apiLog('getUserViews: Items is not a List');
         return [];
       }
 
       final list = items.cast<Map<String, dynamic>>();
-      print('getUserViews: Found ${list.length} views');
+      _apiLog('getUserViews: Found ${list.length} views');
       return list.map((e) => ViewInfo.fromJson(e)).toList();
     } catch (e) {
-      print('getUserViews error: $e');
+      _apiLog('getUserViews error: $e');
       rethrow;
     }
   }
@@ -191,7 +203,7 @@ class EmbyApi {
           (res.data['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
       return list.map((e) => ItemInfo.fromJson(e)).toList();
     } catch (e) {
-      print('getResumeItems error: $e');
+      _apiLog('getResumeItems error: $e');
       return [];
     }
   }
@@ -217,7 +229,7 @@ class EmbyApi {
       }
       return [];
     } catch (e) {
-      print('getLatestItems error: $e');
+      _apiLog('getLatestItems error: $e');
       return [];
     }
   }
@@ -233,7 +245,8 @@ class EmbyApi {
       'StartIndex': startIndex,
       'Limit': limit,
       'Recursive': true,
-      'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag',
+      'Fields':
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag',
     };
 
     // 如果指定了类型，使用指定的；否则使用默认的
@@ -249,8 +262,7 @@ class EmbyApi {
     return list.map((e) => ItemInfo.fromJson(e)).toList();
   }
 
-  Future<List<ItemInfo>> getSimilarItems(
-      String userId, String itemId,
+  Future<List<ItemInfo>> getSimilarItems(String userId, String itemId,
       {int limit = 12}) async {
     final baseParams = {
       'Limit': limit,
@@ -267,15 +279,15 @@ class EmbyApi {
       String tag,
     ) async {
       try {
-        print('[API][Similar] try $tag path=$path params=$queryParams');
+        _apiLog('[API][Similar] try $tag path=$path params=$queryParams');
         final res = await _dio.get(path, queryParameters: queryParams);
         final data = res.data;
         final items = _extractItemsList(data);
         final result = items?.map(ItemInfo.fromJson).toList() ?? [];
-        print('[API][Similar] ok $tag path=$path -> ${result.length} items');
+        _apiLog('[API][Similar] ok $tag path=$path -> ${result.length} items');
         return result;
       } catch (e) {
-        print('[API][Similar] error $tag path=$path: $e');
+        _apiLog('[API][Similar] error $tag path=$path: $e');
         return const [];
       }
     }
@@ -330,7 +342,7 @@ class EmbyApi {
       return fallback;
     }
 
-    print('[API][Similar] no results for item=$itemId');
+    _apiLog('[API][Similar] no results for item=$itemId');
     return const [];
   }
 
@@ -354,7 +366,7 @@ class EmbyApi {
     required Map<String, dynamic> baseParams,
   }) async {
     try {
-      print('[API][Similar] fallback start for item=$itemId');
+      _apiLog('[API][Similar] fallback start for item=$itemId');
       final itemRes = await _dio.get(
         '/Users/$userId/Items/$itemId',
         queryParameters: {
@@ -364,7 +376,7 @@ class EmbyApi {
       );
 
       if (itemRes.data is! Map<String, dynamic>) {
-        print('[API][Similar] fallback: item response not a map');
+        _apiLog('[API][Similar] fallback: item response not a map');
         return const [];
       }
 
@@ -398,7 +410,8 @@ class EmbyApi {
         fallbackParams['Genres'] = genres.take(3).join(',');
       }
 
-      print('[API][Similar] fallback params: type=$itemType parent=$parentId genres=${genres.take(3).join('/') }');
+      _apiLog(
+          '[API][Similar] fallback params: type=$itemType parent=$parentId genres=${genres.take(3).join('/')}');
 
       final res = await _dio.get(
         '/Users/$userId/Items',
@@ -407,7 +420,7 @@ class EmbyApi {
 
       final items = _extractItemsList(res.data) ?? const [];
       if (items.isEmpty) {
-        print('[API][Similar] fallback: no items returned');
+        _apiLog('[API][Similar] fallback: no items returned');
         return const [];
       }
 
@@ -417,11 +430,11 @@ class EmbyApi {
           .map(ItemInfo.fromJson)
           .toList();
 
-      print('[API][Similar] fallback produced ${filtered.length} items');
+      _apiLog('[API][Similar] fallback produced ${filtered.length} items');
       return filtered;
     } catch (e, stack) {
-      print('[API][Similar] fallback error: $e');
-      print(stack);
+      _apiLog('[API][Similar] fallback error: $e');
+      _apiLog(stack.toString());
       return const [];
     }
   }
@@ -432,35 +445,36 @@ class EmbyApi {
     required String seriesId,
   }) async {
     try {
-      print('getSeasons: userId=$userId, seriesId=$seriesId');
+      _apiLog('getSeasons: userId=$userId, seriesId=$seriesId');
       final res = await _dio.get('/Shows/$seriesId/Seasons', queryParameters: {
         'UserId': userId,
-        'Fields': 'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+        'Fields':
+            'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
       });
-      print('getSeasons response: ${res.data}');
+      _apiLog('getSeasons response: ${res.data}');
 
       if (res.data is! Map<String, dynamic>) {
-        print('getSeasons: Response is not a Map');
+        _apiLog('getSeasons: Response is not a Map');
         return [];
       }
 
       final items = res.data['Items'];
       if (items == null) {
-        print('getSeasons: No Items field in response');
+        _apiLog('getSeasons: No Items field in response');
         return [];
       }
 
       if (items is! List) {
-        print('getSeasons: Items is not a List');
+        _apiLog('getSeasons: Items is not a List');
         return [];
       }
 
       final list = items.cast<Map<String, dynamic>>();
-      print('getSeasons: Found ${list.length} seasons');
+      _apiLog('getSeasons: Found ${list.length} seasons');
       return list.map((e) => ItemInfo.fromJson(e)).toList();
     } catch (e, stack) {
-      print('getSeasons error: $e');
-      print('Stack trace: $stack');
+      _apiLog('getSeasons error: $e');
+      _apiLog('Stack trace: $stack');
       rethrow;
     }
   }
@@ -472,37 +486,38 @@ class EmbyApi {
     required String seasonId,
   }) async {
     try {
-      print(
+      _apiLog(
           'getEpisodes: userId=$userId, seriesId=$seriesId, seasonId=$seasonId');
       final res = await _dio.get('/Shows/$seriesId/Episodes', queryParameters: {
         'UserId': userId,
         'SeasonId': seasonId,
-        'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+        'Fields':
+            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
       });
-      print('getEpisodes response: ${res.data}');
+      _apiLog('getEpisodes response: ${res.data}');
 
       if (res.data is! Map<String, dynamic>) {
-        print('getEpisodes: Response is not a Map');
+        _apiLog('getEpisodes: Response is not a Map');
         return [];
       }
 
       final items = res.data['Items'];
       if (items == null) {
-        print('getEpisodes: No Items field in response');
+        _apiLog('getEpisodes: No Items field in response');
         return [];
       }
 
       if (items is! List) {
-        print('getEpisodes: Items is not a List');
+        _apiLog('getEpisodes: Items is not a List');
         return [];
       }
 
       final list = items.cast<Map<String, dynamic>>();
-      print('getEpisodes: Found ${list.length} episodes');
+      _apiLog('getEpisodes: Found ${list.length} episodes');
       return list.map((e) => ItemInfo.fromJson(e)).toList();
     } catch (e, stack) {
-      print('getEpisodes error: $e');
-      print('Stack trace: $stack');
+      _apiLog('getEpisodes error: $e');
+      _apiLog('Stack trace: $stack');
       rethrow;
     }
   }
@@ -523,7 +538,8 @@ class EmbyApi {
     int? imageIndex,
     String? tag,
   }) {
-    final buffer = StringBuffer('${_dio.options.baseUrl}/Items/$itemId/Images/$type');
+    final buffer =
+        StringBuffer('${_dio.options.baseUrl}/Items/$itemId/Images/$type');
     if (imageIndex != null) {
       buffer.write('/$imageIndex');
     }
@@ -557,56 +573,83 @@ class EmbyApi {
     final prefs = await sp.SharedPreferences.getInstance();
     final token = prefs.getString('emby_token') ?? '';
     final userId = prefs.getString('emby_user_id') ?? '';
-    
+
     if (userId.isEmpty) {
       throw Exception('User ID is empty');
     }
-    
+
     // ✅ 先获取 item 信息（包含 MediaSources）
-    final res = await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
-      'Fields': 'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+    final res =
+        await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
+      'Fields':
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
     });
     final itemJson = res.data as Map<String, dynamic>;
     final item = ItemInfo.fromJson(itemJson);
-    print('🎬 [API] Item: ${item.name}, Type: ${item.type}');
-    
+    _apiLog('🎬 [API] Item: ${item.name}, Type: ${item.type}');
+
     // ✅ 从 MediaSources 获取第一个可用的 MediaSourceId
-    String mediaSourceId = itemId;  // 默认使用 itemId
+    String mediaSourceId = itemId; // 默认使用 itemId
     if (itemJson['MediaSources'] != null && itemJson['MediaSources'] is List) {
       final mediaSources = itemJson['MediaSources'] as List;
       if (mediaSources.isNotEmpty) {
         final firstSource = mediaSources[0] as Map<String, dynamic>;
         mediaSourceId = firstSource['Id'] as String? ?? itemId;
-        print('🎬 [API] MediaSourceId: $mediaSourceId');
+        _apiLog('🎬 [API] MediaSourceId: $mediaSourceId');
       }
     }
-    
+
     // ✅ 尝试使用最简单的直接下载 URL（最兼容的方式）
-    final uri = _dio.options.baseUrl + 
-        '/Items/$itemId/Download' +
-        '?api_key=$token';
-    
-    print('🎬 [API] Trying direct download URL first: $uri');
-    
+    final uri =
+        _dio.options.baseUrl + '/Items/$itemId/Download' + '?api_key=$token';
+
+    _apiLog('🎬 [API] Trying direct download URL first: $uri');
+
     // 如果直接下载失败，再尝试 HLS
     // final playSessionId = DateTime.now().millisecondsSinceEpoch.toString();
-    // final hlsUri = _dio.options.baseUrl + 
+    // final hlsUri = _dio.options.baseUrl +
     //     '/Videos/$itemId/master.m3u8' +
     //     '?MediaSourceId=$mediaSourceId' +
     //     '&PlaySessionId=$playSessionId' +
     //     '&api_key=$token';
-    
+
     final headers = <String, String>{
       'X-Emby-Token': token,
     };
-    
-    print('🎬 [API] HLS Master URL: $uri');
+
+    _apiLog('🎬 [API] HLS Master URL: $uri');
     if (token.isNotEmpty) {
-      print('🎬 [API] Token: ${token.substring(0, token.length > 10 ? 10 : token.length)}...');
+      _apiLog(
+          '🎬 [API] Token: ${token.substring(0, token.length > 10 ? 10 : token.length)}...');
     } else {
-      print('⚠️ [API] Token is empty!');
+      _apiLog('⚠️ [API] Token is empty!');
     }
     return MediaSourceUrl(uri: uri, headers: headers);
+  }
+
+  Future<void> updateUserItemData(
+    String userId,
+    String itemId, {
+    Duration? position,
+    bool? played,
+  }) async {
+    final payload = <String, dynamic>{};
+    if (position != null) {
+      final ticks = position.inMicroseconds * 10;
+      final clamped = ticks < 0 ? 0 : ticks.clamp(0, 0x7FFFFFFFFFFFFFFF);
+      payload['PlaybackPositionTicks'] = clamped.toInt();
+    }
+    if (played != null) {
+      payload['Played'] = played;
+    }
+    if (payload.isEmpty) {
+      return;
+    }
+    try {
+      await _dio.post('/Users/$userId/Items/$itemId/UserData', data: payload);
+    } catch (e) {
+      _apiLog('updateUserItemData error: $e');
+    }
   }
 }
 
@@ -630,7 +673,7 @@ class ViewInfo {
     final name = json['Name'] as String? ?? 'Unknown';
     final collectionType = json['CollectionType'] as String?;
 
-    print('ViewInfo.fromJson: id=$id, name=$name, type=$collectionType');
+    _apiLog('ViewInfo.fromJson: id=$id, name=$name, type=$collectionType');
 
     return ViewInfo(
       id: id,
@@ -762,8 +805,8 @@ class ItemInfo {
           .toList(),
       performers: (json['People'] as List?)
           ?.where((element) => element is Map)
-          .map((element) => PerformerInfo.fromJson(
-              Map<String, dynamic>.from(element as Map)))
+          .map((element) =>
+              PerformerInfo.fromJson(Map<String, dynamic>.from(element as Map)))
           .toList(),
       externalUrls: (json['ExternalUrls'] as List?)
           ?.whereType<Map<String, dynamic>>()

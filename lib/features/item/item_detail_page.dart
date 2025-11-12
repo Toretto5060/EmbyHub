@@ -14,12 +14,14 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/emby_api_provider.dart';
+import '../../providers/library_provider.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/status_bar_manager.dart';
 import '../../widgets/blur_navigation_bar.dart';
 
 final itemProvider =
     FutureProvider.family<ItemInfo, String>((ref, itemId) async {
+  ref.watch(libraryRefreshTickerProvider);
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     throw Exception('未登录');
@@ -30,6 +32,7 @@ final itemProvider =
 
 final similarItemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, itemId) async {
+  ref.watch(libraryRefreshTickerProvider);
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     debugPrint('[Similar] skipped: not logged in');
@@ -839,7 +842,12 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                 color: buttonColor,
                 borderRadius: BorderRadius.circular(14),
                 onPressed: item.id != null && item.id!.isNotEmpty
-                    ? () => _handlePlay(context, item.id!, fromBeginning: false)
+                    ? () => _handlePlay(
+                          context,
+                          item.id!,
+                          fromBeginning: !canResume,
+                          resumePositionTicks: canResume ? playedTicks : null,
+                        )
                     : null,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -1266,7 +1274,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     );
 
     if (result == 'restart' && item.id != null) {
-      _handlePlay(context, item.id!, fromBeginning: true);
+      _handlePlay(context, item.id!,
+          fromBeginning: true, resumePositionTicks: 0);
     }
   }
 
@@ -1372,14 +1381,22 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     }
   }
 
-  void _handlePlay(BuildContext context, String itemId,
-      {required bool fromBeginning}) {
-    final route = fromBeginning
-        ? Uri(
-            path: '/player/$itemId',
-            queryParameters: const {'fromStart': 'true'},
-          ).toString()
-        : '/player/$itemId';
+  void _handlePlay(
+    BuildContext context,
+    String itemId, {
+    required bool fromBeginning,
+    int? resumePositionTicks,
+  }) {
+    final params = <String, String>{};
+    if (fromBeginning) {
+      params['fromStart'] = 'true';
+    } else if (resumePositionTicks != null && resumePositionTicks > 0) {
+      params['positionTicks'] = resumePositionTicks.toString();
+    }
+    final route = Uri(
+      path: '/player/$itemId',
+      queryParameters: params.isEmpty ? null : params,
+    ).toString();
     context.push(route);
   }
 
