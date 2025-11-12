@@ -171,10 +171,7 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
             height: 44,
             child: NavigationToolbar(
               leading: widget.leading != null
-                  ? Padding(
-                      padding: const EdgeInsets.only(left: 4),
-                      child: _wrapWithColor(widget.leading!, currentColor),
-                    )
+                  ? _wrapWithColor(widget.leading!, currentColor)
                   : null,
               middle: widget.middle != null
                   ? _wrapWithColor(widget.middle!, currentColor)
@@ -191,15 +188,15 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
   }
 
   Widget _wrapWithColor(Widget child, Color color) {
-    return DefaultTextStyle(
-      style: TextStyle(
+    return IconTheme(
+      data: IconThemeData(
         color: color,
-        fontWeight: FontWeight.w600,
+        size: 28,
       ),
-      child: IconTheme(
-        data: IconThemeData(
+      child: DefaultTextStyle(
+        style: TextStyle(
           color: color,
-          size: 28, // 稍小的图标尺寸，让箭头更细
+          fontWeight: FontWeight.w600,
         ),
         child: child,
       ),
@@ -208,26 +205,22 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
 }
 
 /// 创建带毛玻璃效果的返回按钮
-Widget buildBlurBackButton(BuildContext context) {
-  // 使用 Builder 来获取正确的 IconTheme 颜色
-  return Builder(
-    builder: (context) {
-      final color = IconTheme.of(context).color ?? CupertinoColors.activeBlue;
-      return CupertinoNavigationBarBackButton(
-        color: color,
-        onPressed: () => context.pop(),
-      );
-    },
+Widget buildBlurBackButton(BuildContext context, {Color? color}) {
+  return CupertinoNavigationBarBackButton(
+    color: color ?? IconTheme.of(context).color ?? CupertinoColors.activeBlue,
+    onPressed: () => context.pop(),
   );
 }
 
 /// 创建带样式的标题
-Widget buildNavTitle(String title, BuildContext context) {
+Widget buildNavTitle(String title, BuildContext context, {Color? color}) {
+  final baseStyle = DefaultTextStyle.of(context).style;
   return Text(
     title,
-    style: const TextStyle(
+    style: baseStyle.copyWith(
       fontSize: 17,
       fontWeight: FontWeight.w600,
+      color: color ?? baseStyle.color,
     ),
   );
 }

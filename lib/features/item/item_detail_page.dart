@@ -86,6 +86,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       (_headerTopOffset + _headerBaseHeight - _backdropHeight);
   double _headerHeight = _headerBaseHeight;
   SystemUiOverlayStyle? _navSyncedStyle;
+  late SystemUiOverlayStyle _appliedStatusStyle;
   StatusBarStyleController? _statusBarController;
   ModalRoute<dynamic>? _modalRoute;
   Animation<double>? _routeAnimation;
@@ -103,6 +104,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       _syncStatusBarWithNavigation(
           _scrollController.hasClients ? _scrollController.offset : 0.0);
     });
+    _appliedStatusStyle = _statusBarStyle;
   }
 
   @override
@@ -327,8 +329,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                       top: 0,
                       left: 0,
                       right: 0,
-                      child: _buildBlurNavigationBar(
-                          context, data, _statusBarStyle, isPlayed),
+                      child: _buildBlurNavigationBar(context, data, isPlayed),
                     ),
                   ],
                 );
@@ -340,8 +341,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                     top: 0,
                     left: 0,
                     right: 0,
-                    child: _buildBlurNavigationBar(
-                        context, null, _statusBarStyle, false),
+                    child: _buildBlurNavigationBar(context, null, false),
                   ),
                 ],
               ),
@@ -352,8 +352,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                     top: 0,
                     left: 0,
                     right: 0,
-                    child: _buildBlurNavigationBar(
-                        context, null, _statusBarStyle, false),
+                    child: _buildBlurNavigationBar(context, null, false),
                   ),
                 ],
               ),
@@ -367,16 +366,17 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   Widget _buildBlurNavigationBar(
     BuildContext context,
     ItemInfo? data,
-    SystemUiOverlayStyle? styleOverride,
     bool isPlayed,
   ) {
     final brightness = MediaQuery.of(context).platformBrightness;
-    final SystemUiOverlayStyle baseStyle = _statusBarStyle;
+    final SystemUiOverlayStyle baseStyle = _appliedStatusStyle;
     final SystemUiOverlayStyle targetStyle =
-        _defaultStyleForBrightness(brightness);
+        _navSyncedStyle ?? _appliedStatusStyle;
 
     final Color expandedColor = _colorForStatusStyle(baseStyle, brightness);
     final Color collapsedColor = _colorForStatusStyle(targetStyle, brightness);
+    final Color currentColor = Color.lerp(
+        expandedColor, collapsedColor, _showCollapsedNav ? 1.0 : 0.0)!;
 
     final actions =
         data != null ? _buildTopActions(isPlayed) : const <Widget>[];
@@ -384,7 +384,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     final Widget leadingContent = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        buildBlurBackButton(context),
+        buildBlurBackButton(context, color: currentColor),
         if (data != null)
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 180),
@@ -1007,7 +1007,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     _navSyncedStyle = null;
     if (mounted) {
       _statusBarController?.update(style);
-      setState(() {});
+      setState(() {
+        _appliedStatusStyle = style;
+      });
     } else {
       SystemChrome.setSystemUIOverlayStyle(style);
     }
@@ -1041,8 +1043,13 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     _navSyncedStyle = targetStyle;
     if (mounted) {
       _statusBarController?.update(targetStyle);
+      setState(() {
+        _navSyncedStyle = targetStyle;
+        _appliedStatusStyle = targetStyle;
+      });
     } else {
       SystemChrome.setSystemUIOverlayStyle(targetStyle);
+      _appliedStatusStyle = targetStyle;
     }
   }
 
@@ -2328,13 +2335,13 @@ class _CollapsedTitle extends StatelessWidget {
         item.id!.isEmpty ||
         logoTag == null ||
         logoTag.isEmpty) {
-      return _buildTextTitle();
+      return _buildTextTitle(context);
     }
     return FutureBuilder<EmbyApi>(
       future: EmbyApi.create(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return _buildTextTitle();
+          return _buildTextTitle(context);
         }
         final api = snapshot.data!;
         final logoUrl = api.buildImageUrl(
@@ -2344,7 +2351,7 @@ class _CollapsedTitle extends StatelessWidget {
           maxWidth: 300,
         );
         if (logoUrl.isEmpty) {
-          return _buildTextTitle();
+          return _buildTextTitle(context);
         }
         return SizedBox(
           height: 32,
@@ -2366,12 +2373,13 @@ class _CollapsedTitle extends StatelessWidget {
     );
   }
 
-  Widget _buildTextTitle() {
+  Widget _buildTextTitle(BuildContext context) {
+    final baseStyle = DefaultTextStyle.of(context).style;
     return Text(
       item.name,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: const TextStyle(
+      style: baseStyle.copyWith(
         fontSize: 17,
         fontWeight: FontWeight.w600,
       ),

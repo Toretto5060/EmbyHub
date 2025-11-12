@@ -44,13 +44,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   Duration _duration = Duration.zero;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<Duration>? _durSub; // ✅ 添加 duration 订阅
+  StreamSubscription<bool>? _bufferingSub;
   bool _isLandscape = true; // ✅ 默认横屏
+  bool _isBuffering = true;
+  double? _expectedBitrateKbps;
+  double? _currentSpeedKbps;
+  String? _qualityLabel;
   EmbyApi? _api;
   String? _userId;
   DateTime _lastProgressSync = DateTime.fromMillisecondsSinceEpoch(0);
   Duration _lastReportedPosition = Duration.zero;
   bool _completedReported = false;
   late final StateController<int> _refreshTicker;
+  Timer? _speedTimer;
   Duration? get _initialSeekPosition {
     final ticks = widget.initialPositionTicks;
     if (ticks == null || ticks <= 0) return null;
@@ -81,12 +87,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
     _refreshTicker = ref.read(libraryRefreshTickerProvider.notifier);
+    _speedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_expectedBitrateKbps != null) {
+        setState(() {
+          final playing = _player.state.playing;
+          _currentSpeedKbps = playing ? _expectedBitrateKbps : 0;
+        });
+      }
+    });
 
     _load();
   }
 
   Future<void> _load() async {
     try {
+      if (mounted) {
+        setState(() {
+          _isBuffering = true;
+          _ready = false;
+        });
+      }
       _playerLog('🎬 [Player] Loading item: ${widget.itemId}');
       final api = await EmbyApi.create();
       _api = api;
@@ -94,20 +115,51 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       _userId = authState.value?.userId;
       final media = await api.buildHlsUrl(widget.itemId); // ✅ 添加 await
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
+      if (mounted) {
+        setState(() {
+          _expectedBitrateKbps =
+              media.bitrate != null ? media.bitrate! / 1000 : null;
+          _currentSpeedKbps = _expectedBitrateKbps;
+          if (media.width != null && media.height != null) {
+            _qualityLabel = '${media.width}x${media.height}';
+          }
+          if ((_duration == Duration.zero || _duration.inMilliseconds == 0) &&
+              media.duration != null) {
+            _duration = media.duration!;
+          }
+        });
+      }
 
       final prefs = await SharedPreferences.getInstance();
       _speed = prefs.getDouble('playback_speed') ?? 1.0;
       await _player.setRate(_speed);
 
-      // ✅ 打开媒体并自动播放
-      await _player.open(Media(media.uri, httpHeaders: media.headers),
-          play: true);
-      _playerLog('🎬 [Player] Media opened and playing');
-      final initialSeek = _initialSeekPosition;
-      if (initialSeek != null && initialSeek > Duration.zero) {
-        await _player.seek(initialSeek);
-        _playerLog('🎬 [Player] Seek to ${initialSeek.inSeconds}s');
-        _lastReportedPosition = initialSeek;
+      final needsSeek =
+          _initialSeekPosition != null && _initialSeekPosition! > Duration.zero;
+      _bufferingSub?.cancel();
+      _bufferingSub = _player.stream.buffering.listen((isBuffering) {
+        _playerLog('🎬 [Player] Buffering: $isBuffering');
+        if (!mounted) return;
+        setState(() => _isBuffering = isBuffering);
+      });
+
+      await _player.open(
+        Media(
+          media.uri,
+          httpHeaders: media.headers,
+        ),
+        play: !needsSeek,
+      );
+      _playerLog('🎬 [Player] Media opened');
+
+      if (needsSeek) {
+        // 等待缓冲完成再跳转，避免立即被复位
+        await _player.stream.buffering.firstWhere((value) => value == false);
+        await _player.seek(_initialSeekPosition!);
+        _playerLog('🎬 [Player] Seek to ${_initialSeekPosition!.inSeconds}s');
+        _lastReportedPosition = _initialSeekPosition!;
+        await _player.play();
+        _playerLog('🎬 [Player] Playback started after seek');
       }
 
       // ✅ 监听播放位置
@@ -134,18 +186,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         _playerLog('❌ [Player] Error: $error');
       });
 
-      // ✅ 监听缓冲状态
-      _player.stream.buffering.listen((isBuffering) {
-        _playerLog('🎬 [Player] Buffering: $isBuffering');
-      });
-
       // ✅ 监听媒体轨道
       _player.stream.tracks.listen((tracks) {
         _playerLog(
             '🎬 [Player] Tracks: ${tracks.video.length} video, ${tracks.audio.length} audio');
       });
 
-      setState(() => _ready = true);
+      if (mounted) {
+        setState(() {
+          _ready = true;
+          _isBuffering = false;
+        });
+      }
       _playerLog('🎬 [Player] Ready to play');
     } catch (e, stack) {
       _playerLog('❌ [Player] Load failed: $e');
@@ -157,20 +209,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   void dispose() {
     _posSub?.cancel();
     _durSub?.cancel(); // ✅ 取消 duration 订阅
-    _player.dispose();
+    _bufferingSub?.cancel();
     final markComplete =
         _duration > Duration.zero && _position >= _duration * 0.95;
     _syncProgress(_position, force: true, markComplete: markComplete);
+    unawaited(_player.dispose());
+    _speedTimer?.cancel();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
+    final ticker = _refreshTicker;
     Future.microtask(() {
-      SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-      ]);
-      SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.manual,
-        overlays: SystemUiOverlay.values,
-      );
-      _refreshTicker.state = _refreshTicker.state + 1;
+      ticker.state = ticker.state + 1;
     });
 
     super.dispose();
@@ -216,6 +271,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     final m = d.inMinutes % 60;
     final s = d.inSeconds % 60;
     return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
+  }
+
+  String _formatBitrate(double? kbps) {
+    if (kbps == null || kbps <= 0) return '--';
+    if (kbps >= 1000) {
+      return '${(kbps / 1000).toStringAsFixed(2)} Mbps';
+    }
+    return '${kbps.toStringAsFixed(0)} Kbps';
   }
 
   void _handlePositionUpdate(Duration pos) {
@@ -275,112 +338,143 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       style: overlay,
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: _ready
-            ? Stack(
-                children: [
-                  // ✅ 全屏视频播放器（从状态栏到底部）
-                  Positioned.fill(
-                    child: Video(
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: _ready
+                  ? Video(
                       controller: _controller,
                       fit: BoxFit.contain,
                       controls: NoVideoControls, // ✅ 隐藏原生播放控件
-                    ),
+                    )
+                  : Container(color: Colors.black),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: EdgeInsets.only(
+                  top: MediaQuery.of(context).padding.top,
+                  left: 8,
+                  right: 8,
+                  bottom: 8,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.6),
+                      Colors.black.withValues(alpha: 0.0),
+                    ],
                   ),
-                  // ✅ 悬浮的返回按钮和标题（顶部）
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: EdgeInsets.only(
-                        top: MediaQuery.of(context).padding.top,
-                        left: 8,
-                        right: 8,
-                        bottom: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.6),
-                            Colors.black.withValues(alpha: 0.0),
-                          ],
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              // 返回按钮
-                              CupertinoButton(
-                                padding: EdgeInsets.zero,
-                                onPressed: () => context.pop(),
-                                child: const Icon(
-                                  CupertinoIcons.back,
-                                  color: Colors.white,
-                                  size: 28,
-                                ),
-                              ),
-                              const Spacer(),
-                              // 调试信息
-                              Text(
-                                'Duration: ${_fmt(_duration)} | Pos: ${_fmt(_position)}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const Spacer(),
-                              // 横竖屏切换按钮
-                              CupertinoButton(
-                                padding: EdgeInsets.zero,
-                                onPressed: _toggleOrientation,
-                                child: Icon(
-                                  _isLandscape
-                                      ? CupertinoIcons.device_phone_portrait
-                                      : CupertinoIcons.device_phone_landscape,
-                                  color: Colors.white,
-                                  size: 24,
-                                ),
-                              ),
-                            ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        CupertinoButton(
+                          padding: EdgeInsets.zero,
+                          onPressed: () => context.pop(),
+                          child: const Icon(
+                            CupertinoIcons.back,
+                            color: Colors.white,
+                            size: 28,
                           ),
-                        ],
-                      ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          'Duration: ${_fmt(_duration)} | Pos: ${_fmt(_position)}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const Spacer(),
+                        CupertinoButton(
+                          padding: EdgeInsets.zero,
+                          onPressed: _toggleOrientation,
+                          child: Icon(
+                            _isLandscape
+                                ? CupertinoIcons.device_phone_portrait
+                                : CupertinoIcons.device_phone_landscape,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  // ✅ 悬浮的播放控件（底部）
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: _Controls(
-                      position: _position,
-                      duration: _duration,
-                      speed: _speed,
-                      onSeek: (d) => _player.seek(d),
-                      onTogglePlay: () async {
-                        final playing = _player.state.playing;
-                        if (playing) {
-                          await _player.pause();
-                        } else {
-                          await _player.play();
-                        }
-                        setState(() {});
-                      },
-                      onSpeed: _changeSpeed,
-                      onPip: _enterPip,
-                    ),
-                  ),
-                ],
-              )
-            : const Center(
-                child: CupertinoActivityIndicator(
-                  color: Colors.white,
+                  ],
                 ),
               ),
+            ),
+            if (_ready)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: _Controls(
+                  position: _position,
+                  duration: _duration,
+                  speed: _speed,
+                  onSeek: (d) => _player.seek(d),
+                  onTogglePlay: () async {
+                    final playing = _player.state.playing;
+                    if (playing) {
+                      await _player.pause();
+                    } else {
+                      await _player.play();
+                    }
+                    setState(() {});
+                  },
+                  onSpeed: _changeSpeed,
+                  onPip: _enterPip,
+                ),
+              ),
+            if (!_ready || _isBuffering)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withOpacity(0.2),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const CupertinoActivityIndicator(color: Colors.white),
+                      const SizedBox(height: 16),
+                      Text(
+                        _ready ? '缓冲中...' : '正在准备播放...',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                        ),
+                      ),
+                      if (_expectedBitrateKbps != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _formatBitrate(_currentSpeedKbps),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                      if (_qualityLabel != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '分辨率: $_qualityLabel',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -407,7 +501,9 @@ class _Controls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final totalSeconds = duration.inSeconds.clamp(1, 1 << 30);
-    final value = position.inSeconds / totalSeconds;
+    final rawValue = position.inSeconds / totalSeconds;
+    final sliderValue =
+        rawValue.isNaN ? 0.0 : rawValue.clamp(0.0, 1.0).toDouble();
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
@@ -439,7 +535,7 @@ class _Controls extends StatelessWidget {
             ],
           ),
           CupertinoSlider(
-            value: value.isNaN ? 0 : value,
+            value: sliderValue,
             onChanged: (v) {
               final target = Duration(seconds: (v * totalSeconds).round());
               onSeek(target);

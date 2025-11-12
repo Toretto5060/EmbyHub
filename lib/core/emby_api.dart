@@ -590,11 +590,22 @@ class EmbyApi {
 
     // ✅ 从 MediaSources 获取第一个可用的 MediaSourceId
     String mediaSourceId = itemId; // 默认使用 itemId
+    int? mediaWidth;
+    int? mediaHeight;
+    int? mediaBitrate;
+    Duration? mediaDuration;
     if (itemJson['MediaSources'] != null && itemJson['MediaSources'] is List) {
       final mediaSources = itemJson['MediaSources'] as List;
       if (mediaSources.isNotEmpty) {
         final firstSource = mediaSources[0] as Map<String, dynamic>;
         mediaSourceId = firstSource['Id'] as String? ?? itemId;
+        mediaWidth = (firstSource['Width'] as num?)?.toInt();
+        mediaHeight = (firstSource['Height'] as num?)?.toInt();
+        mediaBitrate = (firstSource['Bitrate'] as num?)?.toInt();
+        final runTimeTicks = (firstSource['RunTimeTicks'] as num?)?.toInt();
+        if (runTimeTicks != null && runTimeTicks > 0) {
+          mediaDuration = Duration(microseconds: (runTimeTicks / 10).round());
+        }
         _apiLog('🎬 [API] MediaSourceId: $mediaSourceId');
       }
     }
@@ -624,7 +635,14 @@ class EmbyApi {
     } else {
       _apiLog('⚠️ [API] Token is empty!');
     }
-    return MediaSourceUrl(uri: uri, headers: headers);
+    return MediaSourceUrl(
+      uri: uri,
+      headers: headers,
+      bitrate: mediaBitrate,
+      width: mediaWidth,
+      height: mediaHeight,
+      duration: mediaDuration,
+    );
   }
 
   Future<void> updateUserItemData(
@@ -825,9 +843,20 @@ class ItemInfo {
 }
 
 class MediaSourceUrl {
-  MediaSourceUrl({required this.uri, required this.headers});
+  MediaSourceUrl({
+    required this.uri,
+    required this.headers,
+    this.bitrate,
+    this.width,
+    this.height,
+    this.duration,
+  });
   final String uri;
   final Map<String, String> headers;
+  final int? bitrate;
+  final int? width;
+  final int? height;
+  final Duration? duration;
 }
 
 class ExternalUrlInfo {
