@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -22,6 +23,9 @@ class _NonRetryableException implements Exception {
 class _ImageCache {
   static final _memoryCache = <String, ui.Image>{};
   static final _loading = <String, Future<ui.Image>>{};
+  static final Queue<_PendingRequest> _pendingRequests =
+      Queue<_PendingRequest>();
+  static bool _isProcessingQueue = false;
   static Directory? _cacheDir;
   
   // 初始化缓存目录
@@ -87,12 +91,43 @@ class _ImageCache {
   // 正在加载的图片
   static Future<ui.Image>? getLoading(String url) => _loading[url];
   
-  static void putLoading(String url, Future<ui.Image> future) {
-    _loading[url] = future;
+  static Future<ui.Image> enqueueNetworkLoad(
+      String url, Future<ui.Image> Function() loader) {
+    final existing = _loading[url];
+    if (existing != null) {
+      return existing;
+    }
+    final completer = Completer<ui.Image>();
+    _loading[url] = completer.future;
+    _pendingRequests.add(_PendingRequest(url, loader, completer));
+    _processQueue();
+    return completer.future;
   }
-  
-  static void removeLoading(String url) {
-    _loading.remove(url);
+
+  static void _processQueue() {
+    if (_isProcessingQueue) {
+      return;
+    }
+    if (_pendingRequests.isEmpty) {
+      return;
+    }
+    _isProcessingQueue = true;
+    final request = _pendingRequests.removeFirst();
+    request.loader().then((image) {
+      if (!request.completer.isCompleted) {
+        request.completer.complete(image);
+      }
+    }).catchError((error, stack) {
+      if (!request.completer.isCompleted) {
+        request.completer.completeError(error, stack);
+      }
+    }).whenComplete(() {
+      _loading.remove(request.url);
+      _isProcessingQueue = false;
+      if (_pendingRequests.isNotEmpty) {
+        _processQueue();
+      }
+    });
   }
   
   // 清空所有缓存
@@ -258,15 +293,16 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
     }
 
     // 创建加载 Future 并放入正在加载的队列
-    final loadFuture = _loadImageFromNetwork();
-    _ImageCache.putLoading(widget.imageUrl, loadFuture);
+    final loadFuture = _ImageCache.enqueueNetworkLoad(
+      widget.imageUrl,
+      _loadImageFromNetwork,
+    );
     
     try {
       final image = await loadFuture;
       
       // ✅ 保存到内存缓存
       _ImageCache.putToMemory(widget.imageUrl, image);
-      _ImageCache.removeLoading(widget.imageUrl);
       
       if (mounted && _currentUrl == widget.imageUrl) {
         setState(() {
@@ -277,9 +313,6 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
         widget.onImageReady?.call(image);
       }
     } catch (e) {
-      // ✅ 移除 loading 状态
-      _ImageCache.removeLoading(widget.imageUrl);
-      
       // ✅ 检查是否是不可重试的错误
       if (e is _NonRetryableException) {
         print('🚫 Non-retryable error, showing placeholder: $e');
@@ -363,20 +396,9 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
   Widget build(BuildContext context) {
     // 如果有图片，直接显示（即使正在加载新图片）
     if (_image != null) {
-      return TweenAnimationBuilder<double>(
-        key: ValueKey(_image.hashCode),  // 用于触发动画
-        tween: Tween<double>(begin: 0.0, end: 1.0),
-        duration: widget.fadeDuration,
-        curve: Curves.easeIn,
-        builder: (context, value, _) {
-          return Opacity(
-            opacity: value,
-            child: RawImage(
-              image: _image,
-              fit: widget.fit,
-            ),
-          );
-        },
+      return RawImage(
+        image: _image,
+        fit: widget.fit,
       );
     }
     
@@ -410,6 +432,13 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
     // _image?.dispose();
     super.dispose();
   }
+}
+
+class _PendingRequest {
+  _PendingRequest(this.url, this.loader, this.completer);
+  final String url;
+  final Future<ui.Image> Function() loader;
+  final Completer<ui.Image> completer;
 }
 
 /*

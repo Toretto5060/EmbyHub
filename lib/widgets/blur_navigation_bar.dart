@@ -66,8 +66,7 @@ class BlurNavigationBar extends StatelessWidget
             final baseColor = brightness == Brightness.dark
                 ? const Color(0xFF1C1C1E)
                 : const Color(0xFFF2F2F7);
-            final Color expandedColor = expandedForegroundColor ??
-                _resolveColor(style, brightness, systemColor);
+            final Color expandedColor = expandedForegroundColor ?? systemColor;
             final Color collapsedColor =
                 collapsedForegroundColor ?? systemColor;
 
@@ -124,18 +123,6 @@ class BlurNavigationBar extends StatelessWidget
         );
       },
     );
-  }
-
-  Color _resolveColor(
-      SystemUiOverlayStyle? style, Brightness brightness, Color systemColor) {
-    final iconBrightness = style?.statusBarIconBrightness;
-    if (iconBrightness == Brightness.light) {
-      return Colors.white;
-    }
-    if (iconBrightness == Brightness.dark) {
-      return Colors.black87;
-    }
-    return systemColor;
   }
 
   Widget _wrapWithColor(Widget child, Color color) {

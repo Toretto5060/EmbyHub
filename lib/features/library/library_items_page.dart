@@ -149,9 +149,9 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
         middle: buildNavTitle(widget.viewName, context),
         scrollController: _scrollController,
       ),
-        child: items.when(
-          data: (list) {
-            if (list.isEmpty) {
+      child: items.when(
+        data: (list) {
+          if (list.isEmpty) {
             return Center(
               child: Padding(
                 padding: EdgeInsets.only(
@@ -187,12 +187,14 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
                   ),
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final hasHorizontal = row.any((entry) => entry.hasHorizontalArtwork);
+                      final hasHorizontal =
+                          row.any((entry) => entry.hasHorizontalArtwork);
                       final columns = hasHorizontal ? 3 : 2;
                       final spacing = columns > 1 ? 16.0 : 0.0;
                       final availableWidth = constraints.maxWidth;
                       final totalSpacing = spacing * (columns - 1);
-                      final cardWidth = (availableWidth - totalSpacing) / columns;
+                      final cardWidth =
+                          (availableWidth - totalSpacing) / columns;
 
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,7 +206,8 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
                               child: i < row.length
                                   ? _ItemTile(
                                       item: row[i].item,
-                                      hasHorizontalArtwork: row[i].hasHorizontalArtwork,
+                                      hasHorizontalArtwork:
+                                          row[i].hasHorizontalArtwork,
                                       cardWidth: cardWidth,
                                     )
                                   : const SizedBox.shrink(),
@@ -266,12 +269,11 @@ class _ItemTileState extends ConsumerState<_ItemTile>
     super.build(context);
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
-    
+
     // 提取年份信息（与首页逻辑一致）
     String? yearText;
     if (item.premiereDate != null && item.premiereDate!.isNotEmpty) {
-      final startYear =
-          int.tryParse(item.premiereDate!.substring(0, 4));
+      final startYear = int.tryParse(item.premiereDate!.substring(0, 4));
       if (startYear != null) {
         if (item.endDate != null && item.endDate!.isNotEmpty) {
           final endYear = int.tryParse(item.endDate!.substring(0, 4));
@@ -289,7 +291,7 @@ class _ItemTileState extends ConsumerState<_ItemTile>
     } else if (item.productionYear != null) {
       yearText = '${item.productionYear}';
     }
-    
+
     int clampTicks(int value, int max) {
       if (value < 0) return 0;
       if (max <= 0) return value;
@@ -299,12 +301,16 @@ class _ItemTileState extends ConsumerState<_ItemTile>
 
     final userData = item.userData ?? {};
     final totalTicks = item.runTimeTicks ?? 0;
-    final playbackTicks = (userData['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+    final playbackTicks =
+        (userData['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
     final playedTicks = clampTicks(playbackTicks, totalTicks);
-    final played = userData['Played'] == true || (totalTicks > 0 && playedTicks >= totalTicks);
-    final showProgress = item.type == 'Movie' && !played && totalTicks > 0 && playedTicks > 0;
+    final played = userData['Played'] == true ||
+        (totalTicks > 0 && playedTicks >= totalTicks);
+    final showProgress =
+        item.type == 'Movie' && !played && totalTicks > 0 && playedTicks > 0;
     final progress = totalTicks > 0 ? playedTicks / totalTicks : 0.0;
-    final remainingTicks = totalTicks > playedTicks ? totalTicks - playedTicks : 0;
+    final remainingTicks =
+        totalTicks > playedTicks ? totalTicks - playedTicks : 0;
     final remainingDuration = Duration(microseconds: remainingTicks ~/ 10);
 
     String formatRemaining(Duration d) {
@@ -394,16 +400,9 @@ class _ItemTileState extends ConsumerState<_ItemTile>
               width: widget.cardWidth,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(isDark ? 0.18 : 0.12),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
               ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -499,27 +498,18 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              TweenAnimationBuilder<double>(
-                                tween: Tween<double>(
-                                  begin: 0,
-                                  end: progress.clamp(0.0, 1.0),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: LinearProgressIndicator(
+                                  value: progress.clamp(0.0, 1.0),
+                                  minHeight: 4,
+                                  backgroundColor:
+                                      Colors.white.withValues(alpha: 0.2),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    const Color(0xFFFFB74D)
+                                        .withValues(alpha: 0.95),
+                                  ),
                                 ),
-                                duration: const Duration(milliseconds: 400),
-                                curve: Curves.easeOut,
-                                builder: (context, value, child) {
-                                  return ClipRRect(
-                                    borderRadius: BorderRadius.circular(999),
-                                    child: LinearProgressIndicator(
-                                      value: value,
-                                      minHeight: 4,
-                                      backgroundColor:
-                                          Colors.white.withValues(alpha: 0.2),
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                        const Color(0xFFFFB74D).withValues(alpha: 0.95),
-                                      ),
-                                    ),
-                                  );
-                                },
                               ),
                             ],
                           ),
@@ -604,10 +594,9 @@ class _PosterSkeleton extends StatelessWidget {
   const _PosterSkeleton({this.itemType});
   final String? itemType;
 
-  IconData get _icon =>
-      (itemType == 'Series' || itemType == 'Episode')
-          ? CupertinoIcons.tv
-          : CupertinoIcons.film;
+  IconData get _icon => (itemType == 'Series' || itemType == 'Episode')
+      ? CupertinoIcons.tv
+      : CupertinoIcons.film;
 
   @override
   Widget build(BuildContext context) {

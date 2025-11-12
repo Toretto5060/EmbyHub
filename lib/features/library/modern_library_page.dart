@@ -681,13 +681,6 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
             Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(isDark ? 0.18 : 0.12),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -904,25 +897,14 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(isDark ? 0.18 : 0.12),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
+            AspectRatio(
+              aspectRatio: 16 / 9,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: _buildResumePoster(context, ref, item),
-                    ),
+                    _buildResumePoster(context, ref, item),
                     if (totalTicks > 0 && normalizedProgress > 0)
                       Positioned(
                         bottom: 0,
@@ -955,24 +937,14 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                               const SizedBox(height: 4),
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(999),
-                                child: TweenAnimationBuilder<double>(
-                                  tween: Tween<double>(
-                                    begin: 0,
-                                    end: normalizedProgress,
-                                  ),
-                                  duration: const Duration(milliseconds: 500),
-                                  curve: Curves.easeOut,
-                                  builder: (context, value, child) {
-                                    return LinearProgressIndicator(
-                                      value: value,
-                                      minHeight: 3,
-                                      backgroundColor:
-                                          Colors.white.withValues(alpha: 0.2),
-                                      valueColor: AlwaysStoppedAnimation(
-                                          const Color(0xFFFFB74D)
-                                              .withValues(alpha: 0.95)),
-                                    );
-                                  },
+                                child: LinearProgressIndicator(
+                                  value: normalizedProgress,
+                                  minHeight: 3,
+                                  backgroundColor:
+                                      Colors.white.withValues(alpha: 0.2),
+                                  valueColor: AlwaysStoppedAnimation(
+                                      const Color(0xFFFFB74D)
+                                          .withValues(alpha: 0.95)),
                                 ),
                               ),
                             ],
