@@ -16,6 +16,7 @@ import '../../providers/settings_provider.dart';
 import '../../providers/emby_api_provider.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/status_bar_manager.dart';
+import '../../utils/status_bar_util.dart';
 import '../../widgets/blur_navigation_bar.dart';
 
 final itemProvider =
@@ -55,14 +56,20 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
     statusBarBrightness: Brightness.dark,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.light,
+    systemStatusBarContrastEnforced: false,
   );
   static const SystemUiOverlayStyle _darkStatusBar = SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
     statusBarBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.dark,
+    systemStatusBarContrastEnforced: false,
   );
 
-  SystemUiOverlayStyle _statusBarStyle = _lightStatusBar;
+  late SystemUiOverlayStyle _statusBarStyle;
   final Map<String, SystemUiOverlayStyle> _imageStyleCache = {};
   int? _selectedAudioStreamIndex;
   int? _selectedSubtitleStreamIndex;
@@ -78,14 +85,21 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   double _headerHeight = _headerBaseHeight;
   SystemUiOverlayStyle? _navSyncedStyle;
   SystemUiOverlayStyle? _initialStatusStyle;
+  StatusBarStyleController? _statusBarController;
 
   @override
   void initState() {
     super.initState();
+    final platformBrightness =
+        WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    _statusBarStyle = StatusBarManager.currentStyle ??
+        _defaultStyleForBrightness(platformBrightness);
     _scrollController.addListener(_handleScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _initialStatusStyle = StatusBarManager.currentStyle;
+      _syncStatusBarWithNavigation(
+          _scrollController.hasClients ? _scrollController.offset : 0.0);
     });
   }
 
@@ -106,7 +120,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
         _showCollapsedNav = shouldShow;
       });
     }
-    // _syncStatusBarWithNavigation(offset);
+    _syncStatusBarWithNavigation(offset);
   }
 
   @override
@@ -115,200 +129,210 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
 
     return StatusBarStyleScope(
       style: _statusBarStyle,
-      child: CupertinoPageScaffold(
-        backgroundColor: CupertinoColors.systemBackground,
-        child: item.when(
-          data: (data) {
-            final isPlayed = (data.userData?['Played'] as bool?) ?? false;
-            final isDark =
-                MediaQuery.of(context).platformBrightness == Brightness.dark;
-            final performers = data.performers ?? const <PerformerInfo>[];
-            final externalLinks = _composeExternalLinks(data);
-            final similarItems = ref.watch(similarItemsProvider(widget.itemId));
+      child: Builder(
+        builder: (context) {
+          _statusBarController = StatusBarStyleScope.of(context);
+          return CupertinoPageScaffold(
+            backgroundColor: CupertinoColors.systemBackground,
+            child: item.when(
+              data: (data) {
+                final isPlayed = (data.userData?['Played'] as bool?) ?? false;
+                final isDark = MediaQuery.of(context).platformBrightness ==
+                    Brightness.dark;
+                final performers = data.performers ?? const <PerformerInfo>[];
+                final externalLinks = _composeExternalLinks(data);
+                final similarItems =
+                    ref.watch(similarItemsProvider(widget.itemId));
 
-            return Stack(
-              children: [
-                CustomScrollView(
-                  controller: _scrollController,
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: SizedBox(
-                        height: _heroBaseHeight +
-                            (_headerHeight - _headerBaseHeight),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Positioned(
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              height: _backdropHeight,
-                              child: _buildBackdropBackground(context, data),
-                            ),
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              top: _headerTopOffset,
-                              child: _buildHeaderCard(context, data, isDark),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    SliverToBoxAdapter(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (performers.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 20),
-                              child: Text(
-                                '演员',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w600,
+                return Stack(
+                  children: [
+                    CustomScrollView(
+                      controller: _scrollController,
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child: SizedBox(
+                            height: _heroBaseHeight +
+                                (_headerHeight - _headerBaseHeight),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  height: _backdropHeight,
+                                  child:
+                                      _buildBackdropBackground(context, data),
                                 ),
-                              ),
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  top: _headerTopOffset,
+                                  child:
+                                      _buildHeaderCard(context, data, isDark),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              height: 190,
-                              child: ListView.builder(
-                                padding: EdgeInsets.zero,
-                                scrollDirection: Axis.horizontal,
-                                itemCount: performers.length,
-                                itemBuilder: (context, index) {
-                                  final card = _PerformerCard(
-                                    performer: performers[index],
-                                    isDark: isDark,
-                                  );
-                                  final bool isFirst = index == 0;
-                                  final bool isLast =
-                                      index == performers.length - 1;
-                                  return Padding(
-                                    padding: EdgeInsets.only(
-                                      left: isFirst ? 20 : 12,
-                                      right: isLast ? 20 : 0,
+                          ),
+                        ),
+                        SliverToBoxAdapter(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (performers.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 20),
+                                  child: Text(
+                                    '演员',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600,
                                     ),
-                                    child: card,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                SizedBox(
+                                  height: 190,
+                                  child: ListView.builder(
+                                    padding: EdgeInsets.zero,
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: performers.length,
+                                    itemBuilder: (context, index) {
+                                      final card = _PerformerCard(
+                                        performer: performers[index],
+                                        isDark: isDark,
+                                      );
+                                      final bool isFirst = index == 0;
+                                      final bool isLast =
+                                          index == performers.length - 1;
+                                      return Padding(
+                                        padding: EdgeInsets.only(
+                                          left: isFirst ? 20 : 12,
+                                          right: isLast ? 20 : 0,
+                                        ),
+                                        child: card,
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                              similarItems.when(
+                                data: (items) {
+                                  if (items.isEmpty) {
+                                    debugPrint('[Similar] no items to display');
+                                    return const SizedBox.shrink();
+                                  }
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const SizedBox(height: 24),
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 20),
+                                        child: Text(
+                                          '其他类似影片',
+                                          style: TextStyle(
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      SizedBox(
+                                        height: 190,
+                                        child: ListView.builder(
+                                          padding: EdgeInsets.zero,
+                                          scrollDirection: Axis.horizontal,
+                                          itemCount: items.length,
+                                          itemBuilder: (context, index) {
+                                            final card = _SimilarCard(
+                                              item: items[index],
+                                              isDark: isDark,
+                                            );
+                                            final bool isFirst = index == 0;
+                                            final bool isLast =
+                                                index == items.length - 1;
+                                            return Padding(
+                                              padding: EdgeInsets.only(
+                                                left: isFirst ? 20 : 12,
+                                                right: isLast ? 20 : 0,
+                                              ),
+                                              child: card,
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ],
                                   );
                                 },
-                              ),
-                            ),
-                          ],
-                          similarItems.when(
-                            data: (items) {
-                              if (items.isEmpty) {
-                                debugPrint('[Similar] no items to display');
-                                return const SizedBox.shrink();
-                              }
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const SizedBox(height: 24),
-                                  const Padding(
-                                    padding:
-                                        EdgeInsets.symmetric(horizontal: 20),
-                                    child: Text(
-                                      '其他类似影片',
-                                      style: TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                                loading: () => const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 24),
+                                  child: Center(
+                                    child: CupertinoActivityIndicator(),
                                   ),
-                                  const SizedBox(height: 12),
-                                  SizedBox(
-                                    height: 190,
-                                    child: ListView.builder(
-                                      padding: EdgeInsets.zero,
-                                      scrollDirection: Axis.horizontal,
-                                      itemCount: items.length,
-                                      itemBuilder: (context, index) {
-                                        final card = _SimilarCard(
-                                          item: items[index],
-                                          isDark: isDark,
-                                        );
-                                        final bool isFirst = index == 0;
-                                        final bool isLast =
-                                            index == items.length - 1;
-                                        return Padding(
-                                          padding: EdgeInsets.only(
-                                            left: isFirst ? 20 : 12,
-                                            right: isLast ? 20 : 0,
-                                          ),
-                                          child: card,
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                            loading: () => const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 24),
-                              child: Center(
-                                child: CupertinoActivityIndicator(),
+                                ),
+                                error: (_, __) => const SizedBox.shrink(),
                               ),
-                            ),
-                            error: (_, __) => const SizedBox.shrink(),
+                              if (externalLinks.isNotEmpty) ...[
+                                const SizedBox(height: 24),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 20),
+                                  child: _buildExternalLinks(
+                                      externalLinks, isDark),
+                                ),
+                              ],
+                              const SizedBox(height: 24),
+                              _buildDetailedMediaModules(
+                                data,
+                                isDark,
+                                horizontalPadding: 20,
+                              ),
+                            ],
                           ),
-                          if (externalLinks.isNotEmpty) ...[
-                            const SizedBox(height: 24),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 20),
-                              child: _buildExternalLinks(externalLinks, isDark),
-                            ),
-                          ],
-                          const SizedBox(height: 24),
-                          _buildDetailedMediaModules(
-                            data,
-                            isDark,
-                            horizontalPadding: 20,
-                          ),
-                        ],
-                      ),
+                        ),
+                        const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                      ],
                     ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: _buildBlurNavigationBar(
+                          context, data, _statusBarStyle, isPlayed),
+                    ),
                   ],
-                ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: _buildBlurNavigationBar(
-                      context, data, _statusBarStyle, isPlayed),
-                ),
-              ],
-            );
-          },
-          loading: () => Stack(
-            children: [
-              const Center(child: CupertinoActivityIndicator()),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: _buildBlurNavigationBar(
-                    context, null, _statusBarStyle, false),
+                );
+              },
+              loading: () => Stack(
+                children: [
+                  const Center(child: CupertinoActivityIndicator()),
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _buildBlurNavigationBar(
+                        context, null, _statusBarStyle, false),
+                  ),
+                ],
               ),
-            ],
-          ),
-          error: (e, _) => Stack(
-            children: [
-              Center(child: Text('加载失败: $e')),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: _buildBlurNavigationBar(
-                    context, null, _statusBarStyle, false),
+              error: (e, _) => Stack(
+                children: [
+                  Center(child: Text('加载失败: $e')),
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _buildBlurNavigationBar(
+                        context, null, _statusBarStyle, false),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -949,48 +973,54 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     }
     _statusBarStyle = style;
     _navSyncedStyle = null;
-    StatusBarStyleScope.of(context)?.update(style);
-    setState(() {});
-    // _syncStatusBarWithNavigation(
-    //     _scrollController.hasClients ? _scrollController.offset : 0.0);
+    if (mounted) {
+      _statusBarController?.update(style);
+      setState(() {});
+    } else {
+      SystemChrome.setSystemUIOverlayStyle(style);
+    }
+    _syncStatusBarWithNavigation(
+        _scrollController.hasClients ? _scrollController.offset : 0.0);
   }
 
   void _syncStatusBarWithNavigation(double offset) {
     if (!mounted) return;
     final brightness = MediaQuery.of(context).platformBrightness;
-    final Color expandedColor =
-        _colorForStatusStyle(_statusBarStyle, brightness);
-    final Color collapsedColor = _colorForStatusStyle(
-        _defaultStyleForBrightness(brightness), brightness);
+    final SystemUiOverlayStyle expandedStyle = _statusBarStyle;
+    final SystemUiOverlayStyle collapsedStyle =
+        _defaultStyleForBrightness(brightness);
 
-    final double blurStart = 10.0;
-    final double blurEnd = _headerTopOffset;
+    const double blurStart = 10.0;
+    const double blurEnd = _headerTopOffset;
     final double progress;
     if (offset <= blurStart) {
       progress = 0.0;
     } else {
-      final double effective = (offset - blurStart).clamp(0.0, blurEnd);
-      progress = (effective / blurEnd).clamp(0.0, 1.0);
+      final double effective =
+          (offset - blurStart).clamp(0.0, blurEnd - blurStart);
+      progress = (effective / (blurEnd - blurStart)).clamp(0.0, 1.0);
     }
 
-    final Color currentColor =
-        Color.lerp(expandedColor, collapsedColor, progress) ?? expandedColor;
-    final Brightness colorBrightness =
-        ThemeData.estimateBrightnessForColor(currentColor);
     final SystemUiOverlayStyle targetStyle =
-        colorBrightness == Brightness.light ? _darkStatusBar : _lightStatusBar;
+        progress < 0.55 ? expandedStyle : collapsedStyle;
     if (_navSyncedStyle == targetStyle) {
       return;
     }
     _navSyncedStyle = targetStyle;
-    StatusBarStyleScope.of(context)?.update(targetStyle);
+    if (mounted) {
+      _statusBarController?.update(targetStyle);
+    } else {
+      SystemChrome.setSystemUIOverlayStyle(targetStyle);
+    }
   }
 
   void _resetStatusBarOnExit() {
     final restoredStyle = _initialStatusStyle ?? StatusBarManager.currentStyle;
-    if (restoredStyle == null) return;
-    _navSyncedStyle = restoredStyle;
-    StatusBarStyleScope.of(context)?.update(restoredStyle);
+    if (restoredStyle != null) {
+      StatusBarUtil.applyStyle(restoredStyle);
+    } else {
+      StatusBarManager.refresh();
+    }
   }
 
   Map<String, dynamic>? _getPrimaryMediaSource(ItemInfo item) {
