@@ -56,3 +56,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // ✅ AndroidX Media 支持（用于 MediaSession 和系统媒体通知）
+    implementation 'androidx.media:media:1.7.0'
+}
