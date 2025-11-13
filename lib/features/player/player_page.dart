@@ -537,13 +537,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     setState(() {
       switch (_videoFit) {
         case BoxFit.contain:
-          _videoFit = BoxFit.cover; // 原始 -> 覆盖
+          _videoFit = BoxFit.cover; // 原始 -> 填充
           break;
         case BoxFit.cover:
-          _videoFit = BoxFit.fill; // 覆盖 -> 填充
+          _videoFit = BoxFit.fill; // 填充 -> 拉伸
           break;
         case BoxFit.fill:
-          _videoFit = BoxFit.contain; // 填充 -> 原始
+          _videoFit = BoxFit.contain; // 拉伸 -> 原始
           break;
         default:
           _videoFit = BoxFit.contain;
@@ -552,17 +552,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _playerLog('🎬 [Player] Video fit changed to: $_videoFit');
   }
 
-  // ✅ 获取视频裁切模式的图标
+  // ✅ 获取视频裁切模式的图标（使用 rounded 风格）
   IconData _getVideoFitIcon() {
     switch (_videoFit) {
       case BoxFit.contain:
-        return Icons.fit_screen; // 原始（适应屏幕）
+        return Icons.fit_screen_rounded; // 原始（适应屏幕）
       case BoxFit.cover:
-        return Icons.crop_free; // 覆盖（裁剪）
+        return Icons.zoom_out_map_rounded; // 填充（放大覆盖）
       case BoxFit.fill:
-        return Icons.fullscreen; // 填充（拉伸）
+        return Icons.open_in_full_rounded; // 拉伸（全屏拉伸）
       default:
-        return Icons.fit_screen;
+        return Icons.fit_screen_rounded;
     }
   }
 
@@ -746,9 +746,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                           child: Container(
                             // ✅ 使用固定高度，确保状态栏显示时按钮在状态栏下方
                             padding: const EdgeInsets.only(
-                              top: 48, // 固定高度，足够容纳状态栏
-                              left: 4,
-                              right: 4,
+                              top: 40, // 固定高度，足够容纳状态栏
+                              left: 16,
+                              right: 16,
                               bottom: 16,
                             ),
                             decoration: BoxDecoration(
@@ -764,9 +764,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                             child: Row(
                               children: [
                                 _buildIconButton(
-                                  icon: CupertinoIcons.back,
+                                  icon: Icons.arrow_back_ios_new_rounded,
                                   onPressed: () => context.pop(),
-                                  size: 26,
+                                  size: 24,
                                 ),
                                 const SizedBox(width: 8),
                                 // ✅ 显示视频标题
@@ -788,28 +788,113 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                // ✅ 小窗按钮
-                                _buildIconButton(
-                                  icon: Icons.picture_in_picture_alt_rounded,
-                                  onPressed: () {
-                                    _enterPip();
-                                    _resetHideControlsTimer();
-                                  },
-                                  size: 22,
+                                const SizedBox(width: 12),
+                                // ✅ 右侧按钮组（带毛玻璃背景）
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(24),
+                                  child: BackdropFilter(
+                                    filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: Theme.of(context).brightness == Brightness.dark
+                                              ? [
+                                                  Colors.grey.shade900.withValues(alpha: 0.6),
+                                                  Colors.grey.shade800.withValues(alpha: 0.4),
+                                                ]
+                                              : [
+                                                  Colors.white.withValues(alpha: 0.2),
+                                                  Colors.white.withValues(alpha: 0.1),
+                                                ],
+                                        ),
+                                        borderRadius: BorderRadius.circular(24),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.2),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // ✅ 视频画面裁切模式切换按钮（带动画）
+                                          CupertinoButton(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 6,
+                                            ),
+                                            minSize: 0,
+                                            onPressed: () {
+                                              _toggleVideoFit();
+                                              _resetHideControlsTimer();
+                                            },
+                                            child: AnimatedSwitcher(
+                                              duration: const Duration(milliseconds: 250),
+                                              transitionBuilder: (child, animation) {
+                                                return RotationTransition(
+                                                  turns: animation,
+                                                  child: FadeTransition(
+                                                    opacity: animation,
+                                                    child: child,
+                                                  ),
+                                                );
+                                              },
+                                              child: Icon(
+                                                _getVideoFitIcon(),
+                                                key: ValueKey<BoxFit>(_videoFit),
+                                                color: Colors.white,
+                                                size: 22,
+                                              ),
+                                            ),
+                                          ),
+                                          // ✅ 小窗按钮
+                                          CupertinoButton(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 6,
+                                            ),
+                                            minSize: 0,
+                                            onPressed: () {
+                                              _enterPip();
+                                              _resetHideControlsTimer();
+                                            },
+                                            child: const Icon(
+                                              Icons.picture_in_picture_alt_rounded,
+                                              color: Colors.white,
+                                              size: 22,
+                                            ),
+                                          ),
+                                          // ✅ 横竖屏切换
+                                          CupertinoButton(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 6,
+                                            ),
+                                            minSize: 0,
+                                            onPressed: () {
+                                              _toggleOrientation();
+                                              _resetHideControlsTimer();
+                                            },
+                                            child: const Icon(
+                                              Icons.screen_rotation_rounded,
+                                              color: Colors.white,
+                                              size: 22,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                const SizedBox(width: 8),
-                                // ✅ 横竖屏切换
-                                _buildIconButton(
-                                  icon: _isLandscape
-                                      ? CupertinoIcons.device_phone_portrait
-                                      : CupertinoIcons.device_phone_landscape,
-                                  onPressed: () {
-                                    _toggleOrientation();
-                                    _resetHideControlsTimer();
-                                  },
-                                  size: 22,
-                                ),
+                                const SizedBox(width: 4),
                               ],
                             ),
                           ),
@@ -825,7 +910,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   _isDraggingProgress &&
                   _draggingPosition != null)
                 Positioned(
-                  top: 110, // 固定高度，在返回按钮下方
+                  top: 102, // 固定高度，在返回按钮下方
                   left: 0,
                   right: 0,
                   child: Center(
@@ -868,8 +953,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   _currentSpeedKbps != null &&
                   _currentSpeedKbps! > 0)
                 Positioned(
-                  top: 100, // 固定高度，在返回按钮下方
-                  right: 8,
+                  top: 92, // 固定高度，在返回按钮下方
+                  right: 16,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -888,8 +973,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                       children: [
                         Icon(
                           _isBuffering
-                              ? CupertinoIcons.arrow_down_circle
-                              : CupertinoIcons.play_circle,
+                              ? Icons.downloading_rounded
+                              : Icons.speed_rounded,
                           color: Colors.white,
                           size: 14,
                         ),
@@ -915,7 +1000,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     animation: _controlsAnimation,
                     builder: (context, child) {
                       return Opacity(
-                        opacity: _controlsAnimation.value * 0.8,
+                        opacity: _controlsAnimation.value * 0.9,
                         child: GestureDetector(
                           onTap: () async {
                             final playing = _player.state.playing;
@@ -926,30 +1011,30 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                             }
                             _resetHideControlsTimer();
                           },
-                          child: Container(
-                            width: 72,
-                            height: 72,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.black.withValues(alpha: 0.5),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.3),
-                                width: 2,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
-                                  blurRadius: 20,
-                                  spreadRadius: 5,
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 300),
+                            transitionBuilder: (child, animation) {
+                              return ScaleTransition(
+                                scale: animation,
+                                child: FadeTransition(
+                                  opacity: animation,
+                                  child: child,
                                 ),
-                              ],
-                            ),
+                              );
+                            },
                             child: Icon(
                               _isPlaying
-                                  ? CupertinoIcons.pause_fill
-                                  : CupertinoIcons.play_fill,
+                                  ? Icons.pause_circle_rounded
+                                  : Icons.play_circle_rounded,
+                              key: ValueKey<bool>(_isPlaying),
                               color: Colors.white,
-                              size: 36,
+                              size: 80,
+                              shadows: const [
+                                Shadow(
+                                  color: Colors.black54,
+                                  blurRadius: 20,
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -1188,7 +1273,7 @@ class _ControlsState extends State<_Controls>
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 20, 12, 20),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.bottomCenter,
