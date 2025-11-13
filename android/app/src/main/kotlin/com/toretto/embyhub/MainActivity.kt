@@ -252,15 +252,23 @@ class MainActivity: FlutterActivity() {
         newConfig: android.content.res.Configuration
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        android.util.Log.d("MainActivity", "PiP mode changed: $isInPictureInPictureMode")
+        android.util.Log.d("MainActivity", "📺 PiP mode changed: $isInPictureInPictureMode")
         
         // 退出 PiP 模式时重置窗口大小状态
         if (!isInPictureInPictureMode) {
             isPipExpanded = false
+            android.util.Log.d("MainActivity", "📺 Exiting PiP mode, reset expanded state")
+        } else {
+            android.util.Log.d("MainActivity", "📺 Entering PiP mode")
         }
         
         // 通知 Flutter 端 PiP 状态变化
-        pipChannel?.invokeMethod("onPipModeChanged", mapOf("isInPipMode" to isInPictureInPictureMode))
+        try {
+            pipChannel?.invokeMethod("onPipModeChanged", mapOf("isInPipMode" to isInPictureInPictureMode))
+            android.util.Log.d("MainActivity", "📺 Notified Flutter: isInPipMode=$isInPictureInPictureMode")
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "❌ Failed to notify Flutter about PiP change: $e")
+        }
     }
     
     // ✅ 初始化 MediaSession

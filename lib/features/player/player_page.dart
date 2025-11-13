@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
@@ -22,6 +23,11 @@ void _playerLog(String message) {
   }
 }
 
+// 重要日志，总是输出
+void _playerLogImportant(String message) {
+  debugPrint(message);
+}
+
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({
     required this.itemId,
@@ -36,7 +42,7 @@ class PlayerPage extends ConsumerStatefulWidget {
 }
 
 class _PlayerPageState extends ConsumerState<PlayerPage>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with SingleTickerProviderStateMixin {
   late final Player _player;
   late final VideoController _controller;
   bool _ready = false;
@@ -61,8 +67,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   late final StateController<int> _refreshTicker;
   Timer? _speedTimer;
 
-  // ✅ 控制栏显示/隐藏
+  // ✅ 控制栏显示/隐藏（初始就显示）
   bool _showControls = true;
+
+  // ✅ 视频画面裁切模式
+  BoxFit _videoFit = BoxFit.contain; // contain(原始), cover(覆盖), fill(填充)
   Timer? _hideControlsTimer;
   late final AnimationController _controlsAnimationController;
   late final Animation<double> _controlsAnimation;
@@ -71,22 +80,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isDraggingProgress = false;
   Duration? _draggingPosition;
 
-  // ✅ 底部上滑手势检测
-  double _verticalDragStart = 0;
-
   // ✅ 视频标题（用于显示和 PiP）
   String _videoTitle = '';
 
   // ✅ PiP 模式状态（用于UI显示）
   bool _isInPipMode = false;
   
-  // ✅ 防止重复触发 PiP（5秒内不重复触发）
-  DateTime? _lastPipAttempt;
-  
+  // ✅ 是否正在执行初始seek（用于隐藏第一帧）
+  bool _isInitialSeeking = false;
+
   Duration? get _initialSeekPosition {
     final ticks = widget.initialPositionTicks;
+    _playerLogImportant('🎬 [Player] Initial position ticks: $ticks');
     if (ticks == null || ticks <= 0) return null;
-    return Duration(microseconds: (ticks / 10).round());
+    final duration = Duration(microseconds: (ticks / 10).round());
+    _playerLogImportant(
+        '🎬 [Player] Initial seek position: ${duration.inSeconds}s');
+    return duration;
   }
 
   static const _pip = MethodChannel('app.pip');
@@ -154,9 +164,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       });
     });
 
-    // ✅ 注册应用生命周期观察者（用于PiP和后台播放）
-    WidgetsBinding.instance.addObserver(this);
-
     // ✅ 监听 PiP 控制按钮的回调
     _pip.setMethodCallHandler((call) async {
       _playerLog('🎬 [Player] PiP method call: ${call.method}');
@@ -173,10 +180,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             await _player.play();
             _playerLog('🎬 [Player] Playing from PiP control');
           }
-          
+
           // 等待播放器状态更新
           await Future.delayed(const Duration(milliseconds: 100));
-          
+
           // 触发状态更新并通知原生层更新按钮
           if (mounted) {
             final newState = _player.state.playing;
@@ -201,66 +208,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
 
     _load();
-  }
-
-  // ✅ 应用生命周期变化回调
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    _playerLog('🎬 [Player] App lifecycle state: $state, ready: $_ready, playing: $_isPlaying');
-
-    if (state == AppLifecycleState.paused) {
-      // ✅ 只有 paused 状态才考虑进入 PiP（不包括 inactive）
-      // inactive 状态可能是下拉通知栏等操作
-      
-      // 防止5秒内重复触发
-      final now = DateTime.now();
-      if (_lastPipAttempt != null && now.difference(_lastPipAttempt!).inSeconds < 2) {
-        _playerLog('🎬 [Player] ❌ Skip PiP: too soon (less than 5s since last attempt)');
-        return;
-      }
-      
-      if (!_ready || !_isPlaying) {
-        _playerLog('🎬 [Player] ❌ Skip PiP: ready=$_ready, playing=$_isPlaying');
-        return;
-      }
-      
-      if (!mounted) {
-        _playerLog('🎬 [Player] ❌ Skip PiP: not mounted');
-        return;
-      }
-      
-      // ✅ 检查当前页面是否是播放器页面（检查 widget 类型）
-      final route = ModalRoute.of(context);
-      final isCurrentRoute = route?.isCurrent ?? false;
-      final routeName = route?.settings.name ?? 'unknown';
-      
-      _playerLog('🎬 [Player] Route check: isCurrent=$isCurrentRoute, name=$routeName, widget=${widget.runtimeType}');
-      
-      if (!isCurrentRoute) {
-        _playerLog('🎬 [Player] ❌ Skip PiP: Player page not current route');
-        return;
-      }
-      
-      // 记录尝试时间
-      _lastPipAttempt = now;
-      
-      _playerLog('🎬 [Player] ✅ All checks passed, entering PiP mode');
-      _enterPip();
-      
-    } else if (state == AppLifecycleState.resumed) {
-      // ✅ 应用从后台恢复，重置 PiP 状态
-      _playerLog('🎬 [Player] App resumed, resetting PiP state');
-      
-      // ✅ 重置 PiP 尝试时间，允许下次触发
-      _lastPipAttempt = null;
-      
-      if (mounted) {
-        setState(() {
-          _isInPipMode = false;
-        });
-      }
-    }
   }
 
   Future<void> _load() async {
@@ -306,6 +253,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       final needsSeek =
           _initialSeekPosition != null && _initialSeekPosition! > Duration.zero;
+
+      _playerLogImportant(
+          '🎬 [Player] needsSeek: $needsSeek, initialPosition: $_initialSeekPosition');
+
       _bufferingSub?.cancel();
       _bufferingSub = _player.stream.buffering.listen((isBuffering) {
         _playerLog('🎬 [Player] Buffering: $isBuffering');
@@ -322,21 +273,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         ),
         play: !needsSeek,
       );
-      
+
       // ✅ 显示系统媒体通知
       _playerLog('🎬 [Player] ✅ Media opened successfully');
       _showMediaNotification();
 
-      if (needsSeek) {
-        // 等待缓冲完成再跳转，避免立即被复位
-        await _player.stream.buffering.firstWhere((value) => value == false);
-        await _player.seek(_initialSeekPosition!);
-        _playerLog('🎬 [Player] Seek to ${_initialSeekPosition!.inSeconds}s');
-        _lastReportedPosition = _initialSeekPosition!;
-        await _player.play();
-        _playerLog('🎬 [Player] Playback started after seek');
-      }
-
+      // ✅ 先设置监听器，确保状态能正确更新
       // ✅ 监听播放位置
       _posSub = _player.stream.position.listen(_handlePositionUpdate);
 
@@ -363,7 +305,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
         // ✅ 更新 PiP 按钮状态
         _updatePipActions();
-        
+
         // ✅ 更新系统媒体通知状态
         _updateMediaNotification();
       });
@@ -379,13 +321,47 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             '🎬 [Player] Tracks: ${tracks.video.length} video, ${tracks.audio.length} audio');
       });
 
+      // ✅ 如果需要从指定位置开始播放
+      if (needsSeek) {
+        // 标记正在执行初始seek，隐藏视频画面
+        if (mounted) {
+          setState(() => _isInitialSeeking = true);
+        }
+        
+        _playerLogImportant('🎬 [Player] ⏱️ Starting playback from beginning first (hidden)...');
+        // 先开始播放，让播放器进入稳定状态
+        await _player.play();
+        
+        _playerLogImportant('🎬 [Player] ⏱️ Waiting for playback to actually start...');
+        // 等待播放真正开始（position 开始更新）
+        await _player.stream.position.firstWhere((pos) => pos > Duration.zero);
+        
+        _playerLogImportant('🎬 [Player] ⏱️ Playback started, now seeking to ${_initialSeekPosition!.inSeconds}s...');
+        await _player.seek(_initialSeekPosition!);
+        _lastReportedPosition = _initialSeekPosition!;
+        
+        // Seek 后确保继续播放
+        _playerLogImportant('🎬 [Player] ✅ Seeked, resuming playback...');
+        await _player.play();
+        
+        // 延迟一下确保seek后的帧已经渲染
+        await Future.delayed(const Duration(milliseconds: 100));
+        
+        // 显示视频画面
+        if (mounted) {
+          setState(() => _isInitialSeeking = false);
+        }
+        _playerLogImportant('🎬 [Player] ✅ Playback resumed from ${_initialSeekPosition!.inSeconds}s, video visible');
+      }
+
       if (mounted) {
         setState(() {
           _ready = true;
           _isBuffering = false;
         });
       }
-      _playerLog('🎬 [Player] ✅ Ready to play, isPlaying: $_isPlaying, canTriggerPip: ${_ready && _isPlaying}');
+      _playerLog(
+          '🎬 [Player] ✅ Ready to play, isPlaying: $_isPlaying, canTriggerPip: ${_ready && _isPlaying}');
     } catch (e, stack) {
       _playerLog('❌ [Player] Load failed: $e');
       _playerLog('Stack: $stack');
@@ -394,11 +370,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   @override
   void dispose() {
+    _playerLog('🎬 [Player] 🔴 PlayerPage disposing...');
+
     // ✅ 隐藏系统媒体通知
     _hideMediaNotification();
-    
-    // ✅ 移除应用生命周期观察者
-    WidgetsBinding.instance.removeObserver(this);
 
     _posSub?.cancel();
     _durSub?.cancel(); // ✅ 取消 duration 订阅
@@ -434,42 +409,26 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     await prefs.setDouble('playback_speed', v);
   }
 
+  // ✅ 手动进入 PiP 模式
   Future<void> _enterPip() async {
     try {
-      // ✅ 最后再次确认页面状态（双重保险）
-      if (!mounted) {
-        _playerLog('🎬 [Player] ❌ Cancelled PiP: not mounted');
-        return;
-      }
-      
-      final route = ModalRoute.of(context);
-      final isCurrentRoute = route?.isCurrent ?? false;
-      
-      if (!isCurrentRoute) {
-        _playerLog('🎬 [Player] ❌ Cancelled PiP: page not current (final check)');
-        return;
-      }
-      
-      if (!_ready || !_isPlaying) {
-        _playerLog('🎬 [Player] ❌ Cancelled PiP: ready=$_ready, playing=$_isPlaying (final check)');
-        return;
-      }
-      
-      _playerLog('🎬 [Player] ⏳ Calling native PiP enter method...');
-      
+      _playerLog(
+          '🎬 [Player] 📞 Manual PiP: Calling native enterPip method...');
+      _playerLog(
+          '🎬 [Player] 📋 PiP params - title: "$_videoTitle", playing: $_isPlaying');
+
       final result = await _pip.invokeMethod('enter', {
         'isPlaying': _isPlaying,
         'title': _videoTitle,
       });
-      
-      _playerLog('🎬 [Player] ✅ PiP call result: $result, title: $_videoTitle, playing: $_isPlaying');
-      
+
+      _playerLog('🎬 [Player] ✅ Native enterPip returned: $result');
+
       // ✅ 不在这里设置 _isInPipMode，等待原生层回调 onPipModeChanged
-      
     } catch (e) {
-      _playerLog('❌ [Player] PiP enter failed: $e');
+      _playerLog('❌ [Player] Manual PiP enter failed: $e');
       if (kDebugMode) {
-        debugPrint('PiP Error: $e');
+        debugPrint('PiP Error Details: $e');
       }
     }
   }
@@ -477,7 +436,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ 更新 PiP 模式下的控制按钮状态
   void _updatePipActions() {
     if (!_isInPipMode) return; // 只在 PiP 模式下更新
-    
+
     try {
       _playerLog('🎬 [Player] Updating PiP actions, isPlaying: $_isPlaying');
       _pip.invokeMethod('updatePipParams', {
@@ -487,12 +446,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerLog('❌ [Player] Update PiP actions failed: $e');
     }
   }
-  
+
   // ✅ 显示系统媒体通知
   void _showMediaNotification() {
     try {
-      _playerLog('🎬 [Player] 📱 Showing system media notification: $_videoTitle');
-      
+      _playerLog(
+          '🎬 [Player] 📱 Showing system media notification: $_videoTitle');
+
       // ✅ 获取海报图片 URL（用于通知栏大图标）
       String? posterUrl;
       if (_api != null && widget.itemId.isNotEmpty) {
@@ -502,18 +462,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           maxWidth: 800, // 通知栏需要大一点的图片
         );
       }
-      
+
       _pip.invokeMethod('showMediaNotification', {
         'isPlaying': _isPlaying,
         'title': _videoTitle.isNotEmpty ? _videoTitle : 'EmbyHub',
         'posterUrl': posterUrl,
       });
-      _playerLog('📱 [Player] Media notification shown with poster: $posterUrl');
+
+      _playerLog(
+          '📱 [Player] Media notification shown with poster: $posterUrl');
     } catch (e) {
       _playerLog('❌ [Player] Show media notification failed: $e');
     }
   }
-  
+
   // ✅ 更新媒体通知状态
   void _updateMediaNotification() {
     try {
@@ -525,7 +487,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           maxWidth: 800,
         );
       }
-      
+
       _pip.invokeMethod('updateMediaSession', {
         'isPlaying': _isPlaying,
         'title': _videoTitle.isNotEmpty ? _videoTitle : 'EmbyHub',
@@ -535,7 +497,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerLog('❌ [Player] Update media notification failed: $e');
     }
   }
-  
+
   // ✅ 隐藏系统媒体通知
   void _hideMediaNotification() {
     try {
@@ -563,6 +525,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       await SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
       ]);
+    }
+  }
+
+  // ✅ 切换视频画面裁切模式
+  void _toggleVideoFit() {
+    setState(() {
+      switch (_videoFit) {
+        case BoxFit.contain:
+          _videoFit = BoxFit.cover; // 原始 -> 覆盖
+          break;
+        case BoxFit.cover:
+          _videoFit = BoxFit.fill; // 覆盖 -> 填充
+          break;
+        case BoxFit.fill:
+          _videoFit = BoxFit.contain; // 填充 -> 原始
+          break;
+        default:
+          _videoFit = BoxFit.contain;
+      }
+    });
+    _playerLog('🎬 [Player] Video fit changed to: $_videoFit');
+  }
+
+  // ✅ 获取视频裁切模式的图标
+  IconData _getVideoFitIcon() {
+    switch (_videoFit) {
+      case BoxFit.contain:
+        return Icons.fit_screen; // 原始（适应屏幕）
+      case BoxFit.cover:
+        return Icons.crop_free; // 覆盖（裁剪）
+      case BoxFit.fill:
+        return Icons.fullscreen; // 填充（拉伸）
+      default:
+        return Icons.fit_screen;
     }
   }
 
@@ -712,36 +708,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           onHorizontalDragStart: (_) {},
           onHorizontalDragUpdate: (_) {},
           onHorizontalDragEnd: (_) {},
-          // ✅ 底部上滑进入小窗播放
-          onVerticalDragStart: (details) {
-            _verticalDragStart = details.globalPosition.dy;
-          },
-          onVerticalDragUpdate: (details) {
-            // 检测是否在屏幕底部1/3区域开始滑动
-            final screenHeight = MediaQuery.of(context).size.height;
-            if (_verticalDragStart > screenHeight * 0.66) {
-              // 从底部向上滑动
-              final delta = _verticalDragStart - details.globalPosition.dy;
-              // 如果向上滑动超过100像素，进入PiP
-              if (delta > 100) {
-                _enterPip();
-                _verticalDragStart = 0; // 重置，避免重复触发
-              }
-            }
-          },
-          onVerticalDragEnd: (_) {
-            _verticalDragStart = 0;
-          },
           behavior: HitTestBehavior.opaque,
           child: Stack(
             children: [
               // ✅ 视频播放器
               Positioned.fill(
                 child: _ready
-                    ? Video(
-                        controller: _controller,
-                        fit: BoxFit.contain,
-                        controls: NoVideoControls, // ✅ 隐藏原生播放控件
+                    ? Opacity(
+                        opacity: _isInitialSeeking ? 0.0 : 1.0,
+                        child: Video(
+                          controller: _controller,
+                          fit: _videoFit,
+                          controls: NoVideoControls, // ✅ 隐藏原生播放控件
+                        ),
                       )
                     : Container(color: Colors.black),
               ),
@@ -1030,15 +1009,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   },
                 ),
 
-              // ✅ 加载/缓冲指示器
+              // ✅ 加载/缓冲指示器（不阻挡点击）
               if (!_ready || _isBuffering)
                 Positioned.fill(
-                  child: Container(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
+                  child: IgnorePointer(
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0),
+                      child: Center(
+                        child: Container(
                           padding: const EdgeInsets.all(20),
                           decoration: BoxDecoration(
                             color: Colors.black.withValues(alpha: 0),
@@ -1083,7 +1061,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                             ],
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
