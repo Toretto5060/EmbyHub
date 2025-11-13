@@ -85,7 +85,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   // ✅ PiP 模式状态（用于UI显示）
   bool _isInPipMode = false;
-  
+
   // ✅ 是否正在执行初始seek（用于隐藏第一帧）
   bool _isInitialSeeking = false;
 
@@ -327,31 +327,35 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         if (mounted) {
           setState(() => _isInitialSeeking = true);
         }
-        
-        _playerLogImportant('🎬 [Player] ⏱️ Starting playback from beginning first (hidden)...');
+
+        _playerLogImportant(
+            '🎬 [Player] ⏱️ Starting playback from beginning first (hidden)...');
         // 先开始播放，让播放器进入稳定状态
         await _player.play();
-        
-        _playerLogImportant('🎬 [Player] ⏱️ Waiting for playback to actually start...');
+
+        _playerLogImportant(
+            '🎬 [Player] ⏱️ Waiting for playback to actually start...');
         // 等待播放真正开始（position 开始更新）
         await _player.stream.position.firstWhere((pos) => pos > Duration.zero);
-        
-        _playerLogImportant('🎬 [Player] ⏱️ Playback started, now seeking to ${_initialSeekPosition!.inSeconds}s...');
+
+        _playerLogImportant(
+            '🎬 [Player] ⏱️ Playback started, now seeking to ${_initialSeekPosition!.inSeconds}s...');
         await _player.seek(_initialSeekPosition!);
         _lastReportedPosition = _initialSeekPosition!;
-        
+
         // Seek 后确保继续播放
         _playerLogImportant('🎬 [Player] ✅ Seeked, resuming playback...');
         await _player.play();
-        
+
         // 延迟一下确保seek后的帧已经渲染
         await Future.delayed(const Duration(milliseconds: 100));
-        
+
         // 显示视频画面
         if (mounted) {
           setState(() => _isInitialSeeking = false);
         }
-        _playerLogImportant('🎬 [Player] ✅ Playback resumed from ${_initialSeekPosition!.inSeconds}s, video visible');
+        _playerLogImportant(
+            '🎬 [Player] ✅ Playback resumed from ${_initialSeekPosition!.inSeconds}s, video visible');
       }
 
       if (mounted) {
@@ -785,6 +789,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                   ),
                                 ),
                                 const SizedBox(width: 8),
+                                // ✅ 小窗按钮
+                                _buildIconButton(
+                                  icon: Icons.picture_in_picture_alt_rounded,
+                                  onPressed: () {
+                                    _enterPip();
+                                    _resetHideControlsTimer();
+                                  },
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 8),
+                                // ✅ 横竖屏切换
                                 _buildIconButton(
                                   icon: _isLandscape
                                       ? CupertinoIcons.device_phone_portrait
@@ -820,7 +835,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                         vertical: 12,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.85),
+                        color: Colors.black.withValues(alpha: 0.75),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: Colors.white.withValues(alpha: 0.3),
@@ -945,7 +960,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
               // ✅ 底部控制栏（淡入淡出动画）
               // PiP 模式下隐藏
-              if (!_isInPipMode && _ready)
+              if (!_isInPipMode)
                 AnimatedBuilder(
                   animation: _controlsAnimation,
                   builder: (context, child) {
@@ -985,21 +1000,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                               _player.seek(d);
                               _resetHideControlsTimer();
                             },
-                            onTogglePlay: () async {
-                              final playing = _player.state.playing;
-                              if (playing) {
-                                await _player.pause();
-                              } else {
-                                await _player.play();
-                              }
-                              _resetHideControlsTimer();
-                            },
                             onSpeed: (v) {
                               _changeSpeed(v);
-                              _resetHideControlsTimer();
-                            },
-                            onPip: () {
-                              _enterPip();
                               _resetHideControlsTimer();
                             },
                           ),
@@ -1077,20 +1079,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required IconData icon,
     required VoidCallback onPressed,
     double size = 24,
+    bool showBackground = false, // ✅ 是否显示背景和边框
   }) {
     return CupertinoButton(
       padding: EdgeInsets.zero,
       onPressed: onPressed,
       child: Container(
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.3),
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.2),
-            width: 1,
-          ),
-        ),
+        decoration: showBackground
+            ? BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.3),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  width: 3,
+                ),
+              )
+            : null,
         child: Icon(
           icon,
           color: Colors.white,
@@ -1112,9 +1117,7 @@ class _Controls extends StatefulWidget {
     required this.onDragStart,
     required this.onDragging,
     required this.onDragEnd,
-    required this.onTogglePlay,
     required this.onSpeed,
-    required this.onPip,
   });
   final Duration position;
   final Duration duration;
@@ -1125,9 +1128,7 @@ class _Controls extends StatefulWidget {
   final VoidCallback onDragStart;
   final ValueChanged<Duration> onDragging;
   final ValueChanged<Duration> onDragEnd;
-  final VoidCallback onTogglePlay;
   final ValueChanged<double> onSpeed;
-  final VoidCallback onPip;
 
   @override
   State<_Controls> createState() => _ControlsState();
@@ -1183,8 +1184,11 @@ class _ControlsState extends State<_Controls>
     final sliderValue =
         rawValue.isNaN ? 0.0 : rawValue.clamp(0.0, 1.0).toDouble();
 
+    // ✅ 根据系统主题模式选择颜色
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+      padding: const EdgeInsets.fromLTRB(12, 20, 12, 20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.bottomCenter,
@@ -1195,132 +1199,144 @@ class _ControlsState extends State<_Controls>
           ],
         ),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // ✅ 进度条
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      _fmt(widget.position),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black45,
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      _fmt(widget.duration),
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black45,
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(40),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              // ✅ 根据系统主题自动切换毛玻璃效果
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDarkMode
+                    ? [
+                        // 深色模式：黑灰色半透明背景
+                        Colors.grey.shade900.withValues(alpha: 0.6),
+                        Colors.grey.shade800.withValues(alpha: 0.4),
+                      ]
+                    : [
+                        // 浅色模式：浅色半透明背景
+                        Colors.white.withValues(alpha: 0.2),
+                        Colors.white.withValues(alpha: 0.1),
+                      ],
+              ),
+              borderRadius: BorderRadius.circular(40),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
                 ),
-                const SizedBox(height: 8),
-                // ✅ 自定义进度条样式（带动画的滑块）
-                AnimatedBuilder(
-                  animation: _thumbAnimation,
-                  builder: (context, child) {
-                    return SliderTheme(
-                      data: SliderThemeData(
-                        trackHeight: 3,
-                        thumbShape: RoundSliderThumbShape(
-                          enabledThumbRadius: _thumbAnimation.value,
+              ],
+            ),
+            child: Row(
+              children: [
+                // ✅ 播放时间（固定宽度）
+                SizedBox(
+                  width: 65, // 固定宽度，避免时间变化导致进度条抖动
+                  child: Text(
+                    _fmt(widget.position),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+                // ✅ 分隔符
+                const Text(
+                  ' · ',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                // ✅ 总时长（固定宽度）
+                SizedBox(
+                  width: 65, // 固定宽度，避免时间变化导致进度条抖动
+                  child: Text(
+                    _fmt(widget.duration),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.left,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // ✅ 进度条
+                Expanded(
+                  child: AnimatedBuilder(
+                    animation: _thumbAnimation,
+                    builder: (context, child) {
+                      return SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 3,
+                          thumbShape: RoundSliderThumbShape(
+                            enabledThumbRadius: _thumbAnimation.value,
+                          ),
+                          overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: 16,
+                          ),
+                          activeTrackColor: Colors.white,
+                          inactiveTrackColor:
+                              Colors.white.withValues(alpha: 0.3),
+                          thumbColor: Colors.white,
+                          overlayColor: Colors.white.withValues(alpha: 0.15),
                         ),
-                        overlayShape: const RoundSliderOverlayShape(
-                          overlayRadius: 16,
+                        child: Slider(
+                          value: sliderValue,
+                          onChangeStart: (v) {
+                            widget.onDragStart();
+                          },
+                          onChanged: (v) {
+                            final target =
+                                Duration(seconds: (v * totalSeconds).round());
+                            widget.onDragging(target);
+                          },
+                          onChangeEnd: (v) {
+                            final target =
+                                Duration(seconds: (v * totalSeconds).round());
+                            widget.onDragEnd(target);
+                          },
                         ),
-                        activeTrackColor: Colors.white,
-                        inactiveTrackColor: Colors.white.withValues(alpha: 0.3),
-                        thumbColor: Colors.white,
-                        overlayColor: Colors.white.withValues(alpha: 0.15),
-                      ),
-                      child: Slider(
-                        value: sliderValue,
-                        onChangeStart: (v) {
-                          widget.onDragStart();
-                        },
-                        onChanged: (v) {
-                          final target =
-                              Duration(seconds: (v * totalSeconds).round());
-                          widget.onDragging(target);
-                        },
-                        onChangeEnd: (v) {
-                          final target =
-                              Duration(seconds: (v * totalSeconds).round());
-                          widget.onDragEnd(target);
-                        },
-                      ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // ✅ 播放速度
+                _buildControlButton(
+                  child: Text(
+                    '${widget.speed.toStringAsFixed(2)}x',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  onPressed: () async {
+                    final sel = await showCupertinoModalPopup<double>(
+                      context: context,
+                      builder: (context) => _SpeedSheet(current: widget.speed),
                     );
+                    if (sel != null) widget.onSpeed(sel);
                   },
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
-          // ✅ 控制按钮行
-          Row(
-            children: [
-              _buildControlButton(
-                icon: widget.isPlaying
-                    ? CupertinoIcons.pause_solid
-                    : CupertinoIcons.play_arrow_solid,
-                onPressed: widget.onTogglePlay,
-                size: 28,
-              ),
-              const SizedBox(width: 12),
-              _buildControlButton(
-                child: Text(
-                  '${widget.speed.toStringAsFixed(2)}x',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                onPressed: () async {
-                  final sel = await showCupertinoModalPopup<double>(
-                    context: context,
-                    builder: (context) => _SpeedSheet(current: widget.speed),
-                  );
-                  if (sel != null) widget.onSpeed(sel);
-                },
-              ),
-              const Spacer(),
-              _buildControlButton(
-                icon: CupertinoIcons.rectangle_on_rectangle,
-                onPressed: widget.onPip,
-                size: 24,
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  // ✅ 构建美化的控制按钮
+  // ✅ 构建美化的控制按钮（无背景边框）
   Widget _buildControlButton({
     IconData? icon,
     Widget? child,
@@ -1328,26 +1344,15 @@ class _ControlsState extends State<_Controls>
     double size = 24,
   }) {
     return CupertinoButton(
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       onPressed: onPressed,
       minSize: 0,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.2),
-            width: 1,
+      child: child ??
+          Icon(
+            icon,
+            color: Colors.white,
+            size: size,
           ),
-        ),
-        child: child ??
-            Icon(
-              icon,
-              color: Colors.white,
-              size: size,
-            ),
-      ),
     );
   }
 
