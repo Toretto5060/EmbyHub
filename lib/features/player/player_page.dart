@@ -1173,39 +1173,39 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                               ),
                                             ),
                                           ),
-                                          // ✅ 小窗按钮
+                                // ✅ 小窗按钮
                                           CupertinoButton(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 8,
                                               vertical: 6,
                                             ),
                                             minSize: 0,
-                                            onPressed: () {
-                                              _enterPip();
-                                              _resetHideControlsTimer();
-                                            },
+                                  onPressed: () {
+                                    _enterPip();
+                                    _resetHideControlsTimer();
+                                  },
                                             child: const Icon(
                                               Icons
                                                   .picture_in_picture_alt_rounded,
                                               color: Colors.white,
-                                              size: 22,
-                                            ),
+                                  size: 22,
+                                ),
                                           ),
-                                          // ✅ 横竖屏切换
+                                // ✅ 横竖屏切换
                                           CupertinoButton(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 8,
                                               vertical: 6,
                                             ),
                                             minSize: 0,
-                                            onPressed: () {
-                                              _toggleOrientation();
-                                              _resetHideControlsTimer();
-                                            },
+                                  onPressed: () {
+                                    _toggleOrientation();
+                                    _resetHideControlsTimer();
+                                  },
                                             child: const Icon(
                                               Icons.screen_rotation_rounded,
                                               color: Colors.white,
-                                              size: 22,
+                                  size: 22,
                                             ),
                                           ),
                                         ],
@@ -1241,12 +1241,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                           borderRadius: BorderRadius.circular(20),
                           child: BackdropFilter(
                             filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
                                 vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
+                      ),
+                      decoration: BoxDecoration(
                                 gradient: LinearGradient(
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
@@ -1264,16 +1264,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                         ],
                                 ),
                                 borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                '${_formatTime(_draggingPosition!)} / ${_formatTime(_duration)}',
-                                style: const TextStyle(
-                                  color: Colors.white,
+                      ),
+                      child: Text(
+                        '${_formatTime(_draggingPosition!)} / ${_formatTime(_duration)}',
+                        style: const TextStyle(
+                          color: Colors.white,
                                   fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
                             ),
                           ),
                         ),
@@ -1309,12 +1309,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                           borderRadius: BorderRadius.circular(8),
                           child: BackdropFilter(
                             filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
                                 vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
+                    ),
+                    decoration: BoxDecoration(
                                 gradient: LinearGradient(
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
@@ -1331,14 +1331,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                           Colors.white.withValues(alpha: 0.1),
                                         ],
                                 ),
-                                borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
                                 _getVideoFitName(),
-                                style: const TextStyle(
-                                  color: Colors.white,
+                          style: const TextStyle(
+                            color: Colors.white,
                                   fontSize: 13,
-                                  fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ),
@@ -1461,7 +1461,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                           }
                                           // ✅ 不可用时点击无任何反应，不重置计时器
                                         },
-                                        child: Icon(
+                            child: Icon(
                                           Icons.add_rounded,
                                           color: _canIncreaseSpeed
                                               ? Colors.white
@@ -1500,7 +1500,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                             '${_speed.toStringAsFixed(1)}x',
                                             textAlign: TextAlign.center,
                                             style: const TextStyle(
-                                              color: Colors.white,
+                              color: Colors.white,
                                               fontSize: 16,
                                               fontWeight: FontWeight.w600,
                                             ),
@@ -1987,155 +1987,187 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Future<void> _showAudioSelectionMenu(BuildContext anchorContext) async {
     if (_audioStreams.isEmpty) return;
 
-    // ✅ 取消自动隐藏计时器，防止弹窗显示时控件自动消失
     _cancelHideControlsTimer();
 
-    final RenderBox button = anchorContext.findRenderObject() as RenderBox;
-    final RenderBox overlay = Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
-    
-    // ✅ 计算按钮位置，让菜单显示在按钮上方并保持12px间距
-    final buttonOffset = button.localToGlobal(Offset.zero, ancestor: overlay);
-    final overlaySize = overlay.size;
-    
-    const maxMenuHeight = 230.0;
-    const spacing = 12.0; // 按钮和菜单之间的间距
-    
-    // 菜单底部应该在按钮顶部上方 spacing 像素
-    // bottom 是距离屏幕底部的距离
-    final menuBottomFromScreenBottom = overlaySize.height - buttonOffset.dy + spacing;
-    
-    // 菜单顶部最多到按钮顶部 - spacing - maxMenuHeight
-    // top 是距离屏幕顶部的距离
-    final menuTopFromScreenTop = (buttonOffset.dy - spacing - maxMenuHeight).clamp(0.0, double.infinity);
-    
-    final RelativeRect position = RelativeRect.fromLTRB(
-      buttonOffset.dx, // 左边对齐按钮
-      menuTopFromScreenTop, // 上边：确保菜单不会超出屏幕顶部
-      overlaySize.width - buttonOffset.dx - button.size.width, // 右边
-      menuBottomFromScreenBottom, // 底部：让菜单底边在按钮上方 spacing 像素
-    );
+    final RenderBox? button =
+        anchorContext.findRenderObject() as RenderBox?;
+    final overlay = Navigator.of(context).overlay;
+    final RenderBox? overlayBox =
+        overlay?.context.findRenderObject() as RenderBox?;
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (button == null || overlayBox == null) {
+      _resetHideControlsTimer();
+      return;
+    }
+
+    final Offset buttonOffset =
+        button.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final Size overlaySize = overlayBox.size;
+
+    double panelWidth = 240.0;
+    const double maxHeight = 230.0;
+    const double spacing = 12.0;
+
+    const double minLeftMargin = 16.0;
+    const double rightMargin = 18.0;
+
+    final double maxAllowedWidth =
+        overlaySize.width - minLeftMargin - rightMargin;
+    if (panelWidth > maxAllowedWidth) {
+      panelWidth = maxAllowedWidth.clamp(120.0, panelWidth);
+    }
+
+    double left = buttonOffset.dx + button.size.width - panelWidth;
+    final double maxLeft = overlaySize.width - panelWidth - rightMargin;
+
+    if (maxLeft < minLeftMargin) {
+      panelWidth =
+          (overlaySize.width - minLeftMargin - rightMargin).clamp(120.0, panelWidth);
+      left = minLeftMargin;
+    } else {
+      left = left.clamp(minLeftMargin, maxLeft);
+    }
+    final double bottom =
+        (overlaySize.height - buttonOffset.dy) + spacing;
+
     final scrollController = ScrollController();
 
-    // ✅ 延迟滚动到选中项
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (scrollController.hasClients && _selectedAudioStreamIndex != null) {
-        const itemHeight = 48.0; // padding 14*2 + 文字高度约20
-        final targetOffset = _selectedAudioStreamIndex! * itemHeight;
-        final maxScrollExtent = scrollController.position.maxScrollExtent;
-        final viewportHeight = scrollController.position.viewportDimension;
-        
-        // 居中显示选中项
-        final centeredOffset = (targetOffset - viewportHeight / 2 + itemHeight / 2)
-            .clamp(0.0, maxScrollExtent);
-        
-        scrollController.animateTo(
-          centeredOffset,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    void scheduleScroll() {
+      if (_selectedAudioStreamIndex == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!scrollController.hasClients) return;
+        const itemHeight = 48.0;
+        final target = _selectedAudioStreamIndex! * itemHeight;
+        final maxExtent = scrollController.position.maxScrollExtent;
+        final viewport = scrollController.position.viewportDimension;
+        final offset =
+            (target - viewport / 2 + itemHeight / 2).clamp(0.0, maxExtent);
+        scrollController.jumpTo(offset);
+      });
+    }
 
-    final result = await showMenu<int>(
+    final result = await showDialog<int>(
       context: context,
-      position: position,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      color: Colors.transparent,
-      elevation: 0,
-      constraints: const BoxConstraints(
-        maxHeight: maxMenuHeight,
-        minWidth: 200,
-      ),
-      items: [
-        PopupMenuItem<int>(
-          enabled: false,
-          padding: EdgeInsets.zero,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-              child: Container(
-                constraints: const BoxConstraints(
-                  maxHeight: 230,
+      barrierDismissible: true,
+      barrierColor: Colors.transparent,
+      builder: (dialogCtx) {
+        scheduleScroll();
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final gradientColors = isDark
+            ? [
+                Colors.grey.shade900.withValues(alpha: 0.7),
+                Colors.grey.shade800.withValues(alpha: 0.5),
+              ]
+            : [
+                Colors.white.withValues(alpha: 0.25),
+                Colors.white.withValues(alpha: 0.15),
+              ];
+
+        return Material(
+          type: MaterialType.transparency,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.of(dialogCtx).pop(),
                 ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: isDark
-                        ? [
-                            Colors.grey.shade900.withValues(alpha: 0.7),
-                            Colors.grey.shade800.withValues(alpha: 0.5),
-                          ]
-                        : [
-                            Colors.white.withValues(alpha: 0.25),
-                            Colors.white.withValues(alpha: 0.15),
-                          ],
+              ),
+              Positioned(
+                left: left,
+                bottom: bottom,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: panelWidth,
+                    maxHeight: maxHeight,
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: List.generate(_audioStreams.length, (index) {
-                      final data = _audioStreams[index];
-                      final label = _formatAudioStream(data);
-                      final isDefault = (data['IsDefault'] as bool?) == true;
-                      final hasDefaultTag = label.contains('默认');
-                      final isSelected = index == _selectedAudioStreamIndex;
-                      
-                      return Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => Navigator.of(context).pop(index),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 14,
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    isDefault && !hasDefaultTag ? '$label (默认)' : label,
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 15,
-                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: gradientColors,
+                          ),
+                        ),
+                        child: SingleChildScrollView(
+                          controller: scrollController,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(
+                              _audioStreams.length,
+                              (index) {
+                                final data = _audioStreams[index];
+                                final label = _formatAudioStream(data);
+                                final isDefault =
+                                    (data['IsDefault'] as bool?) == true;
+                                final hasDefaultTag =
+                                    label.contains('默认');
+                                final isSelected =
+                                    index == _selectedAudioStreamIndex;
+                                final displayLabel = isDefault && !hasDefaultTag
+                                    ? '$label (默认)'
+                                    : label;
+
+                                return Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () =>
+                                        Navigator.of(dialogCtx).pop(index),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 14,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              displayLabel,
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 15,
+                                                fontWeight: isSelected
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                          if (isSelected)
+                                            const Icon(
+                                              Icons.check_rounded,
+                                              size: 20,
+                                              color: Colors.white,
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
-                                if (isSelected)
-                                  const Icon(
-                                    Icons.check_rounded,
-                                    size: 20,
-                                    color: Colors.white,
-                                  ),
-                              ],
+                                );
+                              },
                             ),
                           ),
                         ),
-                      );
-                    }),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
-        ),
-      ],
+        );
+      },
     );
 
-    // ✅ 释放滚动控制器
     scrollController.dispose();
-
-    // ✅ 菜单关闭后，重新启动自动隐藏计时器
     _resetHideControlsTimer();
 
-    if (result != null && result >= 0 && result < _audioStreams.length) {
+    if (result != null &&
+        result >= 0 &&
+        result < _audioStreams.length) {
       setState(() {
         _selectedAudioStreamIndex = result;
         _hasManuallySelectedAudio = true;
@@ -2145,158 +2177,195 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   // ✅ 显示字幕选择菜单
-  Future<void> _showSubtitleSelectionMenu(BuildContext anchorContext) async {
+  Future<void> _showSubtitleSelectionMenu(
+      BuildContext anchorContext) async {
     if (_subtitleStreams.isEmpty) return;
 
-    // ✅ 取消自动隐藏计时器，防止弹窗显示时控件自动消失
     _cancelHideControlsTimer();
 
-    final RenderBox button = anchorContext.findRenderObject() as RenderBox;
-    final RenderBox overlay = Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
-    
-    // ✅ 计算按钮位置，让菜单显示在按钮上方并保持12px间距
-    final buttonOffset = button.localToGlobal(Offset.zero, ancestor: overlay);
-    final overlaySize = overlay.size;
-    
-    const maxMenuHeight = 230.0;
-    const spacing = 12.0; // 按钮和菜单之间的间距
-    
-    // 菜单底部应该在按钮顶部上方 spacing 像素
-    // bottom 是距离屏幕底部的距离
-    final menuBottomFromScreenBottom = overlaySize.height - buttonOffset.dy + spacing;
-    
-    // 菜单顶部最多到按钮顶部 - spacing - maxMenuHeight
-    // top 是距离屏幕顶部的距离
-    final menuTopFromScreenTop = (buttonOffset.dy - spacing - maxMenuHeight).clamp(0.0, double.infinity);
-    
-    final RelativeRect position = RelativeRect.fromLTRB(
-      buttonOffset.dx, // 左边对齐按钮
-      menuTopFromScreenTop, // 上边：确保菜单不会超出屏幕顶部
-      overlaySize.width - buttonOffset.dx - button.size.width, // 右边
-      menuBottomFromScreenBottom, // 底部：让菜单底边在按钮上方 spacing 像素
-    );
+    final RenderBox? button =
+        anchorContext.findRenderObject() as RenderBox?;
+    final overlay = Navigator.of(context).overlay;
+    final RenderBox? overlayBox =
+        overlay?.context.findRenderObject() as RenderBox?;
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (button == null || overlayBox == null) {
+      _resetHideControlsTimer();
+      return;
+    }
+
+    final Offset buttonOffset =
+        button.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final Size overlaySize = overlayBox.size;
+
+    double panelWidth = 240.0;
+    const double maxHeight = 230.0;
+    const double spacing = 12.0;
+
+    const double minLeftMargin = 16.0;
+    const double rightMargin = 18.0;
+
+    final double maxAllowedWidth =
+        overlaySize.width - minLeftMargin - rightMargin;
+    if (panelWidth > maxAllowedWidth) {
+      panelWidth = maxAllowedWidth.clamp(120.0, panelWidth);
+    }
+
+    double left = buttonOffset.dx + button.size.width - panelWidth;
+    final double maxLeft = overlaySize.width - panelWidth - rightMargin;
+
+    if (maxLeft < minLeftMargin) {
+      panelWidth =
+          (overlaySize.width - minLeftMargin - rightMargin).clamp(120.0, panelWidth);
+      left = minLeftMargin;
+    } else {
+      left = left.clamp(minLeftMargin, maxLeft);
+    }
+    final double bottom =
+        (overlaySize.height - buttonOffset.dy) + spacing;
+
     final scrollController = ScrollController();
 
-    // ✅ 延迟滚动到选中项
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (scrollController.hasClients && _selectedSubtitleStreamIndex != null) {
-        const itemHeight = 48.0; // padding 14*2 + 文字高度约20
-        final targetOffset = _selectedSubtitleStreamIndex! * itemHeight;
-        final maxScrollExtent = scrollController.position.maxScrollExtent;
-        final viewportHeight = scrollController.position.viewportDimension;
-        
-        // 居中显示选中项
-        final centeredOffset = (targetOffset - viewportHeight / 2 + itemHeight / 2)
-            .clamp(0.0, maxScrollExtent);
-        
-        scrollController.animateTo(
-          centeredOffset,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    void scheduleScroll() {
+      if (_selectedSubtitleStreamIndex == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!scrollController.hasClients) return;
+        const itemHeight = 48.0;
+        final target = _selectedSubtitleStreamIndex! * itemHeight;
+        final maxExtent = scrollController.position.maxScrollExtent;
+        final viewport = scrollController.position.viewportDimension;
+        final offset =
+            (target - viewport / 2 + itemHeight / 2).clamp(0.0, maxExtent);
+        scrollController.jumpTo(offset);
+      });
+    }
 
-    final result = await showMenu<int>(
+    final result = await showDialog<int>(
       context: context,
-      position: position,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      color: Colors.transparent,
-      elevation: 0,
-      constraints: const BoxConstraints(
-        maxHeight: maxMenuHeight,
-        minWidth: 200,
-      ),
-      items: [
-        PopupMenuItem<int>(
-          enabled: false,
-          padding: EdgeInsets.zero,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-              child: Container(
-                constraints: const BoxConstraints(
-                  maxHeight: 230,
+      barrierDismissible: true,
+      barrierColor: Colors.transparent,
+      builder: (dialogCtx) {
+        scheduleScroll();
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final gradientColors = isDark
+            ? [
+                Colors.grey.shade900.withValues(alpha: 0.7),
+                Colors.grey.shade800.withValues(alpha: 0.5),
+              ]
+            : [
+                Colors.white.withValues(alpha: 0.25),
+                Colors.white.withValues(alpha: 0.15),
+              ];
+
+        return Material(
+          type: MaterialType.transparency,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.of(dialogCtx).pop(),
                 ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: isDark
-                        ? [
-                            Colors.grey.shade900.withValues(alpha: 0.7),
-                            Colors.grey.shade800.withValues(alpha: 0.5),
-                          ]
-                        : [
-                            Colors.white.withValues(alpha: 0.25),
-                            Colors.white.withValues(alpha: 0.15),
-                          ],
+              ),
+              Positioned(
+                left: left,
+                bottom: bottom,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: panelWidth,
+                    maxHeight: maxHeight,
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: List.generate(_subtitleStreams.length, (index) {
-                      final label = _formatSubtitleStream(_subtitleStreams[index]);
-                      final isDefault =
-                          (_subtitleStreams[index]['IsDefault'] as bool?) == true;
-                      final hasDefaultTag = label.contains('默认');
-                      final isSelected = index == _selectedSubtitleStreamIndex;
-                      
-                      return Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => Navigator.of(context).pop(index),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 14,
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    isDefault && !hasDefaultTag ? '$label (默认)' : label,
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 15,
-                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: gradientColors,
+                          ),
+                        ),
+                        child: SingleChildScrollView(
+                          controller: scrollController,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(
+                              _subtitleStreams.length,
+                              (index) {
+                                final label = _formatSubtitleStream(
+                                    _subtitleStreams[index]);
+                                final isDefault =
+                                    (_subtitleStreams[index]['IsDefault']
+                                            as bool?) ==
+                                        true;
+                                final hasDefaultTag =
+                                    label.contains('默认');
+                                final isSelected =
+                                    index == _selectedSubtitleStreamIndex;
+
+                                final displayLabel =
+                                    isDefault && !hasDefaultTag
+                                        ? '$label (默认)'
+                                        : label;
+
+                                return Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () =>
+                                        Navigator.of(dialogCtx).pop(index),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 14,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              displayLabel,
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 15,
+                                                fontWeight: isSelected
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                          if (isSelected)
+                                            const Icon(
+                                              Icons.check_rounded,
+                                              size: 20,
+                                              color: Colors.white,
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
-                                if (isSelected)
-                                  const Icon(
-                                    Icons.check_rounded,
-                                    size: 20,
-                                    color: Colors.white,
-                                  ),
-                              ],
+                                );
+                              },
                             ),
                           ),
                         ),
-                      );
-                    }),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
-        ),
-      ],
+        );
+      },
     );
 
-    // ✅ 释放滚动控制器
     scrollController.dispose();
-
-    // ✅ 菜单关闭后，重新启动自动隐藏计时器
     _resetHideControlsTimer();
 
-    if (result != null && result >= 0 && result < _subtitleStreams.length) {
+    if (result != null &&
+        result >= 0 &&
+        result < _subtitleStreams.length) {
       setState(() {
         _selectedSubtitleStreamIndex = result;
         _hasManuallySelectedSubtitle = true;
@@ -2379,6 +2448,7 @@ class _ControlsState extends State<_Controls>
     with SingleTickerProviderStateMixin {
   late AnimationController _thumbAnimationController;
   late Animation<double> _thumbAnimation;
+  BuildContext? _subtitleAnchorContext;
 
   @override
   void initState() {
@@ -2545,37 +2615,37 @@ class _ControlsState extends State<_Controls>
                                 ),
                               // ✅ 播放进度条
                               SliderTheme(
-                                data: SliderThemeData(
-                                  trackHeight: 3,
-                                  thumbShape: RoundSliderThumbShape(
-                                    enabledThumbRadius: _thumbAnimation.value,
-                                  ),
-                                  overlayShape: const RoundSliderOverlayShape(
-                                    overlayRadius: 16,
-                                  ),
-                                  activeTrackColor: Colors.white,
-                                  inactiveTrackColor:
-                                      Colors.white.withValues(alpha: 0.3),
-                                  thumbColor: Colors.white,
+                        data: SliderThemeData(
+                          trackHeight: 3,
+                          thumbShape: RoundSliderThumbShape(
+                            enabledThumbRadius: _thumbAnimation.value,
+                          ),
+                          overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: 16,
+                          ),
+                          activeTrackColor: Colors.white,
+                          inactiveTrackColor:
+                              Colors.white.withValues(alpha: 0.3),
+                          thumbColor: Colors.white,
                                   overlayColor:
                                       Colors.white.withValues(alpha: 0.15),
-                                ),
-                                child: Slider(
-                                  value: sliderValue,
-                                  onChangeStart: (v) {
-                                    widget.onDragStart();
-                                  },
-                                  onChanged: (v) {
+                        ),
+                        child: Slider(
+                          value: sliderValue,
+                          onChangeStart: (v) {
+                            widget.onDragStart();
+                          },
+                          onChanged: (v) {
                                     final target = Duration(
                                         seconds: (v * totalSeconds).round());
-                                    widget.onDragging(target);
-                                  },
-                                  onChangeEnd: (v) {
+                            widget.onDragging(target);
+                          },
+                          onChangeEnd: (v) {
                                     final target = Duration(
                                         seconds: (v * totalSeconds).round());
-                                    widget.onDragEnd(target);
-                                  },
-                                ),
+                            widget.onDragEnd(target);
+                          },
+                        ),
                               ),
                             ],
                           );
@@ -2586,42 +2656,44 @@ class _ControlsState extends State<_Controls>
                 ),
                 const SizedBox(width: 12),
                 // ✅ 字幕按钮
-                if (widget.subtitleStreams.isNotEmpty)
-                  Builder(
-                    builder: (btnContext) {
-                      return CupertinoButton(
-                        padding: const EdgeInsets.all(8),
-                        minSize: 0,
-                        onPressed: () => widget.onSubtitleTap(btnContext),
-                        child: const Icon(
-                          Icons.subtitles_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      );
-                    },
-                  ),
+                 if (widget.subtitleStreams.isNotEmpty)
+                   Builder(
+                     builder: (btnContext) {
+                       _subtitleAnchorContext = btnContext;
+                       return CupertinoButton(
+                         padding: const EdgeInsets.all(8),
+                         minSize: 0,
+                         onPressed: () => widget.onSubtitleTap(btnContext),
+                         child: const Icon(
+                           Icons.subtitles_rounded,
+                           color: Colors.white,
+                           size: 24,
+                         ),
+                       );
+                     },
+                   ),
                 // ✅ 音频按钮
-                if (widget.audioStreams.isNotEmpty)
-                  Builder(
-                    builder: (btnContext) {
-                      return CupertinoButton(
-                        padding: const EdgeInsets.all(8),
-                        minSize: 0,
-                        onPressed: () => widget.onAudioTap(btnContext),
-                        child: const Icon(
-                          Icons.audiotrack_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      );
-                    },
-                  ),
+                 if (widget.audioStreams.isNotEmpty)
+                   Builder(
+                     builder: (btnContext) {
+                       return CupertinoButton(
+                         padding: const EdgeInsets.all(8),
+                         minSize: 0,
+                         onPressed: () => widget
+                             .onAudioTap(_subtitleAnchorContext ?? btnContext),
+                         child: const Icon(
+                           Icons.audiotrack_rounded,
+                           color: Colors.white,
+                           size: 24,
+                         ),
+                       );
+                     },
+                   ),
               ],
             ),
           ),
         ),
-      ),
+          ),
     );
   }
 
