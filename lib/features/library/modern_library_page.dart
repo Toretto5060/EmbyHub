@@ -17,9 +17,7 @@ import '../../utils/app_route_observer.dart';
 
 const bool _kModernLibraryLogging = false;
 void _homeLog(String message) {
-  if (_kModernLibraryLogging) {
-    debugPrint(message);
-  }
+  if (_kModernLibraryLogging) {}
 }
 
 class ModernLibraryPage extends ConsumerStatefulWidget {
