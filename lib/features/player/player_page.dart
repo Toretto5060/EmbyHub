@@ -16,7 +16,7 @@ import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../utils/status_bar_manager.dart';
 
-const bool _kPlayerLogging = true; // ✅ 启用日志用于调试
+const bool _kPlayerLogging = false; // ✅ 禁用日志，提升性能（倍速播放时大量日志会拖慢速度）
 void _playerLog(String message) {
   if (_kPlayerLogging) {
     debugPrint(message);
@@ -48,7 +48,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _ready = false;
   double _speed = 1.0;
   // ✅ 速度档位列表
-  static const List<double> _speedOptions = [0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0];
+  static const List<double> _speedOptions = [
+    0.5,
+    0.75,
+    1.0,
+    1.5,
+    1.75,
+    2.0,
+    3.0
+  ];
   // ✅ 显示速度列表的状态
   bool _showSpeedList = false;
   Duration _position = Duration.zero;
@@ -134,10 +142,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _controller = VideoController(
       _player,
       configuration: const VideoControllerConfiguration(
-        // ✅ 启用硬件加载，提升解码性能（特别是倍速播放时）
+        // ✅ 启用硬件加速，提升解码性能（特别是倍速播放时）
         enableHardwareAcceleration: true,
-        // ✅ 改为true可能提升倍速播放性能，减少Surface切换延迟
-        androidAttachSurfaceAfterVideoParameters: true,
+        // ✅ 改为 false，提升倍速播放稳定性
+        // 说明：true 会延迟 Surface 附加，可能导致倍速时帧显示不及时
+        androidAttachSurfaceAfterVideoParameters: false,
       ),
     );
 
@@ -312,45 +321,72 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           media.uri,
           httpHeaders: media.headers,
           extras: {
-            // ===== 缓冲大小配置 =====
-            // demuxer-max-bytes: HLS demuxer（解复用器）能缓存的最大数据量
-            // 说明：这是从网络下载的原始视频数据（未解码）的缓存上限
-            // 用途：缓存更多原始数据，减少网络请求，提升流畅度
-            'demuxer-max-bytes': '10G', // 最大缓存 5GB
+            // ===== 大容量缓冲配置 =====
+            // demuxer-max-bytes: 向前缓存上限
+            // 说明：从当前位置向后可以缓存多少压缩视频数据
+            // 作用：5GB可缓存约3-4小时的1080p视频，充分利用快速网络
+            'demuxer-max-bytes': '5G',
 
-            // demuxer-max-back-bytes: 向后缓存的最大数据量（用于倒退播放）
-            // 说明：当前播放位置之前的数据会被保留多少
-            // 用途：倒退播放时不需要重新下载，直接从缓存读取
-            'demuxer-max-back-bytes': '1G', // 向后缓存 5GB
+            // demuxer-max-back-bytes: 向后缓存上限
+            // 说明：当前位置之前保留多少已播放的数据
+            // 作用：倒退时直接从缓存读取，不重新下载
+            'demuxer-max-back-bytes': '3G',
 
-            // ===== 缓存时间配置 =====
-            // cache: 是否启用缓存
+            // cache: 启用缓存
             'cache': 'yes',
 
-            // cache-secs: 缓存的目标时长（秒）
-            // 说明：播放器会尝试缓存这么长时间的视频
-            // 用途：与 demuxer-max-bytes 配合，哪个先达到限制就停止缓存
-            'cache-secs': '3600', // 缓存3600秒（1小时）
+            // cache-secs: 目标缓存时长
+            // 说明：尝试缓存多长时间的视频（秒）
+            // 作用：与空间限制配合，达到任一限制停止缓存
+            'cache-secs': '3600',
 
-            // demuxer-readahead-secs: 预读时长（秒）
-            // 说明：播放器会提前读取多少秒的数据到缓冲区
-            // 用途：积极预读，确保播放流畅
-            'demuxer-readahead-secs': '1800', // 预读1800秒（30分钟）
+            // demuxer-readahead-secs: 积极预读
+            // 说明：提前读取未来多少秒的数据
+            // 作用：播放器会持续下载，填满缓冲区
+            'demuxer-readahead-secs': '1800',
 
-            // ===== 流缓冲配置 =====
-            // stream-buffer-size: 网络流的缓冲区大小
-            // 说明：从网络读取数据的临时缓冲区
-            // 用途：更大的缓冲区可以更快地从网络读取数据
-            'stream-buffer-size': '64M', // 流缓冲区 64MB
+            // stream-buffer-size: 网络流缓冲区
+            // 说明：从网络读取数据的临时缓冲
+            // 作用：更大的缓冲 = 更快的下载速度
+            'stream-buffer-size': '64M',
 
-            // ===== 缓存能力配置 =====
-            // demuxer-seekable-cache: 缓存是否支持随机访问（seek）
-            // 说明：启用后可以在缓存中任意位置seek，不会丢失缓存
+            // demuxer-seekable-cache: 可搜索缓存
+            // 说明：缓存支持随机访问
+            // 作用：在已缓存区域seek不会丢失数据
             'demuxer-seekable-cache': 'yes',
 
-            // force-seekable: 强制视频流可搜索
-            // 说明：即使是 HLS 流也能随意跳转
+            // force-seekable: 强制可搜索
             'force-seekable': 'yes',
+
+            //==========================
+            //【核心：解码与渲染优化】
+            //==========================
+            'hwdec': 'mediacodec-auto', // Android 最稳定硬解
+            'gpu-api': 'opengl', // GPU 渲染最稳定
+
+            // 防止倍速画面跳动
+            'video-sync': 'audio',
+
+            // 不使用插帧，减少卡顿
+            'interpolation': 'no',
+
+            // 减少解码压力（倍速时很重要）
+            'vd-lavc-skiploopfilter': 'all',
+            'vd-lavc-skipidct': 'approx',
+            'vd-lavc-fast': 'yes',
+
+            // 帧丢弃策略：优先保证流畅性
+            'framedrop': 'vo',
+            //==========================
+            //【音频：防止倍速时声音异常】
+            //==========================
+            'audio-pitch-correction': 'yes',
+
+            //==========================
+            //【稳定性】
+            //==========================
+            'opengl-early-flush': 'no', // 防止倍速时丢帧
+            'msg-level': 'all=no', // 关闭大量冗余日志
           },
         ),
         play: !needsSeek,
@@ -1354,18 +1390,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       // ✅ 加速按钮
                                       CupertinoButton(
                                         padding: const EdgeInsets.all(12),
-                                        onPressed: _canIncreaseSpeed
-                                            ? () {
-                                                _increaseSpeed();
-                                                // ✅ 关闭倍速列表
-                                                if (_showSpeedList) {
-                                                  setState(() {
-                                                    _showSpeedList = false;
-                                                  });
-                                                }
-                                                _resetHideControlsTimer();
-                                              }
-                                            : null,
+                                        onPressed: () {
+                                          if (_canIncreaseSpeed) {
+                                            _increaseSpeed();
+                                            // ✅ 关闭倍速列表
+                                            if (_showSpeedList) {
+                                              setState(() {
+                                                _showSpeedList = false;
+                                              });
+                                            }
+                                            _resetHideControlsTimer();
+                                          }
+                                          // ✅ 不可用时点击无任何反应，不重置计时器
+                                        },
                                         child: Icon(
                                           Icons.add_rounded,
                                           color: _canIncreaseSpeed
@@ -1415,18 +1452,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       // ✅ 减速按钮
                                       CupertinoButton(
                                         padding: const EdgeInsets.all(12),
-                                        onPressed: _canDecreaseSpeed
-                                            ? () {
-                                                _decreaseSpeed();
-                                                // ✅ 关闭倍速列表
-                                                if (_showSpeedList) {
-                                                  setState(() {
-                                                    _showSpeedList = false;
-                                                  });
-                                                }
-                                                _resetHideControlsTimer();
-                                              }
-                                            : null,
+                                        onPressed: () {
+                                          if (_canDecreaseSpeed) {
+                                            _decreaseSpeed();
+                                            // ✅ 关闭倍速列表
+                                            if (_showSpeedList) {
+                                              setState(() {
+                                                _showSpeedList = false;
+                                              });
+                                            }
+                                            _resetHideControlsTimer();
+                                          }
+                                          // ✅ 不可用时点击无任何反应，不重置计时器
+                                        },
                                         child: Icon(
                                           Icons.remove_rounded,
                                           color: _canDecreaseSpeed
