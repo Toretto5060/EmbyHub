@@ -123,6 +123,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         logLevel: MPVLogLevel.error,
       ),
     );
+
     _controller = VideoController(
       _player,
       configuration: const VideoControllerConfiguration(
@@ -309,6 +310,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         ),
         play: !needsSeek,
       );
+
+      // ✅ 设置播放器音量为100%，让系统音量完全控制输出音量
+      await _player.setVolume(100.0);
+      _playerLog('🎬 [Player] Volume set to 100%');
 
       // ✅ 显示系统媒体通知
       _playerLog('🎬 [Player] ✅ Media opened successfully');
@@ -906,16 +911,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                               right: 16,
                               bottom: 16,
                             ),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Colors.black.withValues(alpha: 0.7),
-                                  Colors.black.withValues(alpha: 0.0),
-                                ],
-                              ),
-                            ),
+                            decoration: const BoxDecoration(),
                             child: Row(
                               children: [
                                 _buildIconButton(
@@ -976,14 +972,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                                 ],
                                         ),
                                         borderRadius: BorderRadius.circular(24),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black
-                                                .withValues(alpha: 0.2),
-                                            blurRadius: 10,
-                                            offset: const Offset(0, 2),
-                                          ),
-                                        ],
                                       ),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
@@ -1112,13 +1100,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                         ],
                                 ),
                                 borderRadius: BorderRadius.circular(20),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.2),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
                               ),
                               child: Text(
                                 '${_formatTime(_draggingPosition!)} / ${_formatTime(_duration)}',
@@ -1187,13 +1168,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                         ],
                                 ),
                                 borderRadius: BorderRadius.circular(8),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.2),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
                               ),
                               child: Text(
                                 _getVideoFitName(),
@@ -1303,14 +1277,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                             ],
                                     ),
                                     borderRadius: BorderRadius.circular(28),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color:
-                                            Colors.black.withValues(alpha: 0.2),
-                                        blurRadius: 10,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
                                   ),
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
@@ -1321,6 +1287,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                         onPressed: _canIncreaseSpeed
                                             ? () {
                                                 _increaseSpeed();
+                                                // ✅ 关闭倍速列表
+                                                if (_showSpeedList) {
+                                                  setState(() {
+                                                    _showSpeedList = false;
+                                                  });
+                                                }
                                                 _resetHideControlsTimer();
                                               }
                                             : null,
@@ -1376,6 +1348,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                         onPressed: _canDecreaseSpeed
                                             ? () {
                                                 _decreaseSpeed();
+                                                // ✅ 关闭倍速列表
+                                                if (_showSpeedList) {
+                                                  setState(() {
+                                                    _showSpeedList = false;
+                                                  });
+                                                }
                                                 _resetHideControlsTimer();
                                               }
                                             : null,
@@ -1552,13 +1530,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       ],
                               ),
                               borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
-                                  blurRadius: 15,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
                             ),
                             child: SingleChildScrollView(
                               controller: _speedListScrollController,
@@ -1731,16 +1702,6 @@ class _ControlsState extends State<_Controls>
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.bottomCenter,
-          end: Alignment.topCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0.85),
-            Colors.black.withValues(alpha: 0.0),
-          ],
-        ),
-      ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(40),
         child: BackdropFilter(
@@ -1765,13 +1726,6 @@ class _ControlsState extends State<_Controls>
                       ],
               ),
               borderRadius: BorderRadius.circular(40),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.2),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
             ),
             child: Row(
               children: [

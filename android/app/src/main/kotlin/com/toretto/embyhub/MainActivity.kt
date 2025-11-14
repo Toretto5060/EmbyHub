@@ -17,6 +17,9 @@ import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import android.media.AudioManager
+import android.media.AudioFocusRequest
+import android.media.AudioAttributes
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -33,6 +36,10 @@ class MainActivity: FlutterActivity() {
     private var currentVideoTitle: String = "EmbyHub"
     private val NOTIFICATION_ID = 1001
     private val CHANNEL_ID = "media_playback_channel"
+    
+    // ✅ 音频焦点管理
+    private var audioManager: AudioManager? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
     
     companion object {
         const val ACTION_PLAY_PAUSE = "com.toretto.embyhub.PLAY_PAUSE"
@@ -276,6 +283,9 @@ class MainActivity: FlutterActivity() {
         try {
             android.util.Log.d("MainActivity", "📱 Initializing MediaSession")
             
+            // ✅ 初始化 AudioManager
+            audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            
             // 创建通知渠道
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val channel = NotificationChannel(
@@ -298,6 +308,7 @@ class MainActivity: FlutterActivity() {
                 setCallback(object : MediaSessionCompat.Callback() {
                     override fun onPlay() {
                         android.util.Log.d("MainActivity", "📱 MediaSession: onPlay")
+                        requestAudioFocus()
                         pipChannel?.invokeMethod("togglePlayPause", null)
                     }
                     
@@ -308,6 +319,7 @@ class MainActivity: FlutterActivity() {
                     
                     override fun onStop() {
                         android.util.Log.d("MainActivity", "📱 MediaSession: onStop")
+                        abandonAudioFocus()
                         hideMediaNotification()
                     }
                 })
@@ -324,6 +336,9 @@ class MainActivity: FlutterActivity() {
         try {
             currentVideoTitle = title
             android.util.Log.d("MainActivity", "📱 Showing media notification: $title, playing=$isPlaying, poster=$posterUrl")
+            
+            // ✅ 请求音频焦点，这会自动暂停其他应用的音频播放
+            requestAudioFocus()
             
             val session = mediaSession ?: return
             
@@ -396,12 +411,89 @@ class MainActivity: FlutterActivity() {
     }
     
     // ✅ 隐藏媒体通知
+    // ✅ 请求音频焦点
+    private fun requestAudioFocus() {
+        try {
+            val audioMgr = audioManager ?: return
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Android 8.0+ 使用 AudioFocusRequest
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                    .build()
+                
+                val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(audioAttributes)
+                    .setAcceptsDelayedFocusGain(true)
+                    .setWillPauseWhenDucked(true)
+                    .setOnAudioFocusChangeListener { focusChange ->
+                        when (focusChange) {
+                            AudioManager.AUDIOFOCUS_LOSS -> {
+                                android.util.Log.d("MainActivity", "🔊 Audio focus lost")
+                                pipChannel?.invokeMethod("togglePlayPause", null)
+                            }
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                                android.util.Log.d("MainActivity", "🔊 Audio focus lost transient")
+                                pipChannel?.invokeMethod("togglePlayPause", null)
+                            }
+                        }
+                    }
+                    .build()
+                
+                audioFocusRequest = focusRequest
+                val result = audioMgr.requestAudioFocus(focusRequest)
+                android.util.Log.d("MainActivity", "🔊 Audio focus requested: ${if(result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "DENIED"}")
+            } else {
+                // Android 8.0 以下使用旧API
+                @Suppress("DEPRECATION")
+                val result = audioMgr.requestAudioFocus(
+                    { focusChange ->
+                        when (focusChange) {
+                            AudioManager.AUDIOFOCUS_LOSS, 
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                                pipChannel?.invokeMethod("togglePlayPause", null)
+                            }
+                        }
+                    },
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN
+                )
+                android.util.Log.d("MainActivity", "🔊 Audio focus requested (legacy): ${if(result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "DENIED"}")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "❌ Request audio focus failed: $e")
+        }
+    }
+    
+    // ✅ 释放音频焦点
+    private fun abandonAudioFocus() {
+        try {
+            val audioMgr = audioManager ?: return
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioFocusRequest?.let {
+                    audioMgr.abandonAudioFocusRequest(it)
+                    android.util.Log.d("MainActivity", "🔊 Audio focus abandoned")
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                audioMgr.abandonAudioFocus(null)
+                android.util.Log.d("MainActivity", "🔊 Audio focus abandoned (legacy)")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "❌ Abandon audio focus failed: $e")
+        }
+    }
+    
     private fun hideMediaNotification() {
         try {
             android.util.Log.d("MainActivity", "📱 Hiding media notification")
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.cancel(NOTIFICATION_ID)
             mediaSession?.isActive = false
+            // ✅ 隐藏通知时释放音频焦点
+            abandonAudioFocus()
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "❌ Hide notification failed: $e")
         }
