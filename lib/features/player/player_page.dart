@@ -105,6 +105,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ 速度列表滚动控制器
   final ScrollController _speedListScrollController = ScrollController();
 
+  // ✅ 音频和字幕选择
+  int? _selectedAudioStreamIndex;
+  int? _selectedSubtitleStreamIndex;
+  bool _hasManuallySelectedSubtitle = false;
+  bool _hasManuallySelectedAudio = false;
+  List<Map<String, dynamic>> _audioStreams = [];
+  List<Map<String, dynamic>> _subtitleStreams = [];
+
   Duration? get _initialSeekPosition {
     final ticks = widget.initialPositionTicks;
     _playerLogImportant('🎬 [Player] Initial position ticks: $ticks');
@@ -232,7 +240,55 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return null;
     });
 
+    _loadStreamSelections();
     _load();
+  }
+
+  /// ✅ 加载保存的音频和字幕选择
+  Future<void> _loadStreamSelections() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasManualAudio =
+          prefs.getBool('item_${widget.itemId}_manual_audio') ?? false;
+      final hasManualSubtitle =
+          prefs.getBool('item_${widget.itemId}_manual_subtitle') ?? false;
+
+      final audioIndex =
+          hasManualAudio ? prefs.getInt('item_${widget.itemId}_audio') : null;
+      final subtitleIndex = prefs.getInt('item_${widget.itemId}_subtitle');
+
+      if (mounted) {
+        setState(() {
+          _selectedAudioStreamIndex = audioIndex;
+          _selectedSubtitleStreamIndex = subtitleIndex;
+          _hasManuallySelectedAudio = hasManualAudio;
+          _hasManuallySelectedSubtitle = hasManualSubtitle;
+        });
+      }
+    } catch (e) {
+      _playerLog('❌ [Player] Load stream selections failed: $e');
+    }
+  }
+
+  /// ✅ 保存音频和字幕选择
+  Future<void> _saveStreamSelections() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_selectedAudioStreamIndex != null) {
+        await prefs.setInt(
+            'item_${widget.itemId}_audio', _selectedAudioStreamIndex!);
+      }
+      if (_selectedSubtitleStreamIndex != null) {
+        await prefs.setInt(
+            'item_${widget.itemId}_subtitle', _selectedSubtitleStreamIndex!);
+      }
+      await prefs.setBool(
+          'item_${widget.itemId}_manual_audio', _hasManuallySelectedAudio);
+      await prefs.setBool('item_${widget.itemId}_manual_subtitle',
+          _hasManuallySelectedSubtitle);
+    } catch (e) {
+      _playerLog('❌ [Player] Save stream selections failed: $e');
+    }
   }
 
   Future<void> _load() async {
@@ -254,6 +310,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final itemDetails =
           _userId != null ? await api.getItem(_userId!, widget.itemId) : null;
       _videoTitle = itemDetails?.name ?? 'Video';
+
+      // ✅ 提取音频和字幕流
+      if (itemDetails != null) {
+        _audioStreams = _getAudioStreams(itemDetails);
+        _subtitleStreams = _getSubtitleStreams(itemDetails);
+        _ensureAudioSelection();
+        _ensureSubtitleSelection();
+      }
 
       final media = await api.buildHlsUrl(widget.itemId); // ✅ 添加 await
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
@@ -1501,6 +1565,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                             isPlaying: _isPlaying,
                             isDragging: _isDraggingProgress,
                             draggingPosition: _draggingPosition,
+                            audioStreams: _audioStreams,
+                            subtitleStreams: _subtitleStreams,
+                            selectedAudioIndex: _selectedAudioStreamIndex,
+                            selectedSubtitleIndex: _selectedSubtitleStreamIndex,
+                            onAudioTap: (ctx) {
+                              _showAudioSelectionMenu(ctx);
+                            },
+                            onSubtitleTap: (ctx) {
+                              _showSubtitleSelectionMenu(ctx);
+                            },
                             onDragStart: () {
                               setState(() {
                                 _isDraggingProgress = true;
@@ -1701,6 +1775,536 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     );
   }
 
+  // ✅ 获取音频流
+  List<Map<String, dynamic>> _getAudioStreams(ItemInfo item) {
+    final media = _getPrimaryMediaSource(item);
+    if (media == null) return const [];
+    final streams = media['MediaStreams'];
+    if (streams is List) {
+      return streams
+          .where((element) =>
+              element is Map &&
+              (element['Type'] as String?)?.toLowerCase() == 'audio')
+          .map((element) => Map<String, dynamic>.from(
+              (element as Map<dynamic, dynamic>)
+                  .map((key, value) => MapEntry(key.toString(), value))))
+          .toList();
+    }
+    return const [];
+  }
+
+  // ✅ 获取字幕流
+  List<Map<String, dynamic>> _getSubtitleStreams(ItemInfo item) {
+    final media = _getPrimaryMediaSource(item);
+    if (media == null) return const [];
+    final streams = media['MediaStreams'];
+    if (streams is List) {
+      return streams
+          .where((element) =>
+              element is Map &&
+              (element['Type'] as String?)?.toLowerCase() == 'subtitle')
+          .map((element) => Map<String, dynamic>.from(
+              (element as Map<dynamic, dynamic>)
+                  .map((key, value) => MapEntry(key.toString(), value))))
+          .toList();
+    }
+    return const [];
+  }
+
+  // ✅ 获取主要媒体源
+  Map<String, dynamic>? _getPrimaryMediaSource(ItemInfo item) {
+    final sources = item.mediaSources;
+    if (sources == null || sources.isEmpty) return null;
+    return sources.first;
+  }
+
+  // ✅ 确保音频选择
+  void _ensureAudioSelection() {
+    if (_audioStreams.isEmpty) return;
+
+    final current = _selectedAudioStreamIndex;
+    if (current != null && current >= 0 && current < _audioStreams.length) {
+      return;
+    }
+
+    if (_hasManuallySelectedAudio) {
+      final defaultIndex = _audioStreams
+          .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+      final fallback = defaultIndex != -1 ? defaultIndex : 0;
+      if (mounted) {
+        setState(() {
+          _selectedAudioStreamIndex = fallback;
+        });
+      }
+      return;
+    }
+
+    final defaultIndex = _audioStreams
+        .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+    final fallback = defaultIndex != -1 ? defaultIndex : 0;
+
+    if (mounted) {
+      setState(() {
+        _selectedAudioStreamIndex = fallback;
+      });
+    }
+  }
+
+  // ✅ 确保字幕选择
+  void _ensureSubtitleSelection() {
+    if (_subtitleStreams.isEmpty) return;
+
+    final current = _selectedSubtitleStreamIndex;
+    if (current != null && current >= 0 && current < _subtitleStreams.length) {
+      return;
+    }
+
+    if (_hasManuallySelectedSubtitle) {
+      final defaultIndex = _subtitleStreams
+          .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+      final fallback = defaultIndex != -1 ? defaultIndex : 0;
+      if (mounted) {
+        setState(() {
+          _selectedSubtitleStreamIndex = fallback;
+        });
+      }
+      return;
+    }
+
+    int selectedIndex = _findBestChineseSubtitle(_subtitleStreams);
+
+    if (selectedIndex == -1) {
+      final defaultIndex = _subtitleStreams
+          .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+      selectedIndex = defaultIndex != -1 ? defaultIndex : 0;
+    }
+
+    if (mounted) {
+      setState(() {
+        _selectedSubtitleStreamIndex = selectedIndex;
+      });
+      _saveStreamSelections();
+    }
+  }
+
+  // ✅ 查找最佳中文字幕
+  int _findBestChineseSubtitle(List<Map<String, dynamic>> subtitleStreams) {
+    int index = subtitleStreams.indexWhere((stream) {
+      final lang = stream['Language']?.toString() ?? '';
+      final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+      final title = stream['Title']?.toString() ?? '';
+      final combined = '$lang $displayTitle $title'.toLowerCase();
+      return combined.contains('chinese') && combined.contains('simplified');
+    });
+    if (index != -1) return index;
+
+    index = subtitleStreams.indexWhere((stream) {
+      final lang = stream['Language']?.toString() ?? '';
+      final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+      final title = stream['Title']?.toString() ?? '';
+      final combined = '$lang $displayTitle $title'.toLowerCase();
+      return combined.contains('chinese') && combined.contains('traditional');
+    });
+    if (index != -1) return index;
+
+    index = subtitleStreams.indexWhere((stream) {
+      final lang = stream['Language']?.toString() ?? '';
+      final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+      final title = stream['Title']?.toString() ?? '';
+      final combined = '$lang $displayTitle $title'.toLowerCase();
+      return combined.contains('chinese');
+    });
+    if (index != -1) return index;
+
+    index = subtitleStreams.indexWhere((stream) {
+      final lang = (stream['Language']?.toString() ?? '').toLowerCase();
+      return lang == 'chi' ||
+          lang == 'zh' ||
+          lang == 'cn' ||
+          lang == 'chs' ||
+          lang == 'cht' ||
+          lang == 'zh-cn' ||
+          lang == 'zh-tw';
+    });
+
+    return index;
+  }
+
+  // ✅ 格式化音频流
+  String _formatAudioStream(Map<String, dynamic> stream) {
+    final codec = stream['Codec']?.toString().toUpperCase();
+    final channels = (stream['Channels'] as num?)?.toInt();
+    final language = stream['Language']?.toString();
+
+    final displayTitle = stream['DisplayTitle']?.toString();
+    if (displayTitle != null && displayTitle.isNotEmpty) {
+      return displayTitle;
+    }
+
+    final parts = <String>[];
+    if (language != null && language.isNotEmpty) {
+      parts.add(language);
+    }
+    if (codec != null && codec.isNotEmpty) parts.add(codec);
+    if (channels != null) {
+      final channelLabel = channels == 2
+          ? '2.0'
+          : channels == 6
+              ? '5.1'
+              : channels.toString();
+      parts.add(channelLabel);
+    }
+
+    return parts.isEmpty ? '未知' : parts.join(' ');
+  }
+
+  // ✅ 格式化字幕流
+  String _formatSubtitleStream(Map<String, dynamic> stream) {
+    final displayTitle = stream['DisplayTitle']?.toString();
+    if (displayTitle != null && displayTitle.isNotEmpty) {
+      return displayTitle;
+    }
+
+    final language = stream['Language']?.toString();
+    final codec = stream['Codec']?.toString().toUpperCase();
+    final isForced = stream['IsForced'] == true;
+
+    final parts = <String>[];
+    if (language != null && language.isNotEmpty) {
+      parts.add(language);
+    }
+    if (codec != null && codec.isNotEmpty) {
+      parts.add(codec);
+    }
+    if (isForced) {
+      parts.add('强制');
+    }
+
+    return parts.isEmpty ? '未知字幕' : parts.join(' ');
+  }
+
+  // ✅ 显示音频选择菜单
+  Future<void> _showAudioSelectionMenu(BuildContext anchorContext) async {
+    if (_audioStreams.isEmpty) return;
+
+    // ✅ 取消自动隐藏计时器，防止弹窗显示时控件自动消失
+    _cancelHideControlsTimer();
+
+    final RenderBox button = anchorContext.findRenderObject() as RenderBox;
+    final RenderBox overlay = Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
+    
+    // ✅ 计算按钮位置，让菜单显示在按钮上方并保持12px间距
+    final buttonOffset = button.localToGlobal(Offset.zero, ancestor: overlay);
+    final overlaySize = overlay.size;
+    
+    const maxMenuHeight = 230.0;
+    const spacing = 12.0; // 按钮和菜单之间的间距
+    
+    // 菜单底部应该在按钮顶部上方 spacing 像素
+    // bottom 是距离屏幕底部的距离
+    final menuBottomFromScreenBottom = overlaySize.height - buttonOffset.dy + spacing;
+    
+    // 菜单顶部最多到按钮顶部 - spacing - maxMenuHeight
+    // top 是距离屏幕顶部的距离
+    final menuTopFromScreenTop = (buttonOffset.dy - spacing - maxMenuHeight).clamp(0.0, double.infinity);
+    
+    final RelativeRect position = RelativeRect.fromLTRB(
+      buttonOffset.dx, // 左边对齐按钮
+      menuTopFromScreenTop, // 上边：确保菜单不会超出屏幕顶部
+      overlaySize.width - buttonOffset.dx - button.size.width, // 右边
+      menuBottomFromScreenBottom, // 底部：让菜单底边在按钮上方 spacing 像素
+    );
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scrollController = ScrollController();
+
+    // ✅ 延迟滚动到选中项
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (scrollController.hasClients && _selectedAudioStreamIndex != null) {
+        const itemHeight = 48.0; // padding 14*2 + 文字高度约20
+        final targetOffset = _selectedAudioStreamIndex! * itemHeight;
+        final maxScrollExtent = scrollController.position.maxScrollExtent;
+        final viewportHeight = scrollController.position.viewportDimension;
+        
+        // 居中显示选中项
+        final centeredOffset = (targetOffset - viewportHeight / 2 + itemHeight / 2)
+            .clamp(0.0, maxScrollExtent);
+        
+        scrollController.animateTo(
+          centeredOffset,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+
+    final result = await showMenu<int>(
+      context: context,
+      position: position,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: Colors.transparent,
+      elevation: 0,
+      constraints: const BoxConstraints(
+        maxHeight: maxMenuHeight,
+        minWidth: 200,
+      ),
+      items: [
+        PopupMenuItem<int>(
+          enabled: false,
+          padding: EdgeInsets.zero,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                constraints: const BoxConstraints(
+                  maxHeight: 230,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isDark
+                        ? [
+                            Colors.grey.shade900.withValues(alpha: 0.7),
+                            Colors.grey.shade800.withValues(alpha: 0.5),
+                          ]
+                        : [
+                            Colors.white.withValues(alpha: 0.25),
+                            Colors.white.withValues(alpha: 0.15),
+                          ],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: List.generate(_audioStreams.length, (index) {
+                      final data = _audioStreams[index];
+                      final label = _formatAudioStream(data);
+                      final isDefault = (data['IsDefault'] as bool?) == true;
+                      final hasDefaultTag = label.contains('默认');
+                      final isSelected = index == _selectedAudioStreamIndex;
+                      
+                      return Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => Navigator.of(context).pop(index),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 14,
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    isDefault && !hasDefaultTag ? '$label (默认)' : label,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 15,
+                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                if (isSelected)
+                                  const Icon(
+                                    Icons.check_rounded,
+                                    size: 20,
+                                    color: Colors.white,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+
+    // ✅ 释放滚动控制器
+    scrollController.dispose();
+
+    // ✅ 菜单关闭后，重新启动自动隐藏计时器
+    _resetHideControlsTimer();
+
+    if (result != null && result >= 0 && result < _audioStreams.length) {
+      setState(() {
+        _selectedAudioStreamIndex = result;
+        _hasManuallySelectedAudio = true;
+      });
+      _saveStreamSelections();
+    }
+  }
+
+  // ✅ 显示字幕选择菜单
+  Future<void> _showSubtitleSelectionMenu(BuildContext anchorContext) async {
+    if (_subtitleStreams.isEmpty) return;
+
+    // ✅ 取消自动隐藏计时器，防止弹窗显示时控件自动消失
+    _cancelHideControlsTimer();
+
+    final RenderBox button = anchorContext.findRenderObject() as RenderBox;
+    final RenderBox overlay = Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
+    
+    // ✅ 计算按钮位置，让菜单显示在按钮上方并保持12px间距
+    final buttonOffset = button.localToGlobal(Offset.zero, ancestor: overlay);
+    final overlaySize = overlay.size;
+    
+    const maxMenuHeight = 230.0;
+    const spacing = 12.0; // 按钮和菜单之间的间距
+    
+    // 菜单底部应该在按钮顶部上方 spacing 像素
+    // bottom 是距离屏幕底部的距离
+    final menuBottomFromScreenBottom = overlaySize.height - buttonOffset.dy + spacing;
+    
+    // 菜单顶部最多到按钮顶部 - spacing - maxMenuHeight
+    // top 是距离屏幕顶部的距离
+    final menuTopFromScreenTop = (buttonOffset.dy - spacing - maxMenuHeight).clamp(0.0, double.infinity);
+    
+    final RelativeRect position = RelativeRect.fromLTRB(
+      buttonOffset.dx, // 左边对齐按钮
+      menuTopFromScreenTop, // 上边：确保菜单不会超出屏幕顶部
+      overlaySize.width - buttonOffset.dx - button.size.width, // 右边
+      menuBottomFromScreenBottom, // 底部：让菜单底边在按钮上方 spacing 像素
+    );
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scrollController = ScrollController();
+
+    // ✅ 延迟滚动到选中项
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (scrollController.hasClients && _selectedSubtitleStreamIndex != null) {
+        const itemHeight = 48.0; // padding 14*2 + 文字高度约20
+        final targetOffset = _selectedSubtitleStreamIndex! * itemHeight;
+        final maxScrollExtent = scrollController.position.maxScrollExtent;
+        final viewportHeight = scrollController.position.viewportDimension;
+        
+        // 居中显示选中项
+        final centeredOffset = (targetOffset - viewportHeight / 2 + itemHeight / 2)
+            .clamp(0.0, maxScrollExtent);
+        
+        scrollController.animateTo(
+          centeredOffset,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+
+    final result = await showMenu<int>(
+      context: context,
+      position: position,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: Colors.transparent,
+      elevation: 0,
+      constraints: const BoxConstraints(
+        maxHeight: maxMenuHeight,
+        minWidth: 200,
+      ),
+      items: [
+        PopupMenuItem<int>(
+          enabled: false,
+          padding: EdgeInsets.zero,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                constraints: const BoxConstraints(
+                  maxHeight: 230,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isDark
+                        ? [
+                            Colors.grey.shade900.withValues(alpha: 0.7),
+                            Colors.grey.shade800.withValues(alpha: 0.5),
+                          ]
+                        : [
+                            Colors.white.withValues(alpha: 0.25),
+                            Colors.white.withValues(alpha: 0.15),
+                          ],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: List.generate(_subtitleStreams.length, (index) {
+                      final label = _formatSubtitleStream(_subtitleStreams[index]);
+                      final isDefault =
+                          (_subtitleStreams[index]['IsDefault'] as bool?) == true;
+                      final hasDefaultTag = label.contains('默认');
+                      final isSelected = index == _selectedSubtitleStreamIndex;
+                      
+                      return Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => Navigator.of(context).pop(index),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 14,
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    isDefault && !hasDefaultTag ? '$label (默认)' : label,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 15,
+                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                if (isSelected)
+                                  const Icon(
+                                    Icons.check_rounded,
+                                    size: 20,
+                                    color: Colors.white,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+
+    // ✅ 释放滚动控制器
+    scrollController.dispose();
+
+    // ✅ 菜单关闭后，重新启动自动隐藏计时器
+    _resetHideControlsTimer();
+
+    if (result != null && result >= 0 && result < _subtitleStreams.length) {
+      setState(() {
+        _selectedSubtitleStreamIndex = result;
+        _hasManuallySelectedSubtitle = true;
+      });
+      _saveStreamSelections();
+    }
+  }
+
   // ✅ 构建美化的图标按钮
   Widget _buildIconButton({
     required IconData icon,
@@ -1741,6 +2345,12 @@ class _Controls extends StatefulWidget {
     required this.isPlaying,
     required this.isDragging,
     this.draggingPosition,
+    required this.audioStreams,
+    required this.subtitleStreams,
+    this.selectedAudioIndex,
+    this.selectedSubtitleIndex,
+    required this.onAudioTap,
+    required this.onSubtitleTap,
     required this.onDragStart,
     required this.onDragging,
     required this.onDragEnd,
@@ -1751,6 +2361,12 @@ class _Controls extends StatefulWidget {
   final bool isPlaying;
   final bool isDragging;
   final Duration? draggingPosition;
+  final List<Map<String, dynamic>> audioStreams;
+  final List<Map<String, dynamic>> subtitleStreams;
+  final int? selectedAudioIndex;
+  final int? selectedSubtitleIndex;
+  final ValueChanged<BuildContext> onAudioTap;
+  final ValueChanged<BuildContext> onSubtitleTap;
   final VoidCallback onDragStart;
   final ValueChanged<Duration> onDragging;
   final ValueChanged<Duration> onDragEnd;
@@ -1968,6 +2584,39 @@ class _ControlsState extends State<_Controls>
                     },
                   ),
                 ),
+                const SizedBox(width: 12),
+                // ✅ 字幕按钮
+                if (widget.subtitleStreams.isNotEmpty)
+                  Builder(
+                    builder: (btnContext) {
+                      return CupertinoButton(
+                        padding: const EdgeInsets.all(8),
+                        minSize: 0,
+                        onPressed: () => widget.onSubtitleTap(btnContext),
+                        child: const Icon(
+                          Icons.subtitles_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      );
+                    },
+                  ),
+                // ✅ 音频按钮
+                if (widget.audioStreams.isNotEmpty)
+                  Builder(
+                    builder: (btnContext) {
+                      return CupertinoButton(
+                        padding: const EdgeInsets.all(8),
+                        minSize: 0,
+                        onPressed: () => widget.onAudioTap(btnContext),
+                        child: const Icon(
+                          Icons.audiotrack_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      );
+                    },
+                  ),
               ],
             ),
           ),
