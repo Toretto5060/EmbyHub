@@ -60,6 +60,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isLandscape = true; // ✅ 默认横屏
   bool _isBuffering = true;
   bool _isPlaying = false; // ✅ 添加播放状态
+  Duration _bufferPosition = Duration.zero; // ✅ 实时缓冲进度
   double? _expectedBitrateKbps;
   double? _currentSpeedKbps;
   String? _qualityLabel;
@@ -71,8 +72,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   late final StateController<int> _refreshTicker;
   Timer? _speedTimer;
 
-  // ✅ 控制栏显示/隐藏（初始就显示）
-  bool _showControls = true;
+  // ✅ 控制栏显示/隐藏（初始隐藏，点击屏幕显示）
+  bool _showControls = false;
 
   // ✅ 视频画面裁切模式
   BoxFit _videoFit = BoxFit.contain; // contain(原始), cover(覆盖), fill(填充)
@@ -117,17 +118,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     super.initState();
     // ✅ 创建播放器，media_kit会自动启用系统媒体会话
     _player = Player(
-      configuration: const PlayerConfiguration(
+      configuration: PlayerConfiguration(
         title: 'Emby Player',
         // ✅ 设置日志级别（减少日志输出，提升性能）
         logLevel: MPVLogLevel.error,
+
+        // ===== bufferSize: 播放器内部缓冲区大小 =====
+        // 说明：这是播放器在内存中保存已解码视频帧的缓冲区大小
+        // 用途：更大的缓冲区可以保存更多已解码的帧，减少解码压力
+        // 注意：已解码帧占用空间较大（1080p约3-5MB/帧），1GB可以缓存几百帧
+        bufferSize: 1024 * 1024 * 1024, // 1GB 缓冲区
       ),
     );
 
     _controller = VideoController(
       _player,
       configuration: const VideoControllerConfiguration(
-        // ✅ 启用硬件加速，提升解码性能（特别是倍速播放时）
+        // ✅ 启用硬件加载，提升解码性能（特别是倍速播放时）
         enableHardwareAcceleration: true,
         // ✅ 改为true可能提升倍速播放性能，减少Surface切换延迟
         androidAttachSurfaceAfterVideoParameters: true,
@@ -143,7 +150,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       parent: _controlsAnimationController,
       curve: Curves.easeInOut,
     );
-    _controlsAnimationController.forward();
+    // ✅ 初始状态是隐藏的，不执行forward
 
     // ✅ 进入播放页面时默认横屏
     SystemChrome.setPreferredOrientations([
@@ -151,11 +158,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       DeviceOrientation.landscapeRight,
     ]);
 
-    // ✅ 初始显示状态栏（因为控制栏默认显示）
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.manual,
-      overlays: SystemUiOverlay.values,
-    );
+    // ✅ 初始隐藏状态栏（因为控制栏默认隐藏）
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
     _refreshTicker = ref.read(libraryRefreshTickerProvider.notifier);
 
@@ -232,6 +236,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         setState(() {
           _isBuffering = true;
           _ready = false;
+          _bufferPosition = Duration.zero; // 重置缓冲进度
         });
       }
       _playerLog('🎬 [Player] Loading item: ${widget.itemId}');
@@ -294,12 +299,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerLogImportant(
           '🎬 [Player] needsSeek: $needsSeek, initialPosition: $_initialSeekPosition');
 
-      _bufferingSub?.cancel();
-      _bufferingSub = _player.stream.buffering.listen((isBuffering) {
-        _playerLog('🎬 [Player] Buffering: $isBuffering');
-        if (!mounted) return;
-        setState(() => _isBuffering = isBuffering);
-      });
+      // ✅ 如果需要seek，先静音，避免第一帧有声音
+      if (needsSeek) {
+        await _player.setVolume(0.0);
+        _playerLogImportant('🎬 [Player] 🔇 Pre-muted for initial seek');
+      }
 
       // ✅ 打开媒体（设置标题以支持系统媒体通知）
       _playerLog('🎬 [Player] Opening media with title: $_videoTitle');
@@ -307,13 +311,65 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         Media(
           media.uri,
           httpHeaders: media.headers,
+          extras: {
+            // ===== 缓冲大小配置 =====
+            // demuxer-max-bytes: HLS demuxer（解复用器）能缓存的最大数据量
+            // 说明：这是从网络下载的原始视频数据（未解码）的缓存上限
+            // 用途：缓存更多原始数据，减少网络请求，提升流畅度
+            'demuxer-max-bytes': '10G', // 最大缓存 5GB
+
+            // demuxer-max-back-bytes: 向后缓存的最大数据量（用于倒退播放）
+            // 说明：当前播放位置之前的数据会被保留多少
+            // 用途：倒退播放时不需要重新下载，直接从缓存读取
+            'demuxer-max-back-bytes': '1G', // 向后缓存 5GB
+
+            // ===== 缓存时间配置 =====
+            // cache: 是否启用缓存
+            'cache': 'yes',
+
+            // cache-secs: 缓存的目标时长（秒）
+            // 说明：播放器会尝试缓存这么长时间的视频
+            // 用途：与 demuxer-max-bytes 配合，哪个先达到限制就停止缓存
+            'cache-secs': '3600', // 缓存3600秒（1小时）
+
+            // demuxer-readahead-secs: 预读时长（秒）
+            // 说明：播放器会提前读取多少秒的数据到缓冲区
+            // 用途：积极预读，确保播放流畅
+            'demuxer-readahead-secs': '1800', // 预读1800秒（30分钟）
+
+            // ===== 流缓冲配置 =====
+            // stream-buffer-size: 网络流的缓冲区大小
+            // 说明：从网络读取数据的临时缓冲区
+            // 用途：更大的缓冲区可以更快地从网络读取数据
+            'stream-buffer-size': '64M', // 流缓冲区 64MB
+
+            // ===== 缓存能力配置 =====
+            // demuxer-seekable-cache: 缓存是否支持随机访问（seek）
+            // 说明：启用后可以在缓存中任意位置seek，不会丢失缓存
+            'demuxer-seekable-cache': 'yes',
+
+            // force-seekable: 强制视频流可搜索
+            // 说明：即使是 HLS 流也能随意跳转
+            'force-seekable': 'yes',
+          },
         ),
         play: !needsSeek,
       );
 
-      // ✅ 设置播放器音量为100%，让系统音量完全控制输出音量
-      await _player.setVolume(100.0);
-      _playerLog('🎬 [Player] Volume set to 100%');
+      // ✅ 在 open 之后设置 buffering 监听，确保能正确捕获缓冲状态
+      _bufferingSub?.cancel();
+      _bufferingSub = _player.stream.buffering.listen((isBuffering) {
+        _playerLog('🎬 [Player] Buffering状态变化: $isBuffering');
+        if (!mounted) return;
+        setState(() => _isBuffering = isBuffering);
+      });
+
+      // ✅ 如果不需要seek，设置音量为100%
+      // 如果需要seek，在seek流程中控制音量（先静音再恢复）
+      if (!needsSeek) {
+        await _player.setVolume(100.0);
+        _playerLog('🎬 [Player] Volume set to 100%');
+      }
 
       // ✅ 显示系统媒体通知
       _playerLog('🎬 [Player] ✅ Media opened successfully');
@@ -351,6 +407,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _updateMediaNotification();
       });
 
+      // ✅ 监听缓冲进度（用于显示进度条上的缓冲位置）
+      _player.stream.buffer.listen((buffer) {
+        if (mounted && buffer > Duration.zero) {
+          setState(() {
+            _bufferPosition = buffer; // 直接使用实时缓冲位置
+          });
+        }
+      });
+
       // ✅ 监听错误
       _player.stream.error.listen((error) {
         _playerLog('❌ [Player] Error: $error');
@@ -370,8 +435,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         }
 
         _playerLogImportant(
-            '🎬 [Player] ⏱️ Starting playback from beginning first (hidden)...');
-        // 先开始播放，让播放器进入稳定状态
+            '🎬 [Player] ⏱️ Starting playback from beginning first (hidden and muted)...');
+
+        // 先开始播放，让播放器进入稳定状态（已在open前静音）
         await _player.play();
 
         _playerLogImportant(
@@ -384,8 +450,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         await _player.seek(_initialSeekPosition!);
         _lastReportedPosition = _initialSeekPosition!;
 
-        // Seek 后确保继续播放
-        _playerLogImportant('🎬 [Player] ✅ Seeked, resuming playback...');
+        // Seek 后恢复音量并确保继续播放
+        _playerLogImportant(
+            '🎬 [Player] ✅ Seeked, restoring volume and resuming playback...');
+        await _player.setVolume(100.0);
+        _playerLogImportant('🎬 [Player] 🔊 Volume restored to 100%');
         await _player.play();
 
         // 延迟一下确保seek后的帧已经渲染
@@ -402,11 +471,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       if (mounted) {
         setState(() {
           _ready = true;
-          _isBuffering = false;
+          // ✅ 不在这里设置 _isBuffering = false
+          // _isBuffering 由 buffering stream 控制，确保缓冲完成后才消失
         });
       }
       _playerLog(
-          '🎬 [Player] ✅ Ready to play, isPlaying: $_isPlaying, canTriggerPip: ${_ready && _isPlaying}');
+          '🎬 [Player] ✅ Ready to play, isPlaying: $_isPlaying, isBuffering: $_isBuffering');
     } catch (e, stack) {
       _playerLog('❌ [Player] Load failed: $e');
       _playerLog('Stack: $stack');
@@ -1395,6 +1465,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                           child: _Controls(
                             position: _position,
                             duration: _duration,
+                            bufferPosition: _bufferPosition, // ✅ 传递实时缓冲进度
                             isPlaying: _isPlaying,
                             isDragging: _isDraggingProgress,
                             draggingPosition: _draggingPosition,
@@ -1440,7 +1511,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 ),
 
               // ✅ 加载/缓冲指示器（不阻挡点击）
-              if (!_ready || _isBuffering)
+              // 显示条件：未准备好 或 正在缓冲 或 还未开始播放（position为0）
+              if (!_ready ||
+                  _isBuffering ||
+                  (_ready && _position == Duration.zero))
                 Positioned.fill(
                   child: IgnorePointer(
                     child: Container(
@@ -1461,7 +1535,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                               ),
                               const SizedBox(height: 16),
                               Text(
-                                _ready ? '缓冲中...' : '加载中...',
+                                !_ready
+                                    ? '加载中...'
+                                    : _isBuffering
+                                        ? '缓冲中...'
+                                        : '准备中...',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,
@@ -1627,6 +1705,7 @@ class _Controls extends StatefulWidget {
   const _Controls({
     required this.position,
     required this.duration,
+    required this.bufferPosition, // ✅ 缓冲进度
     required this.isPlaying,
     required this.isDragging,
     this.draggingPosition,
@@ -1636,6 +1715,7 @@ class _Controls extends StatefulWidget {
   });
   final Duration position;
   final Duration duration;
+  final Duration bufferPosition; // ✅ 缓冲进度
   final bool isPlaying;
   final bool isDragging;
   final Duration? draggingPosition;
@@ -1770,37 +1850,88 @@ class _ControlsState extends State<_Controls>
                   child: AnimatedBuilder(
                     animation: _thumbAnimation,
                     builder: (context, child) {
-                      return SliderTheme(
-                        data: SliderThemeData(
-                          trackHeight: 3,
-                          thumbShape: RoundSliderThumbShape(
-                            enabledThumbRadius: _thumbAnimation.value,
-                          ),
-                          overlayShape: const RoundSliderOverlayShape(
-                            overlayRadius: 16,
-                          ),
-                          activeTrackColor: Colors.white,
-                          inactiveTrackColor:
-                              Colors.white.withValues(alpha: 0.3),
-                          thumbColor: Colors.white,
-                          overlayColor: Colors.white.withValues(alpha: 0.15),
-                        ),
-                        child: Slider(
-                          value: sliderValue,
-                          onChangeStart: (v) {
-                            widget.onDragStart();
-                          },
-                          onChanged: (v) {
-                            final target =
-                                Duration(seconds: (v * totalSeconds).round());
-                            widget.onDragging(target);
-                          },
-                          onChangeEnd: (v) {
-                            final target =
-                                Duration(seconds: (v * totalSeconds).round());
-                            widget.onDragEnd(target);
-                          },
-                        ),
+                      // 计算缓冲进度值
+                      final bufferValue =
+                          widget.bufferPosition.inSeconds / totalSeconds;
+                      final bufferSliderValue = bufferValue.isNaN
+                          ? 0.0
+                          : bufferValue.clamp(0.0, 1.0).toDouble();
+
+                      return LayoutBuilder(
+                        builder: (context, constraints) {
+                          final width = constraints.maxWidth;
+                          // 计算缓冲区域的起始和结束位置（像素）
+                          final playedWidth = width * sliderValue;
+                          final bufferedWidth = width * bufferSliderValue;
+
+                          return Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              // ✅ 缓冲进度条（浅白色，只显示从播放位置到缓冲位置）
+                              if (bufferedWidth > playedWidth)
+                                Positioned.fill(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 24), // Slider的默认padding
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Container(
+                                        margin: EdgeInsets.only(
+                                            left: (width - 48) *
+                                                sliderValue), // 减去padding后的宽度
+                                        width: (width - 48) *
+                                            (bufferSliderValue -
+                                                sliderValue), // 缓冲区域宽度
+                                        height: 3,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white
+                                              .withValues(alpha: 0.5), // 缓冲进度颜色
+                                          borderRadius: const BorderRadius.only(
+                                            topRight: Radius.circular(1.5),
+                                            bottomRight: Radius.circular(1.5),
+                                          ), // 左侧直角，右侧圆角
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              // ✅ 播放进度条
+                              SliderTheme(
+                                data: SliderThemeData(
+                                  trackHeight: 3,
+                                  thumbShape: RoundSliderThumbShape(
+                                    enabledThumbRadius: _thumbAnimation.value,
+                                  ),
+                                  overlayShape: const RoundSliderOverlayShape(
+                                    overlayRadius: 16,
+                                  ),
+                                  activeTrackColor: Colors.white,
+                                  inactiveTrackColor:
+                                      Colors.white.withValues(alpha: 0.3),
+                                  thumbColor: Colors.white,
+                                  overlayColor:
+                                      Colors.white.withValues(alpha: 0.15),
+                                ),
+                                child: Slider(
+                                  value: sliderValue,
+                                  onChangeStart: (v) {
+                                    widget.onDragStart();
+                                  },
+                                  onChanged: (v) {
+                                    final target = Duration(
+                                        seconds: (v * totalSeconds).round());
+                                    widget.onDragging(target);
+                                  },
+                                  onChangeEnd: (v) {
+                                    final target = Duration(
+                                        seconds: (v * totalSeconds).round());
+                                    widget.onDragEnd(target);
+                                  },
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       );
                     },
                   ),

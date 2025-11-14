@@ -80,6 +80,11 @@ class MainActivity: FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         
+        // ✅ 设置音量控制为媒体音量流（使用系统音效）
+        // 这样按音量键时调节的是媒体音量，而非铃声音量
+        volumeControlStream = AudioManager.STREAM_MUSIC
+        android.util.Log.d("MainActivity", "🔊 Volume control stream set to STREAM_MUSIC")
+        
         // ✅ 初始化 MediaSession
         initMediaSession()
         
@@ -283,8 +288,26 @@ class MainActivity: FlutterActivity() {
         try {
             android.util.Log.d("MainActivity", "📱 Initializing MediaSession")
             
-            // ✅ 初始化 AudioManager
+            // ✅ 初始化 AudioManager 并配置音频模式
             audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioManager?.apply {
+                // 设置为媒体播放模式，启用系统音效增强
+                mode = AudioManager.MODE_NORMAL
+                // 确保使用扬声器输出（非通话模式）
+                isSpeakerphoneOn = false
+                
+                // ✅ 检查当前媒体音量并记录
+                val currentVolume = getStreamVolume(AudioManager.STREAM_MUSIC)
+                val maxVolume = getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                android.util.Log.d("MainActivity", "🔊 Current media volume: $currentVolume/$maxVolume")
+                
+                // 如果音量太小，提示用户
+                if (currentVolume < maxVolume * 0.3) {
+                    android.util.Log.w("MainActivity", "⚠️ Media volume is low ($currentVolume/$maxVolume), please increase system volume")
+                }
+                
+                android.util.Log.d("MainActivity", "🔊 AudioManager configured: mode=NORMAL")
+            }
             
             // 创建通知渠道
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
