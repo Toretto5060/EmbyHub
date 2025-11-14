@@ -18,15 +18,11 @@ import '../../utils/status_bar_manager.dart';
 
 const bool _kPlayerLogging = false; // ✅ 禁用日志，提升性能（倍速播放时大量日志会拖慢速度）
 void _playerLog(String message) {
-  if (_kPlayerLogging) {
-    debugPrint(message);
-  }
+  if (_kPlayerLogging) {}
 }
 
 // 重要日志，总是输出
-void _playerLogImportant(String message) {
-  debugPrint(message);
-}
+void _playerLogImportant(String message) {}
 
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({
@@ -631,9 +627,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // ✅ 不在这里设置 _isInPipMode，等待原生层回调 onPipModeChanged
     } catch (e) {
       _playerLog('❌ [Player] Manual PiP enter failed: $e');
-      if (kDebugMode) {
-        debugPrint('PiP Error Details: $e');
-      }
+      if (kDebugMode) {}
     }
   }
 

@@ -11,7 +11,7 @@ import '../../utils/status_bar_manager.dart';
 
 class ModernConnectPage extends ConsumerStatefulWidget {
   const ModernConnectPage({super.key, this.startAtLogin = false});
-  
+
   final bool startAtLogin;
 
   @override
@@ -33,7 +33,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
   bool _serverConnected = false;
   bool _loading = false;
   String? _serverName;
-  bool _rememberMe = false;  // ✅ 记住我选项，默认勾选
+  bool _rememberMe = false; // ✅ 记住我选项，默认勾选
 
   @override
   void initState() {
@@ -87,16 +87,14 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
   Future<void> _testConnection() async {
     // 让所有输入框失去焦点，避免键盘闪烁和焦点传递问题
     FocusScope.of(context).unfocus();
-    
+
     setState(() {
       _loading = true;
     });
     try {
       final port = _port.text.trim().isEmpty ? '8096' : _port.text.trim();
       await ref.read(serverSettingsProvider.notifier).save(ServerSettings(
-          protocol: _protocol,
-          host: _host.text.trim(),
-          port: port));
+          protocol: _protocol, host: _host.text.trim(), port: port));
       final api = await EmbyApi.create();
       final info = await api.systemInfo();
       setState(() {
@@ -114,7 +112,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
             backgroundColor: Colors.red.shade700,
             behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         );
       }
@@ -127,7 +126,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
             backgroundColor: Colors.red.shade700,
             behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         );
       }
@@ -152,26 +152,25 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
     });
     try {
       final api = await EmbyApi.create();
-      final result = await api.authenticate(username: _user.text.trim(), password: _pwd.text);
-      
+      final result = await api.authenticate(
+          username: _user.text.trim(), password: _pwd.text);
+
       // ✅ 只有勾选了"记住我"才保存到账号历史
       if (_rememberMe) {
         final serverSettingsAsync = ref.read(serverSettingsProvider);
         final serverSettings = serverSettingsAsync.value;
         if (serverSettings != null) {
-          final serverUrl = '${serverSettings.protocol}://${serverSettings.host}:${serverSettings.port}';
+          final serverUrl =
+              '${serverSettings.protocol}://${serverSettings.host}:${serverSettings.port}';
           await ref.read(accountHistoryProvider.notifier).addAccount(
-            serverUrl,
-            result.userName,
-            result.token,
-            userId: result.userId,
-          );
-          print('💾 Saved account to history: ${result.userName}');
+                serverUrl,
+                result.userName,
+                result.token,
+                userId: result.userId,
+              );
         }
-      } else {
-        print('⚠️ Remember me not checked, skipping account history');
-      }
-      
+      } else {}
+
       await ref.read(authStateProvider.notifier).load();
       if (!mounted) return;
       context.go('/');
@@ -192,7 +191,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
             backgroundColor: Colors.red.shade700,
             behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         );
       }
@@ -205,7 +205,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
             backgroundColor: Colors.red.shade700,
             behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
         );
       }
@@ -253,7 +254,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
               SafeArea(
                 child: Center(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 40),
                     child: FadeTransition(
                       opacity: _fadeAnim,
                       child: SlideTransition(
@@ -281,15 +283,18 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                   child: SafeArea(
                     child: TextButton.icon(
                       onPressed: () => context.go('/'),
-                      icon: const Icon(Icons.home_rounded, color: Colors.white, size: 20),
-                      label: const Text('跳过', style: TextStyle(color: Colors.white, fontSize: 14)),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                backgroundColor: Colors.white.withOpacity(0.2),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
+                      icon: const Icon(Icons.home_rounded,
+                          color: Colors.white, size: 20),
+                      label: const Text('跳过',
+                          style: TextStyle(color: Colors.white, fontSize: 14)),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        backgroundColor: Colors.white.withOpacity(0.2),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -421,7 +426,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 decoration: InputDecoration(
                   labelText: '服务器地址',
                   hintText: 'example.com 或 192.168.1.100',
-                  hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                  hintStyle:
+                      TextStyle(color: Colors.grey.shade600, fontSize: 16),
                   prefixIcon: const Icon(Icons.dns_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,
@@ -447,7 +453,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 decoration: InputDecoration(
                   labelText: '端口（可选）',
                   hintText: '留空则使用 8096',
-                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                  hintStyle:
+                      TextStyle(color: Colors.grey.shade400, fontSize: 14),
                   prefixIcon: const Icon(Icons.settings_ethernet_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,
@@ -567,7 +574,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 decoration: InputDecoration(
                   labelText: '用户名',
                   hintText: '输入用户名',
-                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 16),
+                  hintStyle:
+                      TextStyle(color: Colors.grey.shade400, fontSize: 16),
                   prefixIcon: const Icon(Icons.person_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,
@@ -594,7 +602,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 decoration: InputDecoration(
                   labelText: '密码',
                   hintText: '输入密码',
-                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 16),
+                  hintStyle:
+                      TextStyle(color: Colors.grey.shade400, fontSize: 16),
                   prefixIcon: const Icon(Icons.lock_rounded),
                   filled: true,
                   fillColor: Colors.grey.shade50,
@@ -668,7 +677,8 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                       )
                     : const Text(
                         '登录',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w600),
                       ),
               ),
             ],

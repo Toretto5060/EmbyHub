@@ -106,7 +106,6 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage> {
             const SizedBox(height: 12),
             seasonsAsync.when(
               data: (seasons) {
-                print('🎬 Seasons loaded: ${seasons.length} seasons');
                 if (seasons.isEmpty) {
                   return Center(
                     child: Padding(
@@ -142,7 +141,6 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage> {
                 );
               },
               loading: () {
-                print('⏳ Loading seasons for series: ${widget.seriesId}');
                 return Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32.0),

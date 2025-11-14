@@ -70,11 +70,9 @@ class _BottomNavWrapperState extends State<BottomNavWrapper> {
           if (!didPop) {
             // 如果在首页，将应用移到后台
             if (isHomePage) {
-              print('📱 首页返回：移到后台');
               await PlatformUtils.moveToBackground();
             } else {
               // 如果在子页面，返回上一页
-              print('📱 子页面返回：返回上一页');
               if (Navigator.of(context).canPop()) {
                 Navigator.of(context).pop();
               } else {

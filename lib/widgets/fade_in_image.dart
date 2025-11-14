@@ -14,9 +14,7 @@ import 'package:path_provider/path_provider.dart';
 const bool _kImageCacheLogging = false;
 
 void _log(String message) {
-  if (_kImageCacheLogging) {
-    debugPrint(message);
-  }
+  if (_kImageCacheLogging) {}
 }
 
 // ✅ 不可重试的异常（如404等客户端错误）

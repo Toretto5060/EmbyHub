@@ -5,10 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart' as sp;
 
 const bool _kEmbyApiLogging = false;
 void _apiLog(String message) {
-  if (_kEmbyApiLogging) {
-    // ignore: avoid_print
-    print(message);
-  }
+  if (_kEmbyApiLogging) {}
 }
 
 class EmbyApi {

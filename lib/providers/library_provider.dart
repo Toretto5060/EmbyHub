@@ -5,10 +5,7 @@ import 'settings_provider.dart';
 
 const bool _kLibraryProviderLogging = false;
 void _libraryLog(String message) {
-  if (_kLibraryProviderLogging) {
-    // ignore: avoid_print
-    print(message);
-  }
+  if (_kLibraryProviderLogging) {}
 }
 
 // ✅ 全局刷新信号：每次媒体状态发生变动时 +1

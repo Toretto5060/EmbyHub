@@ -10,9 +10,7 @@ class PlatformUtils {
     if (Platform.isAndroid) {
       try {
         await _channel.invokeMethod('moveToBackground');
-        print('📱 应用已移到后台');
       } catch (e) {
-        print('❌ 移到后台失败，使用 SystemNavigator.pop(): $e');
         // 降级方案：退出应用
         SystemNavigator.pop();
       }
@@ -27,10 +25,6 @@ class PlatformUtils {
     }
     try {
       await _channel.invokeMethod('setHighRefreshRate');
-      print('⚡ 已请求高刷新率显示模式');
-    } catch (e) {
-      print('❌ 请求高刷新率失败: $e');
-    }
+    } catch (e) {}
   }
 }
-

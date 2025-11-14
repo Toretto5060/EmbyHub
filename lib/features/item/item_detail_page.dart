@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
@@ -35,12 +36,10 @@ final similarItemsProvider =
   ref.watch(libraryRefreshTickerProvider);
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
-    debugPrint('[Similar] skipped: not logged in');
     return const [];
   }
   final api = await ref.watch(embyApiProvider.future);
   final items = await api.getSimilarItems(auth.userId!, itemId, limit: 12);
-  debugPrint('[Similar] fetched ${items.length} items for $itemId');
   return items;
 });
 
@@ -75,6 +74,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   final Map<String, SystemUiOverlayStyle> _imageStyleCache = {};
   int? _selectedAudioStreamIndex;
   int? _selectedSubtitleStreamIndex;
+  bool _hasManuallySelectedSubtitle = false; // ✅ 标记用户是否手动选择过字幕
+  bool _hasManuallySelectedAudio = false; // ✅ 标记用户是否手动选择过音频
   final GlobalKey _resumeMenuAnchorKey = GlobalKey();
   static const Color _resumeButtonColor = Color(0xFFFFB74D);
   static const Color _playButtonColor = Color(0xFF3F8CFF);
@@ -105,6 +106,54 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
           _scrollController.hasClients ? _scrollController.offset : 0.0);
     });
     _appliedStatusStyle = _statusBarStyle;
+    // ✅ 加载保存的音频和字幕选择
+    _loadStreamSelections();
+  }
+
+  /// ✅ 加载保存的音频和字幕选择
+  Future<void> _loadStreamSelections() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasManualAudio =
+          prefs.getBool('item_${widget.itemId}_manual_audio') ?? false;
+      final hasManualSubtitle =
+          prefs.getBool('item_${widget.itemId}_manual_subtitle') ?? false;
+
+      // ✅ 只有手动选择过才加载保存的值
+      final audioIndex =
+          hasManualAudio ? prefs.getInt('item_${widget.itemId}_audio') : null;
+      final subtitleIndex = prefs.getInt('item_${widget.itemId}_subtitle');
+
+      if (mounted) {
+        setState(() {
+          _selectedAudioStreamIndex = audioIndex;
+          _selectedSubtitleStreamIndex = subtitleIndex;
+          _hasManuallySelectedAudio = hasManualAudio;
+          _hasManuallySelectedSubtitle = hasManualSubtitle;
+        });
+      }
+    } catch (e) {
+    }
+  }
+
+  /// ✅ 保存音频和字幕选择
+  Future<void> _saveStreamSelections() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_selectedAudioStreamIndex != null) {
+        await prefs.setInt(
+            'item_${widget.itemId}_audio', _selectedAudioStreamIndex!);
+      }
+      if (_selectedSubtitleStreamIndex != null) {
+        await prefs.setInt(
+            'item_${widget.itemId}_subtitle', _selectedSubtitleStreamIndex!);
+      }
+      await prefs.setBool(
+          'item_${widget.itemId}_manual_audio', _hasManuallySelectedAudio);
+      await prefs.setBool('item_${widget.itemId}_manual_subtitle',
+          _hasManuallySelectedSubtitle);
+    } catch (e) {
+    }
   }
 
   @override
@@ -249,7 +298,6 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
                               similarItems.when(
                                 data: (items) {
                                   if (items.isEmpty) {
-                                    debugPrint('[Similar] no items to display');
                                     return const SizedBox.shrink();
                                   }
                                   return Column(
@@ -994,7 +1042,6 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       final double avg = totalLuminance / samples;
       return avg < 0.5;
     } catch (e) {
-      debugPrint('Failed to analyze image brightness: $e');
       return true;
     }
   }
@@ -1113,30 +1160,51 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
 
   int _ensureAudioSelection(List<Map<String, dynamic>> audioStreams) {
     if (audioStreams.isEmpty) return -1;
+
+    final current = _selectedAudioStreamIndex;
+    // ✅ 如果已有有效选择（手动选择过的），直接使用
+    if (current != null && current >= 0 && current < audioStreams.length) {
+      return current;
+    }
+
+    // ✅ 如果用户手动选择过，但值还是null（异步加载中），等待加载完成
+    if (_hasManuallySelectedAudio) {
+      // 返回默认值显示，但不设置state，避免覆盖即将加载的值
+      final defaultIndex = audioStreams
+          .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+      return defaultIndex != -1 ? defaultIndex : 0;
+    }
+
+    // ✅ 没有手动选择过，使用默认音频或第一个（不保存）
     final defaultIndex = audioStreams
         .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
     final fallback = defaultIndex != -1 ? defaultIndex : 0;
-    final current = _selectedAudioStreamIndex;
-    if (current == null || current >= audioStreams.length) {
-      Future.microtask(() {
-        if (mounted) {
-          setState(() {
-            _selectedAudioStreamIndex = fallback;
-          });
-        }
-      });
-      return fallback;
-    }
-    return current;
+
+    Future.microtask(() {
+      if (mounted && !_hasManuallySelectedAudio) {
+        setState(() {
+          _selectedAudioStreamIndex = fallback;
+        });
+        // ✅ 不保存，让每次都使用默认值
+      }
+    });
+    return fallback;
   }
 
   int _ensureSubtitleSelection(List<Map<String, dynamic>> subtitleStreams) {
     if (subtitleStreams.isEmpty) return -1;
-    final defaultIndex = subtitleStreams
-        .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
-    final fallback = defaultIndex != -1 ? defaultIndex : 0;
+
     final current = _selectedSubtitleStreamIndex;
-    if (current == null || current >= subtitleStreams.length) {
+    // ✅ 如果已有有效选择，直接使用
+    if (current != null && current >= 0 && current < subtitleStreams.length) {
+      return current;
+    }
+
+    // ✅ 如果用户手动选择过，使用默认值
+    if (_hasManuallySelectedSubtitle) {
+      final defaultIndex = subtitleStreams
+          .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+      final fallback = defaultIndex != -1 ? defaultIndex : 0;
       Future.microtask(() {
         if (mounted) {
           setState(() {
@@ -1146,7 +1214,74 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       });
       return fallback;
     }
-    return current;
+
+    // ✅ 智能中文字幕选择
+    int selectedIndex = _findBestChineseSubtitle(subtitleStreams);
+
+    // ✅ 如果没有找到中文字幕，使用默认或第一个
+    if (selectedIndex == -1) {
+      final defaultIndex = subtitleStreams
+          .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+      selectedIndex = defaultIndex != -1 ? defaultIndex : 0;
+    }
+
+    Future.microtask(() {
+      if (mounted) {
+        setState(() {
+          _selectedSubtitleStreamIndex = selectedIndex;
+        });
+        _saveStreamSelections();
+      }
+    });
+    return selectedIndex;
+  }
+
+  /// ✅ 查找最佳中文字幕
+  /// 优先级：Chinese Simplified > Chinese Traditional > chinese
+  int _findBestChineseSubtitle(List<Map<String, dynamic>> subtitleStreams) {
+    // 1. 优先：Chinese Simplified（大小写均可）
+    int index = subtitleStreams.indexWhere((stream) {
+      final lang = stream['Language']?.toString() ?? '';
+      final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+      final title = stream['Title']?.toString() ?? '';
+      final combined = '$lang $displayTitle $title'.toLowerCase();
+      return combined.contains('chinese') && combined.contains('simplified');
+    });
+    if (index != -1) return index;
+
+    // 2. 其次：Chinese Traditional（大小写均可）
+    index = subtitleStreams.indexWhere((stream) {
+      final lang = stream['Language']?.toString() ?? '';
+      final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+      final title = stream['Title']?.toString() ?? '';
+      final combined = '$lang $displayTitle $title'.toLowerCase();
+      return combined.contains('chinese') && combined.contains('traditional');
+    });
+    if (index != -1) return index;
+
+    // 3. 再次：包含 chinese（任意大小写）
+    index = subtitleStreams.indexWhere((stream) {
+      final lang = stream['Language']?.toString() ?? '';
+      final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+      final title = stream['Title']?.toString() ?? '';
+      final combined = '$lang $displayTitle $title'.toLowerCase();
+      return combined.contains('chinese');
+    });
+    if (index != -1) return index;
+
+    // 4. 最后尝试：chi, zh, cn, chs, cht 等常见中文标识
+    index = subtitleStreams.indexWhere((stream) {
+      final lang = (stream['Language']?.toString() ?? '').toLowerCase();
+      return lang == 'chi' ||
+          lang == 'zh' ||
+          lang == 'cn' ||
+          lang == 'chs' ||
+          lang == 'cht' ||
+          lang == 'zh-cn' ||
+          lang == 'zh-tw';
+    });
+
+    return index;
   }
 
   String? _formatResolutionInfo(Map<String, dynamic>? media) {
@@ -1333,7 +1468,11 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     if (result != null && result >= 0 && result < audioStreams.length) {
       setState(() {
         _selectedAudioStreamIndex = result;
+        // ✅ 标记为手动选择
+        _hasManuallySelectedAudio = true;
       });
+      // ✅ 保存音频选择
+      _saveStreamSelections();
     }
   }
 
@@ -1384,7 +1523,11 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     if (result != null && result >= 0 && result < subtitleStreams.length) {
       setState(() {
         _selectedSubtitleStreamIndex = result;
+        // ✅ 标记为手动选择
+        _hasManuallySelectedSubtitle = true;
       });
+      // ✅ 保存字幕选择
+      _saveStreamSelections();
     }
   }
 
@@ -1619,13 +1762,10 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   Future<void> _openExternalLink(String url) async {
     final uri = Uri.tryParse(url);
     if (uri == null) {
-      debugPrint('[ExternalLink] Invalid URL: $url');
       return;
     }
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!launched) {
-      debugPrint('[ExternalLink] Failed to launch $url');
-    }
+    if (!launched) {}
   }
 
   List<ExternalUrlInfo> _composeExternalLinks(ItemInfo item) {
