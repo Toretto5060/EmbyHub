@@ -564,19 +564,69 @@ class EmbyApi {
     return _dio.options.baseUrl + '/Users/$userId/Images/Primary';
   }
 
-  // ✅ 获取字幕URL
+  // ✅ 获取播放信息（PlaybackInfo），包含正确的字幕流信息
+  Future<Map<String, dynamic>> getPlaybackInfo({
+    required String itemId,
+    required String userId,
+  }) async {
+    try {
+      final res =
+          await _dio.get('/Items/$itemId/PlaybackInfo', queryParameters: {
+        'UserId': userId,
+      });
+      return res.data as Map<String, dynamic>;
+    } catch (e) {
+      _apiLog('❌ [API] Get PlaybackInfo failed: $e');
+      rethrow;
+    }
+  }
+
+  // ✅ 获取字幕URL（使用PlaybackInfo获取正确的MediaSourceId）
   Future<String> buildSubtitleUrl({
     required String itemId,
     required int subtitleStreamIndex,
+    String? mediaSourceId,
     String format = 'vtt', // vtt, srt, ass, ssa
   }) async {
     final prefs = await sp.SharedPreferences.getInstance();
     final token = prefs.getString('emby_token') ?? '';
     final baseUrl = _dio.options.baseUrl;
 
-    // Emby API 字幕URL格式: /Videos/{itemId}/Subtitles/{subtitleStreamIndex}/Stream.{format}
-    final url =
+    // ✅ 根据Emby API文档，字幕URL格式为：
+    // /Videos/{itemId}/Subtitles/{subtitleStreamIndex}/Stream.{format}?api_key={token}
+    // 或者使用MediaSourceId：
+    // /Videos/{itemId}/Subtitles/{subtitleStreamIndex}/Stream.{format}?MediaSourceId={mediaSourceId}&api_key={token}
+
+    String url =
         '$baseUrl/Videos/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?api_key=$token';
+
+    // ✅ 如果有MediaSourceId，添加到URL中
+    if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+      url += '&MediaSourceId=$mediaSourceId';
+    }
+
+    return url;
+  }
+
+  // ✅ 尝试使用 Items 端点构建字幕URL（备用方案）
+  Future<String> buildSubtitleUrlWithItems({
+    required String itemId,
+    required int subtitleStreamIndex,
+    String? mediaSourceId,
+    String format = 'vtt',
+  }) async {
+    final prefs = await sp.SharedPreferences.getInstance();
+    final token = prefs.getString('emby_token') ?? '';
+    final baseUrl = _dio.options.baseUrl;
+
+    String url =
+        '$baseUrl/Items/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?api_key=$token';
+
+    // ✅ 如果有MediaSourceId，添加到URL中
+    if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+      url += '&MediaSourceId=$mediaSourceId';
+    }
+
     return url;
   }
 

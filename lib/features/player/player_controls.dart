@@ -50,6 +50,7 @@ class PlayerControlsState {
     required this.onCancelHideControlsTimer,
     required this.onSetState,
     required this.onShowSpeedListChanged,
+    required this.onToggleControls,
     required this.getVideoFitIcon,
     required this.getVideoFitName,
     required this.formatTime,
@@ -101,6 +102,7 @@ class PlayerControlsState {
   final VoidCallback onCancelHideControlsTimer;
   final ValueChanged<VoidCallback> onSetState;
   final ValueChanged<bool> onShowSpeedListChanged;
+  final VoidCallback onToggleControls;
   final IconData Function() getVideoFitIcon;
   final String Function() getVideoFitName;
   final String Function(Duration) formatTime;
@@ -123,6 +125,20 @@ class PlayerControls extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
+        // ✅ 空白区域点击检测层（最底层，当控制层显示时，用于隐藏控制层）
+        // 使用 translucent 允许事件穿透到按钮，按钮会用 AbsorbPointer 吸收事件
+        if (!state.isInPipMode && state.showControls && !state.showSpeedList)
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {
+                // ✅ 点击空白区域隐藏控制层
+                state.onToggleControls();
+              },
+              behavior: HitTestBehavior.translucent,
+              child: Container(color: Colors.transparent),
+            ),
+          ),
+
         // ✅ 顶部控制栏（淡入淡出动画）- 固定高度，不随状态栏变化
         // PiP 模式下隐藏
         if (!state.isInPipMode) _TopControlsBar(state: state, context: context),
@@ -192,9 +208,9 @@ class _TopControlsBar extends StatelessWidget {
             child: IgnorePointer(
               ignoring: !state.showControls,
               child: Container(
-                // ✅ 使用固定高度，确保状态栏显示时按钮在状态栏下方
+                // ✅ 顶部距离与底部控制条保持一致（都是20）
                 padding: const EdgeInsets.only(
-                  top: 40, // 固定高度，足够容纳状态栏
+                  top: 20, // ✅ 与底部控制条的bottom: 20保持一致
                   left: 16,
                   right: 16,
                   bottom: 16,
@@ -380,7 +396,7 @@ class _DraggingTimePreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Positioned(
-      top: 40, // 与顶部工具条水平对齐
+      top: 20, // ✅ 与顶部工具条对齐（top: 20）
       left: 0,
       right: 0,
       child: Padding(

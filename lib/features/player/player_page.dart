@@ -18,9 +18,11 @@ import '../../utils/status_bar_manager.dart';
 import 'custom_subtitle_overlay.dart';
 import 'player_controls.dart';
 
-const bool _kPlayerLogging = false; // ✅ 禁用日志，提升性能（倍速播放时大量日志会拖慢速度）
+const bool _kPlayerLogging = true; // ✅ 临时启用日志，用于调试字幕问题
 void _playerLog(String message) {
-  if (_kPlayerLogging) {}
+  if (_kPlayerLogging) {
+    debugPrint(message);
+  }
 }
 
 // 重要日志，总是输出
@@ -117,6 +119,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   // ✅ 自定义字幕URL
   String? _subtitleUrl;
+
+  // ✅ MediaSourceId（用于构建字幕URL）
+  String? _mediaSourceId;
 
   Duration? get _initialSeekPosition {
     final ticks = widget.initialPositionTicks;
@@ -342,6 +347,39 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       if (itemDetails != null) {
         _audioStreams = _getAudioStreams(itemDetails);
         _subtitleStreams = _getSubtitleStreams(itemDetails);
+
+        // ✅ 获取 PlaybackInfo 以获取正确的 MediaSourceId
+        if (_userId != null) {
+          try {
+            final playbackInfo = await api.getPlaybackInfo(
+              itemId: widget.itemId,
+              userId: _userId!,
+            );
+            _playerLog('🎬 [Player] PlaybackInfo: $playbackInfo');
+
+            // ✅ 从 PlaybackInfo 中获取 MediaSourceId
+            if (playbackInfo['MediaSources'] != null &&
+                playbackInfo['MediaSources'] is List &&
+                (playbackInfo['MediaSources'] as List).isNotEmpty) {
+              final mediaSource = (playbackInfo['MediaSources'] as List).first;
+              if (mediaSource is Map) {
+                _mediaSourceId = mediaSource['Id'] as String?;
+                _playerLog(
+                    '🎬 [Player] MediaSourceId from PlaybackInfo: $_mediaSourceId');
+              }
+            }
+          } catch (e) {
+            _playerLog('❌ [Player] Failed to get PlaybackInfo: $e');
+            // ✅ 如果 PlaybackInfo 失败，尝试从 itemDetails 获取 MediaSourceId
+            final media = _getPrimaryMediaSource(itemDetails);
+            if (media != null) {
+              _mediaSourceId = media['Id'] as String?;
+              _playerLog(
+                  '🎬 [Player] MediaSourceId from itemDetails: $_mediaSourceId');
+            }
+          }
+        }
+
         _ensureAudioSelection();
         _ensureSubtitleSelection();
         // ✅ 初始化字幕URL
@@ -981,11 +1019,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     if (willShow) {
       _controlsAnimationController.forward();
-      // ✅ 显示控制栏时，也显示状态栏
-      SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.manual,
-        overlays: SystemUiOverlay.values,
-      );
+      // ✅ 显示控制栏时，不显示状态栏（保持全屏效果）
+      // 状态栏保持隐藏，只显示控制层
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       if (_isPlaying) {
         _startHideControlsTimer();
       }
@@ -1083,145 +1119,159 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     return StatusBarStyleScope(
       style: overlay,
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            // ✅ 视频播放器（使用 IgnorePointer 让触摸事件穿透）
-            Positioned.fill(
-              child: _ready
-                  ? Opacity(
-                      opacity: _isInitialSeeking ? 0.0 : 1.0,
-                      child: IgnorePointer(
-                        child: Video(
-                          controller: _controller,
-                          fit: _videoFit,
-                          controls: NoVideoControls, // ✅ 隐藏原生播放控件
+      child: PopScope(
+        // ✅ 完全禁止侧滑返回和系统返回键
+        // 返回键的行为：如果控制层显示，则返回；否则显示控制层
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop) return; // 如果已经返回，不再处理
+          // ✅ 如果控制层显示，允许返回
+          if (_showControls) {
+            Navigator.of(context).pop();
+          } else {
+            // ✅ 否则显示控制层
+            _toggleControls();
+          }
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            children: [
+              // ✅ 视频播放器（最底层，使用 IgnorePointer 让触摸事件穿透）
+              Positioned.fill(
+                child: _ready
+                    ? Opacity(
+                        opacity: _isInitialSeeking ? 0.0 : 1.0,
+                        child: IgnorePointer(
+                          child: Video(
+                            controller: _controller,
+                            fit: _videoFit,
+                            controls: NoVideoControls, // ✅ 隐藏原生播放控件
+                          ),
                         ),
-                      ),
-                    )
-                  : Container(color: Colors.black),
-            ),
-
-            // ✅ 自定义字幕显示组件（在视频上方，控制栏下方）
-            if (!_isInPipMode && _ready)
-              CustomSubtitleOverlay(
-                position: _position,
-                subtitleUrl: _subtitleUrl,
-                isVisible: true, // 始终显示字幕（当有字幕时）
+                      )
+                    : Container(color: Colors.black),
               ),
 
-            // ✅ UI 控制层（所有控制相关的 UI 组件）
-            PlayerControls(
-              state: PlayerControlsState(
-                isInPipMode: _isInPipMode,
-                ready: _ready,
-                showControls: _showControls,
-                isBuffering: _isBuffering,
-                isPlaying: _isPlaying,
-                position: _position,
-                duration: _duration,
-                bufferPosition: _bufferPosition,
-                isDraggingProgress: _isDraggingProgress,
-                draggingPosition: _draggingPosition,
-                videoTitle: _videoTitle,
-                videoFit: _videoFit,
-                showVideoFitHint: _showVideoFitHint,
-                speed: _speed,
-                showSpeedList: _showSpeedList,
-                speedOptions: _speedOptions,
-                expectedBitrateKbps: _expectedBitrateKbps,
-                currentSpeedKbps: _currentSpeedKbps,
-                qualityLabel: _qualityLabel,
-                audioStreams: _audioStreams,
-                subtitleStreams: _subtitleStreams,
-                selectedAudioStreamIndex: _selectedAudioStreamIndex,
-                selectedSubtitleStreamIndex: _selectedSubtitleStreamIndex,
-                controlsAnimation: _controlsAnimation,
-                speedListScrollController: _speedListScrollController,
-                player: _player,
-                onToggleVideoFit: _toggleVideoFit,
-                onEnterPip: _enterPip,
-                onToggleOrientation: _toggleOrientation,
-                onPlayPause: () async {
-                  final playing = _player.state.playing;
-                  if (playing) {
-                    await _player.pause();
-                  } else {
-                    await _player.play();
-                  }
-                  _resetHideControlsTimer();
-                },
-                onIncreaseSpeed: _increaseSpeed,
-                onDecreaseSpeed: _decreaseSpeed,
-                onChangeSpeed: _changeSpeed,
-                onScrollToSelectedSpeed: _scrollToSelectedSpeed,
-                onShowAudioSelectionMenu: _showAudioSelectionMenu,
-                onShowSubtitleSelectionMenu: _showSubtitleSelectionMenu,
-                onDragStart: () {
-                  setState(() {
-                    _isDraggingProgress = true;
-                  });
-                  _cancelHideControlsTimer();
-                },
-                onDragging: (d) {
-                  setState(() {
-                    _draggingPosition = d;
-                  });
-                },
-                onDragEnd: (d) async {
-                  setState(() {
-                    _position = d;
-                    _draggingPosition = null;
-                  });
-                  await _player.seek(d);
-                  await Future.delayed(const Duration(milliseconds: 100));
-                  if (mounted) {
+              // ✅ 自定义字幕显示组件（中间层，在视频上方，UI控制层下方）
+              if (!_isInPipMode && _ready)
+                CustomSubtitleOverlay(
+                  position: _position,
+                  subtitleUrl: _subtitleUrl,
+                  isVisible: true, // 始终显示字幕（当有字幕时）
+                ),
+
+              // ✅ 触摸检测层（当控制层隐藏时，用于显示控制层）
+              // 必须在 UI 控制层之前，让 UI 控制层能处理事件
+              Positioned.fill(
+                child: IgnorePointer(
+                  // ✅ 当控制层显示时，忽略触摸检测层
+                  // 当控制层隐藏时，触摸检测层可以接收事件来显示控制层
+                  ignoring: _showControls,
+                  child: GestureDetector(
+                    onTap: () {
+                      // ✅ 点击屏幕显示控制栏
+                      if (!_showSpeedList) {
+                        _toggleControls();
+                      }
+                    },
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(color: Colors.transparent),
+                  ),
+                ),
+              ),
+
+              // ✅ UI 控制层（最上层，所有控制相关的 UI 组件）
+              PlayerControls(
+                state: PlayerControlsState(
+                  isInPipMode: _isInPipMode,
+                  ready: _ready,
+                  showControls: _showControls,
+                  isBuffering: _isBuffering,
+                  isPlaying: _isPlaying,
+                  position: _position,
+                  duration: _duration,
+                  bufferPosition: _bufferPosition,
+                  isDraggingProgress: _isDraggingProgress,
+                  draggingPosition: _draggingPosition,
+                  videoTitle: _videoTitle,
+                  videoFit: _videoFit,
+                  showVideoFitHint: _showVideoFitHint,
+                  speed: _speed,
+                  showSpeedList: _showSpeedList,
+                  speedOptions: _speedOptions,
+                  expectedBitrateKbps: _expectedBitrateKbps,
+                  currentSpeedKbps: _currentSpeedKbps,
+                  qualityLabel: _qualityLabel,
+                  audioStreams: _audioStreams,
+                  subtitleStreams: _subtitleStreams,
+                  selectedAudioStreamIndex: _selectedAudioStreamIndex,
+                  selectedSubtitleStreamIndex: _selectedSubtitleStreamIndex,
+                  controlsAnimation: _controlsAnimation,
+                  speedListScrollController: _speedListScrollController,
+                  player: _player,
+                  onToggleVideoFit: _toggleVideoFit,
+                  onEnterPip: _enterPip,
+                  onToggleOrientation: _toggleOrientation,
+                  onPlayPause: () async {
+                    final playing = _player.state.playing;
+                    if (playing) {
+                      await _player.pause();
+                    } else {
+                      await _player.play();
+                    }
+                    _resetHideControlsTimer();
+                  },
+                  onIncreaseSpeed: _increaseSpeed,
+                  onDecreaseSpeed: _decreaseSpeed,
+                  onChangeSpeed: _changeSpeed,
+                  onScrollToSelectedSpeed: _scrollToSelectedSpeed,
+                  onShowAudioSelectionMenu: _showAudioSelectionMenu,
+                  onShowSubtitleSelectionMenu: _showSubtitleSelectionMenu,
+                  onDragStart: () {
                     setState(() {
-                      _isDraggingProgress = false;
+                      _isDraggingProgress = true;
                     });
-                  }
-                  _resetHideControlsTimer();
-                },
-                onResetHideControlsTimer: _resetHideControlsTimer,
-                onCancelHideControlsTimer: _cancelHideControlsTimer,
-                onSetState: (callback) => setState(callback),
-                onShowSpeedListChanged: (show) {
-                  setState(() {
-                    _showSpeedList = show;
-                  });
-                },
-                getVideoFitIcon: _getVideoFitIcon,
-                getVideoFitName: _getVideoFitName,
-                formatTime: _formatTime,
-                formatBitrate: _formatBitrate,
-                canIncreaseSpeed: _canIncreaseSpeed,
-                canDecreaseSpeed: _canDecreaseSpeed,
+                    _cancelHideControlsTimer();
+                  },
+                  onDragging: (d) {
+                    setState(() {
+                      _draggingPosition = d;
+                    });
+                  },
+                  onDragEnd: (d) async {
+                    setState(() {
+                      _position = d;
+                      _draggingPosition = null;
+                    });
+                    await _player.seek(d);
+                    await Future.delayed(const Duration(milliseconds: 100));
+                    if (mounted) {
+                      setState(() {
+                        _isDraggingProgress = false;
+                      });
+                    }
+                    _resetHideControlsTimer();
+                  },
+                  onResetHideControlsTimer: _resetHideControlsTimer,
+                  onCancelHideControlsTimer: _cancelHideControlsTimer,
+                  onSetState: (callback) => setState(callback),
+                  onShowSpeedListChanged: (show) {
+                    setState(() {
+                      _showSpeedList = show;
+                    });
+                  },
+                  onToggleControls: _toggleControls,
+                  getVideoFitIcon: _getVideoFitIcon,
+                  getVideoFitName: _getVideoFitName,
+                  formatTime: _formatTime,
+                  formatBitrate: _formatBitrate,
+                  canIncreaseSpeed: _canIncreaseSpeed,
+                  canDecreaseSpeed: _canDecreaseSpeed,
+                ),
               ),
-            ),
-
-            // ✅ 触摸检测层（覆盖整个屏幕，必须在所有UI组件之后，确保能捕获触摸事件）
-            // 注意：控制层的按钮在触摸检测层之前，所以按钮的点击能够正常工作
-            // 触摸检测层只捕获空白区域的点击，用于切换控制层显示/隐藏
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: () {
-                  // ✅ 点击屏幕切换控制栏显示/隐藏
-                  // 只在没有列表显示时切换（避免在显示速度列表等时误触）
-                  if (!_showSpeedList) {
-                    _toggleControls();
-                  }
-                },
-                // ✅ 拦截横向滑动手势，禁止侧滑返回
-                onHorizontalDragStart: (_) {},
-                onHorizontalDragUpdate: (_) {},
-                onHorizontalDragEnd: (_) {},
-                behavior: HitTestBehavior
-                    .translucent, // ✅ 使用 translucent，允许触摸事件穿透到控制层按钮
-                child: Container(color: Colors.transparent), // 透明容器，不阻挡视频显示
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1245,20 +1295,29 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     return const [];
   }
 
-  // ✅ 获取字幕流
+  // ✅ 获取字幕流（保存原始 MediaStreams 中的索引）
   List<Map<String, dynamic>> _getSubtitleStreams(ItemInfo item) {
     final media = _getPrimaryMediaSource(item);
     if (media == null) return const [];
     final streams = media['MediaStreams'];
     if (streams is List) {
-      return streams
-          .where((element) =>
-              element is Map &&
-              (element['Type'] as String?)?.toLowerCase() == 'subtitle')
-          .map((element) => Map<String, dynamic>.from(
-              (element as Map<dynamic, dynamic>)
-                  .map((key, value) => MapEntry(key.toString(), value))))
-          .toList();
+      final result = <Map<String, dynamic>>[];
+      for (int i = 0; i < streams.length; i++) {
+        final element = streams[i];
+        if (element is Map) {
+          final type = (element['Type'] as String?)?.toLowerCase();
+          if (type == 'subtitle') {
+            final elementMap = element as Map<dynamic, dynamic>;
+            final streamMap = Map<String, dynamic>.from(elementMap
+                .map((key, value) => MapEntry(key.toString(), value)));
+            // ✅ 保存字幕流在原始 MediaStreams 数组中的索引位置
+            // 这是 Emby API 需要的索引
+            streamMap['_originalIndex'] = i;
+            result.add(streamMap);
+          }
+        }
+      }
+      return result;
     }
     return const [];
   }
@@ -1826,20 +1885,41 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     try {
       final subtitleStream = _subtitleStreams[_selectedSubtitleStreamIndex!];
-      final subtitleIndex = subtitleStream['Index'] as int?;
+
+      // ✅ 调试信息：打印字幕流的完整信息
+      _playerLog('🎬 [Player] Subtitle stream data: $subtitleStream');
+
+      // ✅ Emby API 可能需要使用字幕流的 Index 字段（不是数组索引）
+      // 根据 Emby API 文档，字幕 URL 格式为：
+      // /Videos/{itemId}/Subtitles/{streamIndex}/Stream.{format}
+      // 其中 streamIndex 是字幕流在 MediaStreams 中的 Index 字段值
+      int? subtitleIndex = subtitleStream['Index'] as int?;
+
+      // ✅ 如果 Index 不存在，尝试使用 _originalIndex（数组位置）
+      if (subtitleIndex == null) {
+        subtitleIndex = subtitleStream['_originalIndex'] as int?;
+        _playerLog('🎬 [Player] Using _originalIndex: $subtitleIndex');
+      } else {
+        _playerLog('🎬 [Player] Using Index field: $subtitleIndex');
+      }
 
       if (subtitleIndex != null) {
+        // ✅ 使用 PlaybackInfo 获取的 MediaSourceId 构建字幕URL
         final url = await _api!.buildSubtitleUrl(
           itemId: widget.itemId,
           subtitleStreamIndex: subtitleIndex,
+          mediaSourceId: _mediaSourceId,
           format: 'vtt',
         );
+        _playerLog('🎬 [Player] Subtitle URL (with MediaSourceId): $url');
+
         if (mounted) {
           setState(() {
             _subtitleUrl = url;
           });
         }
       } else {
+        _playerLog('❌ [Player] Subtitle index not found');
         if (mounted) {
           setState(() {
             _subtitleUrl = null;
