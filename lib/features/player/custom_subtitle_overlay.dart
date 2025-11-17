@@ -200,6 +200,14 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ 调试信息：检查字幕层状态
+    if (widget.subtitleUrl != null && widget.subtitleUrl!.isNotEmpty) {
+      debugPrint('🎬 [Subtitle] URL: ${widget.subtitleUrl}');
+      debugPrint('🎬 [Subtitle] Position: ${widget.position.inSeconds}s');
+      debugPrint('🎬 [Subtitle] Subtitles count: ${_subtitles.length}');
+      debugPrint('🎬 [Subtitle] Loading: $_isLoading, Error: $_error');
+    }
+
     if (!widget.isVisible ||
         widget.subtitleUrl == null ||
         widget.subtitleUrl!.isEmpty) {
@@ -211,6 +219,8 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     }
 
     if (_error != null) {
+      // ✅ 显示错误信息（调试用）
+      debugPrint('🎬 [Subtitle] Error: $_error');
       return const SizedBox.shrink();
     }
 
@@ -218,6 +228,8 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     if (currentSubtitle == null) {
       return const SizedBox.shrink();
     }
+
+    debugPrint('🎬 [Subtitle] Current subtitle: ${currentSubtitle.text}');
 
     // ✅ 字幕显示在底部中央，带背景和阴影
     // 使用 IgnorePointer 确保字幕不阻挡视频交互，避免影响视频渲染

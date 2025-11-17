@@ -1103,29 +1103,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   : Container(color: Colors.black),
             ),
 
-            // ✅ 触摸检测层（覆盖整个屏幕，但不阻挡视频显示）
-            // 注意：这个层必须在所有其他UI组件之后，确保能捕获触摸事件
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _toggleControls, // ✅ 点击屏幕切换控制栏显示
-                // ✅ 拦截横向滑动手势，禁止侧滑返回
-                onHorizontalDragStart: (_) {},
-                onHorizontalDragUpdate: (_) {},
-                onHorizontalDragEnd: (_) {},
-                behavior:
-                    HitTestBehavior.translucent, // ✅ 使用 translucent，允许触摸事件穿透
-                child: Container(color: Colors.transparent), // 透明容器，不阻挡视频显示
-              ),
-            ),
-
             // ✅ 自定义字幕显示组件（在视频上方，控制栏下方）
-            // 暂时禁用字幕显示，排查黑屏问题
-            // if (!_isInPipMode && _ready)
-            //   CustomSubtitleOverlay(
-            //     position: _position,
-            //     subtitleUrl: _subtitleUrl,
-            //     isVisible: true, // 始终显示字幕（当有字幕时）
-            //   ),
+            if (!_isInPipMode && _ready)
+              CustomSubtitleOverlay(
+                position: _position,
+                subtitleUrl: _subtitleUrl,
+                isVisible: true, // 始终显示字幕（当有字幕时）
+              ),
 
             // ✅ UI 控制层（所有控制相关的 UI 组件）
             PlayerControls(
@@ -1213,6 +1197,28 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 formatBitrate: _formatBitrate,
                 canIncreaseSpeed: _canIncreaseSpeed,
                 canDecreaseSpeed: _canDecreaseSpeed,
+              ),
+            ),
+
+            // ✅ 触摸检测层（覆盖整个屏幕，必须在所有UI组件之后，确保能捕获触摸事件）
+            // 注意：控制层的按钮在触摸检测层之前，所以按钮的点击能够正常工作
+            // 触摸检测层只捕获空白区域的点击，用于切换控制层显示/隐藏
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  // ✅ 点击屏幕切换控制栏显示/隐藏
+                  // 只在没有列表显示时切换（避免在显示速度列表等时误触）
+                  if (!_showSpeedList) {
+                    _toggleControls();
+                  }
+                },
+                // ✅ 拦截横向滑动手势，禁止侧滑返回
+                onHorizontalDragStart: (_) {},
+                onHorizontalDragUpdate: (_) {},
+                onHorizontalDragEnd: (_) {},
+                behavior: HitTestBehavior
+                    .translucent, // ✅ 使用 translucent，允许触摸事件穿透到控制层按钮
+                child: Container(color: Colors.transparent), // 透明容器，不阻挡视频显示
               ),
             ),
           ],
