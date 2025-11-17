@@ -15,6 +15,7 @@ import '../../core/emby_api.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../utils/status_bar_manager.dart';
+import 'custom_subtitle_overlay.dart';
 
 const bool _kPlayerLogging = false; // ✅ 禁用日志，提升性能（倍速播放时大量日志会拖慢速度）
 void _playerLog(String message) {
@@ -113,6 +114,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   List<Map<String, dynamic>> _audioStreams = [];
   List<Map<String, dynamic>> _subtitleStreams = [];
 
+  // ✅ 自定义字幕URL
+  String? _subtitleUrl;
+
   Duration? get _initialSeekPosition {
     final ticks = widget.initialPositionTicks;
     _playerLogImportant('🎬 [Player] Initial position ticks: $ticks');
@@ -138,8 +142,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         // ===== bufferSize: 播放器内部缓冲区大小 =====
         // 说明：这是播放器在内存中保存已解码视频帧的缓冲区大小
         // 用途：更大的缓冲区可以保存更多已解码的帧，减少解码压力
-        // 注意：已解码帧占用空间较大（1080p约3-5MB/帧），1GB可以缓存几百帧
-        bufferSize: 1024 * 1024 * 1024, // 1GB 缓冲区
+        // 注意：已解码帧占用空间较大（1080p约3-5MB/帧）
+        // 降低缓冲区大小，避免 ImageReader 缓冲区溢出导致黑屏
+        bufferSize: 256 * 1024 * 1024, // 256MB 缓冲区（降低以减少缓冲区压力）
       ),
     );
 
@@ -148,11 +153,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       configuration: const VideoControllerConfiguration(
         // ✅ 启用硬件加速，提升解码性能（特别是倍速播放时）
         enableHardwareAcceleration: true,
-        // ✅ 改为 false，提升倍速播放稳定性
-        // 说明：true 会延迟 Surface 附加，可能导致倍速时帧显示不及时
+        // ✅ 改为 false，延迟 Surface 附加，避免 ImageReader 缓冲区溢出
+        // 说明：true 可能导致在视频参数确定前就附加 Surface，引发缓冲区错误
+        // false 会等待视频参数确定后再附加，更稳定
         androidAttachSurfaceAfterVideoParameters: false,
       ),
     );
+
+    // ✅ 创建播放器后立即禁用字幕显示
+    _disableSubtitle();
 
     // ✅ 初始化控制栏动画
     _controlsAnimationController = AnimationController(
@@ -244,6 +253,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _load();
   }
 
+  /// ✅ 禁用字幕显示（在创建播放器后立即调用）
+  Future<void> _disableSubtitle() async {
+    try {
+      // 尝试使用 setSubtitleTrack 禁用字幕
+      // 如果 SubtitleTrack.no() 不存在，extras 配置中的设置应该已经足够
+      try {
+        await _player.setSubtitleTrack(SubtitleTrack.no());
+        _playerLog('🎬 [Player] Subtitle disabled via setSubtitleTrack');
+      } catch (e) {
+        // 如果 SubtitleTrack.no() 不存在，只记录日志，extras 配置应该已经禁用了字幕
+        _playerLog('🎬 [Player] Subtitle should be disabled by extras config');
+      }
+    } catch (e) {
+      _playerLog('❌ [Player] Failed to disable subtitle: $e');
+    }
+  }
+
   /// ✅ 加载保存的音频和字幕选择
   Future<void> _loadStreamSelections() async {
     try {
@@ -317,6 +343,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _subtitleStreams = _getSubtitleStreams(itemDetails);
         _ensureAudioSelection();
         _ensureSubtitleSelection();
+        // ✅ 初始化字幕URL
+        _updateSubtitleUrl();
       }
 
       final media = await api.buildHlsUrl(widget.itemId); // ✅ 添加 await
@@ -435,8 +463,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             'vd-lavc-skipidct': 'approx',
             'vd-lavc-fast': 'yes',
 
-            // 帧丢弃策略：优先保证流畅性
-            'framedrop': 'vo',
+            // 帧丢弃策略：优先保证流畅性，更积极的丢帧
+            'framedrop': 'decoder+vo',
+
+            //==========================
+            //【ImageReader 缓冲区限制 - 解决黑屏问题】
+            //==========================
+            // 限制视频输出缓冲区数量，避免 ImageReader 缓冲区溢出
+            'opengl-glfinish': 'yes', // 确保 OpenGL 命令及时执行
+            'opengl-swapinterval': '0', // 不限制交换间隔，提高流畅度
+            'video-latency-hacks': 'yes', // 启用视频延迟优化
             //==========================
             //【音频：防止倍速时声音异常】
             //==========================
@@ -447,10 +483,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             //==========================
             'opengl-early-flush': 'no', // 防止倍速时丢帧
             'msg-level': 'all=no', // 关闭大量冗余日志
+
+            //==========================
+            //【字幕：完全禁用原生字幕显示】
+            //==========================
+            'sub-visibility': 'no', // 禁用原生字幕显示
+            'sub-auto': 'no', // 禁用自动加载字幕
+            'sub-forced-only': 'no', // 不显示强制字幕
+            'sub-ass-override': 'no', // 禁用 ASS 字幕覆盖
+            'sub-ass-style-override': 'no', // 禁用 ASS 样式覆盖
+            'sid': 'no', // 禁用字幕轨道（不选择任何字幕轨道）
           },
         ),
         play: !needsSeek,
       );
+
+      // ✅ 在 open 之后再次确保字幕被禁用
+      await _disableSubtitle();
 
       // ✅ 在 open 之后设置 buffering 监听，确保能正确捕获缓冲状态
       _bufferingSub?.cancel();
@@ -517,10 +566,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _playerLog('❌ [Player] Error: $error');
       });
 
-      // ✅ 监听媒体轨道
+      // ✅ 监听媒体轨道，并在轨道加载后确保禁用字幕
       _player.stream.tracks.listen((tracks) {
         _playerLog(
-            '🎬 [Player] Tracks: ${tracks.video.length} video, ${tracks.audio.length} audio');
+            '🎬 [Player] Tracks: ${tracks.video.length} video, ${tracks.audio.length} audio, ${tracks.subtitle.length} subtitle');
+        // 确保字幕被禁用（轨道加载后可能自动启用字幕，需要再次禁用）
+        if (tracks.subtitle.isNotEmpty) {
+          _disableSubtitle();
+          _playerLog('🎬 [Player] Subtitle tracks detected, disabled again');
+        }
       });
 
       // ✅ 如果需要从指定位置开始播放
@@ -1030,672 +1084,239 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       style: overlay,
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: GestureDetector(
-          onTap: _toggleControls, // ✅ 点击屏幕切换控制栏显示
-          // ✅ 拦截横向滑动手势，禁止侧滑返回
-          onHorizontalDragStart: (_) {},
-          onHorizontalDragUpdate: (_) {},
-          onHorizontalDragEnd: (_) {},
-          behavior: HitTestBehavior.opaque,
-          child: Stack(
-            children: [
-              // ✅ 视频播放器
-              Positioned.fill(
-                child: _ready
-                    ? Opacity(
-                        opacity: _isInitialSeeking ? 0.0 : 1.0,
+        body: Stack(
+          children: [
+            // ✅ 视频播放器（使用 IgnorePointer 让触摸事件穿透）
+            Positioned.fill(
+              child: _ready
+                  ? Opacity(
+                      opacity: _isInitialSeeking ? 0.0 : 1.0,
+                      child: IgnorePointer(
                         child: Video(
                           controller: _controller,
                           fit: _videoFit,
                           controls: NoVideoControls, // ✅ 隐藏原生播放控件
                         ),
-                      )
-                    : Container(color: Colors.black),
+                      ),
+                    )
+                  : Container(color: Colors.black),
+            ),
+
+            // ✅ 触摸检测层（覆盖整个屏幕，但不阻挡视频显示）
+            // 注意：这个层必须在所有其他UI组件之后，确保能捕获触摸事件
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _toggleControls, // ✅ 点击屏幕切换控制栏显示
+                // ✅ 拦截横向滑动手势，禁止侧滑返回
+                onHorizontalDragStart: (_) {},
+                onHorizontalDragUpdate: (_) {},
+                onHorizontalDragEnd: (_) {},
+                behavior:
+                    HitTestBehavior.translucent, // ✅ 使用 translucent，允许触摸事件穿透
+                child: Container(color: Colors.transparent), // 透明容器，不阻挡视频显示
               ),
+            ),
 
-              // ✅ 顶部控制栏（淡入淡出动画）- 固定高度，不随状态栏变化
-              // PiP 模式下隐藏
-              if (!_isInPipMode)
-                AnimatedBuilder(
-                  animation: _controlsAnimation,
-                  builder: (context, child) {
-                    return Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: Opacity(
-                        opacity: _controlsAnimation.value,
-                        child: IgnorePointer(
-                          ignoring: !_showControls,
-                          child: Container(
-                            // ✅ 使用固定高度，确保状态栏显示时按钮在状态栏下方
-                            padding: const EdgeInsets.only(
-                              top: 40, // 固定高度，足够容纳状态栏
-                              left: 16,
-                              right: 16,
-                              bottom: 16,
-                            ),
-                            decoration: const BoxDecoration(),
-                            child: Row(
-                              children: [
-                                _buildIconButton(
-                                  icon: Icons.arrow_back_ios_new_rounded,
-                                  onPressed: () => context.pop(),
-                                  size: 24,
-                                ),
-                                const SizedBox(width: 8),
-                                // ✅ 显示视频标题
-                                Expanded(
-                                  child: Text(
-                                    _videoTitle,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                      shadows: [
-                                        Shadow(
-                                          color: Colors.black45,
-                                          blurRadius: 4,
-                                        ),
-                                      ],
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                // ✅ 右侧按钮组（带毛玻璃背景）
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(24),
-                                  child: BackdropFilter(
-                                    filter: ImageFilter.blur(
-                                        sigmaX: 20, sigmaY: 20),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 6,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        gradient: LinearGradient(
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                          colors: Theme.of(context)
-                                                      .brightness ==
-                                                  Brightness.dark
-                                              ? [
-                                                  Colors.grey.shade900
-                                                      .withValues(alpha: 0.6),
-                                                  Colors.grey.shade800
-                                                      .withValues(alpha: 0.4),
-                                                ]
-                                              : [
-                                                  Colors.white
-                                                      .withValues(alpha: 0.2),
-                                                  Colors.white
-                                                      .withValues(alpha: 0.1),
-                                                ],
-                                        ),
-                                        borderRadius: BorderRadius.circular(24),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          // ✅ 视频画面裁切模式切换按钮（带动画）
-                                          CupertinoButton(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 6,
-                                            ),
-                                            minSize: 0,
-                                            onPressed: () {
-                                              _toggleVideoFit();
-                                              _resetHideControlsTimer();
-                                            },
-                                            child: AnimatedSwitcher(
-                                              duration: const Duration(
-                                                  milliseconds: 250),
-                                              transitionBuilder:
-                                                  (child, animation) {
-                                                return RotationTransition(
-                                                  turns: animation,
-                                                  child: FadeTransition(
-                                                    opacity: animation,
-                                                    child: child,
-                                                  ),
-                                                );
-                                              },
-                                              child: Icon(
-                                                _getVideoFitIcon(),
-                                                key:
-                                                    ValueKey<BoxFit>(_videoFit),
-                                                color: Colors.white,
-                                                size: 22,
-                                              ),
-                                            ),
-                                          ),
-                                // ✅ 小窗按钮
-                                          CupertinoButton(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 6,
-                                            ),
-                                            minSize: 0,
-                                  onPressed: () {
-                                    _enterPip();
-                                    _resetHideControlsTimer();
-                                  },
-                                            child: const Icon(
-                                              Icons
-                                                  .picture_in_picture_alt_rounded,
-                                              color: Colors.white,
-                                  size: 22,
-                                ),
-                                          ),
-                                // ✅ 横竖屏切换
-                                          CupertinoButton(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 6,
-                                            ),
-                                            minSize: 0,
-                                  onPressed: () {
-                                    _toggleOrientation();
-                                    _resetHideControlsTimer();
-                                  },
-                                            child: const Icon(
-                                              Icons.screen_rotation_rounded,
-                                              color: Colors.white,
-                                  size: 22,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+            // ✅ 自定义字幕显示组件（在视频上方，控制栏下方）
+            // 暂时禁用字幕显示，排查黑屏问题
+            // if (!_isInPipMode && _ready)
+            //   CustomSubtitleOverlay(
+            //     position: _position,
+            //     subtitleUrl: _subtitleUrl,
+            //     isVisible: true, // 始终显示字幕（当有字幕时）
+            //   ),
 
-              // ✅ 拖动进度条时的时间预览（与顶部工具条水平对齐）
-              // PiP 模式下隐藏
-              if (!_isInPipMode &&
-                  _isDraggingProgress &&
-                  _draggingPosition != null)
-                Positioned(
-                  top: 40, // 与顶部工具条水平对齐
-                  left: 0,
-                  right: 0,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(20),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: Theme.of(context).brightness ==
-                                          Brightness.dark
-                                      ? [
-                                          Colors.grey.shade900
-                                              .withValues(alpha: 0.6),
-                                          Colors.grey.shade800
-                                              .withValues(alpha: 0.4),
-                                        ]
-                                      : [
-                                          Colors.white.withValues(alpha: 0.2),
-                                          Colors.white.withValues(alpha: 0.1),
-                                        ],
-                                ),
-                                borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '${_formatTime(_draggingPosition!)} / ${_formatTime(_duration)}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                                  fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                            ),
+            // ✅ 顶部控制栏（淡入淡出动画）- 固定高度，不随状态栏变化
+            // PiP 模式下隐藏
+            if (!_isInPipMode)
+              AnimatedBuilder(
+                animation: _controlsAnimation,
+                builder: (context, child) {
+                  return Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: Opacity(
+                      opacity: _controlsAnimation.value,
+                      child: IgnorePointer(
+                        ignoring: !_showControls,
+                        child: Container(
+                          // ✅ 使用固定高度，确保状态栏显示时按钮在状态栏下方
+                          padding: const EdgeInsets.only(
+                            top: 40, // 固定高度，足够容纳状态栏
+                            left: 16,
+                            right: 16,
+                            bottom: 16,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-              // ✅ 视频裁切模式提示（tooltip样式，显示在按钮下方）
-              // PiP 模式下隐藏
-              if (!_isInPipMode && _showVideoFitHint)
-                Positioned(
-                  top: 90, // 在顶部按钮下方，紧贴按钮组
-                  right: 85, // 对齐裁剪按钮位置
-                  child: AnimatedOpacity(
-                    opacity: _showVideoFitHint ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // ✅ 箭头（三角形）
-                        CustomPaint(
-                          size: const Size(12, 6),
-                          painter: _TooltipArrowPainter(
-                            color: Theme.of(context).brightness ==
-                                    Brightness.dark
-                                ? Colors.grey.shade900.withValues(alpha: 0.6)
-                                : Colors.white.withValues(alpha: 0.2),
-                          ),
-                        ),
-                        // ✅ Tooltip内容
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: Theme.of(context).brightness ==
-                                          Brightness.dark
-                                      ? [
-                                          Colors.grey.shade900
-                                              .withValues(alpha: 0.6),
-                                          Colors.grey.shade800
-                                              .withValues(alpha: 0.4),
-                                        ]
-                                      : [
-                                          Colors.white.withValues(alpha: 0.2),
-                                          Colors.white.withValues(alpha: 0.1),
-                                        ],
-                                ),
-                      borderRadius: BorderRadius.circular(8),
+                          decoration: const BoxDecoration(),
+                          child: Row(
+                            children: [
+                              _buildIconButton(
+                                icon: Icons.arrow_back_ios_new_rounded,
+                                onPressed: () => context.pop(),
+                                size: 24,
                               ),
-                              child: Text(
-                                _getVideoFitName(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                                  fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-              // ✅ 中间播放/暂停按钮（仅在显示控制栏时）
-              // PiP 模式下隐藏，缓冲时也隐藏
-              if (!_isInPipMode && _ready && _showControls && !_isBuffering)
-                Center(
-                  child: AnimatedBuilder(
-                    animation: _controlsAnimation,
-                    builder: (context, child) {
-                      return Opacity(
-                        opacity: _controlsAnimation.value * 0.9,
-                        child: GestureDetector(
-                          onTap: () async {
-                            final playing = _player.state.playing;
-                            if (playing) {
-                              await _player.pause();
-                            } else {
-                              await _player.play();
-                            }
-                            _resetHideControlsTimer();
-                          },
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 300),
-                            transitionBuilder: (child, animation) {
-                              return ScaleTransition(
-                                scale: animation,
-                                child: FadeTransition(
-                                  opacity: animation,
-                                  child: child,
-                                ),
-                              );
-                            },
-                            child: Icon(
-                              _isPlaying
-                                  ? Icons.pause_circle_rounded
-                                  : Icons.play_circle_rounded,
-                              key: ValueKey<bool>(_isPlaying),
-                              color: Colors.white,
-                              size: 80,
-                              shadows: const [
-                                Shadow(
-                                  color: Colors.black54,
-                                  blurRadius: 20,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-              // ✅ 右侧速度控制（仅在显示控制栏时）
-              // PiP 模式下隐藏，一进来就显示
-              if (!_isInPipMode && _showControls)
-                Positioned(
-                  right: 24,
-                  top: 0,
-                  bottom: 0,
-                  child: AnimatedBuilder(
-                    animation: _controlsAnimation,
-                    builder: (context, child) {
-                      return Opacity(
-                        opacity: _controlsAnimation.value,
-                        child: IgnorePointer(
-                          ignoring: !_showControls,
-                          child: Center(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(28),
-                              child: BackdropFilter(
-                                filter:
-                                    ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: Theme.of(context).brightness ==
-                                              Brightness.dark
-                                          ? [
-                                              Colors.grey.shade900
-                                                  .withValues(alpha: 0.6),
-                                              Colors.grey.shade800
-                                                  .withValues(alpha: 0.4),
-                                            ]
-                                          : [
-                                              Colors.white
-                                                  .withValues(alpha: 0.2),
-                                              Colors.white
-                                                  .withValues(alpha: 0.1),
-                                            ],
-                                    ),
-                                    borderRadius: BorderRadius.circular(28),
-                                  ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      // ✅ 加速按钮
-                                      CupertinoButton(
-                                        padding: const EdgeInsets.all(12),
-                                        onPressed: () {
-                                          if (_canIncreaseSpeed) {
-                                            _increaseSpeed();
-                                            // ✅ 关闭倍速列表
-                                            if (_showSpeedList) {
-                                              setState(() {
-                                                _showSpeedList = false;
-                                              });
-                                            }
-                                            _resetHideControlsTimer();
-                                          }
-                                          // ✅ 不可用时点击无任何反应，不重置计时器
-                                        },
-                            child: Icon(
-                                          Icons.add_rounded,
-                                          color: _canIncreaseSpeed
-                                              ? Colors.white
-                                              : Colors.white
-                                                  .withValues(alpha: 0.3),
-                                          size: 24,
-                                        ),
-                                      ),
-                                      // ✅ 速度值
-                                      CupertinoButton(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 8,
-                                        ),
-                                        onPressed: () {
-                                          final willShow = !_showSpeedList;
-                                          setState(() {
-                                            _showSpeedList = willShow;
-                                          });
-                                          if (willShow) {
-                                            // ✅ 显示列表时，取消自动隐藏计时器
-                                            _cancelHideControlsTimer();
-                                            // ✅ 滚动到选中项
-                                            WidgetsBinding.instance
-                                                .addPostFrameCallback((_) {
-                                              _scrollToSelectedSpeed();
-                                            });
-                                          } else {
-                                            // ✅ 隐藏列表时，重新启动自动隐藏计时器
-                                            _resetHideControlsTimer();
-                                          }
-                                        },
-                                        child: SizedBox(
-                                          width: 30, // ✅ 固定宽度，避免文字变化导致宽度变化
-                                          child: Text(
-                                            '${_speed.toStringAsFixed(1)}x',
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(
-                              color: Colors.white,
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      // ✅ 减速按钮
-                                      CupertinoButton(
-                                        padding: const EdgeInsets.all(12),
-                                        onPressed: () {
-                                          if (_canDecreaseSpeed) {
-                                            _decreaseSpeed();
-                                            // ✅ 关闭倍速列表
-                                            if (_showSpeedList) {
-                                              setState(() {
-                                                _showSpeedList = false;
-                                              });
-                                            }
-                                            _resetHideControlsTimer();
-                                          }
-                                          // ✅ 不可用时点击无任何反应，不重置计时器
-                                        },
-                                        child: Icon(
-                                          Icons.remove_rounded,
-                                          color: _canDecreaseSpeed
-                                              ? Colors.white
-                                              : Colors.white
-                                                  .withValues(alpha: 0.3),
-                                          size: 24,
-                                        ),
+                              const SizedBox(width: 8),
+                              // ✅ 显示视频标题
+                              Expanded(
+                                child: Text(
+                                  _videoTitle,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black45,
+                                        blurRadius: 4,
                                       ),
                                     ],
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-              // ✅ 底部控制栏（淡入淡出动画）
-              // PiP 模式下隐藏
-              if (!_isInPipMode)
-                AnimatedBuilder(
-                  animation: _controlsAnimation,
-                  builder: (context, child) {
-                    return Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Opacity(
-                        opacity: _controlsAnimation.value,
-                        child: IgnorePointer(
-                          ignoring: !_showControls,
-                          child: _Controls(
-                            position: _position,
-                            duration: _duration,
-                            bufferPosition: _bufferPosition, // ✅ 传递实时缓冲进度
-                            isPlaying: _isPlaying,
-                            isDragging: _isDraggingProgress,
-                            draggingPosition: _draggingPosition,
-                            audioStreams: _audioStreams,
-                            subtitleStreams: _subtitleStreams,
-                            selectedAudioIndex: _selectedAudioStreamIndex,
-                            selectedSubtitleIndex: _selectedSubtitleStreamIndex,
-                            onAudioTap: (ctx) {
-                              _showAudioSelectionMenu(ctx);
-                            },
-                            onSubtitleTap: (ctx) {
-                              _showSubtitleSelectionMenu(ctx);
-                            },
-                            onDragStart: () {
-                              setState(() {
-                                _isDraggingProgress = true;
-                              });
-                              _cancelHideControlsTimer();
-                            },
-                            onDragging: (d) {
-                              setState(() {
-                                _draggingPosition = d;
-                              });
-                            },
-                            onDragEnd: (d) async {
-                              // ✅ 先更新位置和隐藏预览
-                              setState(() {
-                                _position = d;
-                                _draggingPosition = null;
-                              });
-
-                              // ✅ 执行seek操作
-                              await _player.seek(d);
-
-                              // ✅ seek完成后，延迟一小段时间再重置拖动状态
-                              // 确保播放器位置已经更新，避免闪烁
-                              await Future.delayed(
-                                  const Duration(milliseconds: 100));
-
-                              if (mounted) {
-                                setState(() {
-                                  _isDraggingProgress = false;
-                                });
-                              }
-
-                              _resetHideControlsTimer();
-                            },
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-
-              // ✅ 加载/缓冲指示器（不阻挡点击）
-              // 显示条件：未准备好 或 正在缓冲 或 还未开始播放（position为0）
-              if (!_ready ||
-                  _isBuffering ||
-                  (_ready && _position == Duration.zero))
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: Container(
-                      color: Colors.black.withValues(alpha: 0),
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const CupertinoActivityIndicator(
-                                color: Colors.white,
-                                radius: 16,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                !_ready
-                                    ? '加载中...'
-                                    : _isBuffering
-                                        ? '缓冲中...'
-                                        : '准备中...',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              if (_expectedBitrateKbps != null) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  _formatBitrate(_currentSpeedKbps),
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 13,
+                              const SizedBox(width: 12),
+                              // ✅ 右侧按钮组（带毛玻璃背景）
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(24),
+                                child: BackdropFilter(
+                                  filter:
+                                      ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                        colors: Theme.of(context).brightness ==
+                                                Brightness.dark
+                                            ? [
+                                                Colors.grey.shade900
+                                                    .withValues(alpha: 0.6),
+                                                Colors.grey.shade800
+                                                    .withValues(alpha: 0.4),
+                                              ]
+                                            : [
+                                                Colors.white
+                                                    .withValues(alpha: 0.2),
+                                                Colors.white
+                                                    .withValues(alpha: 0.1),
+                                              ],
+                                      ),
+                                      borderRadius: BorderRadius.circular(24),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        // ✅ 视频画面裁切模式切换按钮（带动画）
+                                        CupertinoButton(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 6,
+                                          ),
+                                          minSize: 0,
+                                          onPressed: () {
+                                            _toggleVideoFit();
+                                            _resetHideControlsTimer();
+                                          },
+                                          child: AnimatedSwitcher(
+                                            duration: const Duration(
+                                                milliseconds: 250),
+                                            transitionBuilder:
+                                                (child, animation) {
+                                              return RotationTransition(
+                                                turns: animation,
+                                                child: FadeTransition(
+                                                  opacity: animation,
+                                                  child: child,
+                                                ),
+                                              );
+                                            },
+                                            child: Icon(
+                                              _getVideoFitIcon(),
+                                              key: ValueKey<BoxFit>(_videoFit),
+                                              color: Colors.white,
+                                              size: 22,
+                                            ),
+                                          ),
+                                        ),
+                                        // ✅ 小窗按钮
+                                        CupertinoButton(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 6,
+                                          ),
+                                          minSize: 0,
+                                          onPressed: () {
+                                            _enterPip();
+                                            _resetHideControlsTimer();
+                                          },
+                                          child: const Icon(
+                                            Icons
+                                                .picture_in_picture_alt_rounded,
+                                            color: Colors.white,
+                                            size: 22,
+                                          ),
+                                        ),
+                                        // ✅ 横竖屏切换
+                                        CupertinoButton(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 6,
+                                          ),
+                                          minSize: 0,
+                                          onPressed: () {
+                                            _toggleOrientation();
+                                            _resetHideControlsTimer();
+                                          },
+                                          child: const Icon(
+                                            Icons.screen_rotation_rounded,
+                                            color: Colors.white,
+                                            size: 22,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ],
-                              if (_qualityLabel != null) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  '分辨率: $_qualityLabel',
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
+                              ),
+                              const SizedBox(width: 4),
                             ],
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ),
+                  );
+                },
+              ),
 
-              // ✅ 速度档位列表（显示在左侧，放在最后确保在最上层）
-              if (!_isInPipMode && _showSpeedList && _showControls)
-                Positioned(
-                  right: 90,
-                  top: 10,
-                  bottom: 0,
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxHeight: 220, // ✅ 设置最大高度
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
+            // ✅ 拖动进度条时的时间预览（与顶部工具条水平对齐）
+            // PiP 模式下隐藏
+            if (!_isInPipMode &&
+                _isDraggingProgress &&
+                _draggingPosition != null)
+              Positioned(
+                top: 40, // 与顶部工具条水平对齐
+                left: 0,
+                right: 0,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
                         child: BackdropFilter(
                           filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                           child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
                                 begin: Alignment.topLeft,
@@ -1704,63 +1325,507 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                         Brightness.dark
                                     ? [
                                         Colors.grey.shade900
-                                            .withValues(alpha: 0.7),
+                                            .withValues(alpha: 0.6),
                                         Colors.grey.shade800
-                                            .withValues(alpha: 0.5),
+                                            .withValues(alpha: 0.4),
                                       ]
                                     : [
-                                        Colors.white.withValues(alpha: 0.25),
-                                        Colors.white.withValues(alpha: 0.15),
+                                        Colors.white.withValues(alpha: 0.2),
+                                        Colors.white.withValues(alpha: 0.1),
                                       ],
                               ),
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: BorderRadius.circular(20),
                             ),
-                            child: SingleChildScrollView(
-                              controller: _speedListScrollController,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: _speedOptions.map((speed) {
-                                  final isSelected = speed == _speed;
-                                  return CupertinoButton(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 24,
-                                      vertical: 12,
+                            child: Text(
+                              '${_formatTime(_draggingPosition!)} / ${_formatTime(_duration)}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // ✅ 视频裁切模式提示（tooltip样式，显示在按钮下方）
+            // PiP 模式下隐藏
+            if (!_isInPipMode && _showVideoFitHint)
+              Positioned(
+                top: 90, // 在顶部按钮下方，紧贴按钮组
+                right: 85, // 对齐裁剪按钮位置
+                child: AnimatedOpacity(
+                  opacity: _showVideoFitHint ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // ✅ 箭头（三角形）
+                      CustomPaint(
+                        size: const Size(12, 6),
+                        painter: _TooltipArrowPainter(
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.grey.shade900.withValues(alpha: 0.6)
+                              : Colors.white.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      // ✅ Tooltip内容
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? [
+                                        Colors.grey.shade900
+                                            .withValues(alpha: 0.6),
+                                        Colors.grey.shade800
+                                            .withValues(alpha: 0.4),
+                                      ]
+                                    : [
+                                        Colors.white.withValues(alpha: 0.2),
+                                        Colors.white.withValues(alpha: 0.1),
+                                      ],
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              _getVideoFitName(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // ✅ 中间播放/暂停按钮（仅在显示控制栏时）
+            // PiP 模式下隐藏，缓冲时也隐藏
+            if (!_isInPipMode && _ready && _showControls && !_isBuffering)
+              Center(
+                child: AnimatedBuilder(
+                  animation: _controlsAnimation,
+                  builder: (context, child) {
+                    return Opacity(
+                      opacity: _controlsAnimation.value * 0.9,
+                      child: GestureDetector(
+                        onTap: () async {
+                          final playing = _player.state.playing;
+                          if (playing) {
+                            await _player.pause();
+                          } else {
+                            await _player.play();
+                          }
+                          _resetHideControlsTimer();
+                        },
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          transitionBuilder: (child, animation) {
+                            return ScaleTransition(
+                              scale: animation,
+                              child: FadeTransition(
+                                opacity: animation,
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: Icon(
+                            _isPlaying
+                                ? Icons.pause_circle_rounded
+                                : Icons.play_circle_rounded,
+                            key: ValueKey<bool>(_isPlaying),
+                            color: Colors.white,
+                            size: 80,
+                            shadows: const [
+                              Shadow(
+                                color: Colors.black54,
+                                blurRadius: 20,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+            // ✅ 右侧速度控制（仅在显示控制栏时）
+            // PiP 模式下隐藏，一进来就显示
+            if (!_isInPipMode && _showControls)
+              Positioned(
+                right: 24,
+                top: 0,
+                bottom: 0,
+                child: AnimatedBuilder(
+                  animation: _controlsAnimation,
+                  builder: (context, child) {
+                    return Opacity(
+                      opacity: _controlsAnimation.value,
+                      child: IgnorePointer(
+                        ignoring: !_showControls,
+                        child: Center(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(28),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? [
+                                            Colors.grey.shade900
+                                                .withValues(alpha: 0.6),
+                                            Colors.grey.shade800
+                                                .withValues(alpha: 0.4),
+                                          ]
+                                        : [
+                                            Colors.white.withValues(alpha: 0.2),
+                                            Colors.white.withValues(alpha: 0.1),
+                                          ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(28),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // ✅ 加速按钮
+                                    CupertinoButton(
+                                      padding: const EdgeInsets.all(12),
+                                      onPressed: () {
+                                        if (_canIncreaseSpeed) {
+                                          _increaseSpeed();
+                                          // ✅ 关闭倍速列表
+                                          if (_showSpeedList) {
+                                            setState(() {
+                                              _showSpeedList = false;
+                                            });
+                                          }
+                                          _resetHideControlsTimer();
+                                        }
+                                        // ✅ 不可用时点击无任何反应，不重置计时器
+                                      },
+                                      child: Icon(
+                                        Icons.add_rounded,
+                                        color: _canIncreaseSpeed
+                                            ? Colors.white
+                                            : Colors.white
+                                                .withValues(alpha: 0.3),
+                                        size: 24,
+                                      ),
                                     ),
-                                    onPressed: () async {
-                                      await _changeSpeed(speed);
-                                      setState(() {
-                                        _showSpeedList = false;
-                                      });
-                                      _resetHideControlsTimer();
-                                    },
-                                    child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          '${speed.toStringAsFixed(1)}x',
-                                          style: TextStyle(
+                                    // ✅ 速度值
+                                    CupertinoButton(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
+                                      onPressed: () {
+                                        final willShow = !_showSpeedList;
+                                        setState(() {
+                                          _showSpeedList = willShow;
+                                        });
+                                        if (willShow) {
+                                          // ✅ 显示列表时，取消自动隐藏计时器
+                                          _cancelHideControlsTimer();
+                                          // ✅ 滚动到选中项
+                                          WidgetsBinding.instance
+                                              .addPostFrameCallback((_) {
+                                            _scrollToSelectedSpeed();
+                                          });
+                                        } else {
+                                          // ✅ 隐藏列表时，重新启动自动隐藏计时器
+                                          _resetHideControlsTimer();
+                                        }
+                                      },
+                                      child: SizedBox(
+                                        width: 30, // ✅ 固定宽度，避免文字变化导致宽度变化
+                                        child: Text(
+                                          '${_speed.toStringAsFixed(1)}x',
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 16,
-                                            fontWeight: isSelected
-                                                ? FontWeight.w700
-                                                : FontWeight.w500,
+                                            fontWeight: FontWeight.w600,
                                           ),
                                         ),
-                                        if (isSelected) ...[
-                                          const SizedBox(width: 8),
-                                          const Icon(
-                                            Icons.check_rounded,
-                                            color: Colors.white,
-                                            size: 18,
-                                          ),
-                                        ],
-                                      ],
+                                      ),
                                     ),
-                                  );
-                                }).toList(),
+                                    // ✅ 减速按钮
+                                    CupertinoButton(
+                                      padding: const EdgeInsets.all(12),
+                                      onPressed: () {
+                                        if (_canDecreaseSpeed) {
+                                          _decreaseSpeed();
+                                          // ✅ 关闭倍速列表
+                                          if (_showSpeedList) {
+                                            setState(() {
+                                              _showSpeedList = false;
+                                            });
+                                          }
+                                          _resetHideControlsTimer();
+                                        }
+                                        // ✅ 不可用时点击无任何反应，不重置计时器
+                                      },
+                                      child: Icon(
+                                        Icons.remove_rounded,
+                                        color: _canDecreaseSpeed
+                                            ? Colors.white
+                                            : Colors.white
+                                                .withValues(alpha: 0.3),
+                                        size: 24,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+            // ✅ 底部控制栏（淡入淡出动画）
+            // PiP 模式下隐藏
+            if (!_isInPipMode)
+              AnimatedBuilder(
+                animation: _controlsAnimation,
+                builder: (context, child) {
+                  return Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Opacity(
+                      opacity: _controlsAnimation.value,
+                      child: IgnorePointer(
+                        ignoring: !_showControls,
+                        child: _Controls(
+                          position: _position,
+                          duration: _duration,
+                          bufferPosition: _bufferPosition, // ✅ 传递实时缓冲进度
+                          isPlaying: _isPlaying,
+                          isDragging: _isDraggingProgress,
+                          draggingPosition: _draggingPosition,
+                          audioStreams: _audioStreams,
+                          subtitleStreams: _subtitleStreams,
+                          selectedAudioIndex: _selectedAudioStreamIndex,
+                          selectedSubtitleIndex: _selectedSubtitleStreamIndex,
+                          onAudioTap: (ctx) {
+                            _showAudioSelectionMenu(ctx);
+                          },
+                          onSubtitleTap: (ctx) {
+                            _showSubtitleSelectionMenu(ctx);
+                          },
+                          onDragStart: () {
+                            setState(() {
+                              _isDraggingProgress = true;
+                            });
+                            _cancelHideControlsTimer();
+                          },
+                          onDragging: (d) {
+                            setState(() {
+                              _draggingPosition = d;
+                            });
+                          },
+                          onDragEnd: (d) async {
+                            // ✅ 先更新位置和隐藏预览
+                            setState(() {
+                              _position = d;
+                              _draggingPosition = null;
+                            });
+
+                            // ✅ 执行seek操作
+                            await _player.seek(d);
+
+                            // ✅ seek完成后，延迟一小段时间再重置拖动状态
+                            // 确保播放器位置已经更新，避免闪烁
+                            await Future.delayed(
+                                const Duration(milliseconds: 100));
+
+                            if (mounted) {
+                              setState(() {
+                                _isDraggingProgress = false;
+                              });
+                            }
+
+                            _resetHideControlsTimer();
+                          },
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+
+            // ✅ 加载/缓冲指示器（不阻挡点击）
+            // 显示条件：未准备好 或 正在缓冲 或 还未开始播放（position为0）
+            if (!_ready ||
+                _isBuffering ||
+                (_ready && _position == Duration.zero))
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0),
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CupertinoActivityIndicator(
+                              color: Colors.white,
+                              radius: 16,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              !_ready
+                                  ? '加载中...'
+                                  : _isBuffering
+                                      ? '缓冲中...'
+                                      : '准备中...',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            if (_expectedBitrateKbps != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                _formatBitrate(_currentSpeedKbps),
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                            if (_qualityLabel != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                '分辨率: $_qualityLabel',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+            // ✅ 速度档位列表（显示在左侧，放在最后确保在最上层）
+            if (!_isInPipMode && _showSpeedList && _showControls)
+              Positioned(
+                right: 90,
+                top: 10,
+                bottom: 0,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxHeight: 220, // ✅ 设置最大高度
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? [
+                                      Colors.grey.shade900
+                                          .withValues(alpha: 0.7),
+                                      Colors.grey.shade800
+                                          .withValues(alpha: 0.5),
+                                    ]
+                                  : [
+                                      Colors.white.withValues(alpha: 0.25),
+                                      Colors.white.withValues(alpha: 0.15),
+                                    ],
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: SingleChildScrollView(
+                            controller: _speedListScrollController,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: _speedOptions.map((speed) {
+                                final isSelected = speed == _speed;
+                                return CupertinoButton(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
+                                    vertical: 12,
+                                  ),
+                                  onPressed: () async {
+                                    await _changeSpeed(speed);
+                                    setState(() {
+                                      _showSpeedList = false;
+                                    });
+                                    _resetHideControlsTimer();
+                                  },
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${speed.toStringAsFixed(1)}x',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: isSelected
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                        ),
+                                      ),
+                                      if (isSelected) ...[
+                                        const SizedBox(width: 8),
+                                        const Icon(
+                                          Icons.check_rounded,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
                             ),
                           ),
                         ),
@@ -1768,8 +1833,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     ),
                   ),
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
@@ -1884,6 +1949,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _selectedSubtitleStreamIndex = selectedIndex;
       });
       _saveStreamSelections();
+      _updateSubtitleUrl();
     }
   }
 
@@ -1989,8 +2055,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     _cancelHideControlsTimer();
 
-    final RenderBox? button =
-        anchorContext.findRenderObject() as RenderBox?;
+    final RenderBox? button = anchorContext.findRenderObject() as RenderBox?;
     final overlay = Navigator.of(context).overlay;
     final RenderBox? overlayBox =
         overlay?.context.findRenderObject() as RenderBox?;
@@ -2021,14 +2086,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final double maxLeft = overlaySize.width - panelWidth - rightMargin;
 
     if (maxLeft < minLeftMargin) {
-      panelWidth =
-          (overlaySize.width - minLeftMargin - rightMargin).clamp(120.0, panelWidth);
+      panelWidth = (overlaySize.width - minLeftMargin - rightMargin)
+          .clamp(120.0, panelWidth);
       left = minLeftMargin;
     } else {
       left = left.clamp(minLeftMargin, maxLeft);
     }
-    final double bottom =
-        (overlaySize.height - buttonOffset.dy) + spacing;
+    final double bottom = (overlaySize.height - buttonOffset.dy) + spacing;
 
     final scrollController = ScrollController();
 
@@ -2104,8 +2168,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                 final label = _formatAudioStream(data);
                                 final isDefault =
                                     (data['IsDefault'] as bool?) == true;
-                                final hasDefaultTag =
-                                    label.contains('默认');
+                                final hasDefaultTag = label.contains('默认');
                                 final isSelected =
                                     index == _selectedAudioStreamIndex;
                                 final displayLabel = isDefault && !hasDefaultTag
@@ -2165,9 +2228,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     scrollController.dispose();
     _resetHideControlsTimer();
 
-    if (result != null &&
-        result >= 0 &&
-        result < _audioStreams.length) {
+    if (result != null && result >= 0 && result < _audioStreams.length) {
       setState(() {
         _selectedAudioStreamIndex = result;
         _hasManuallySelectedAudio = true;
@@ -2177,14 +2238,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   // ✅ 显示字幕选择菜单
-  Future<void> _showSubtitleSelectionMenu(
-      BuildContext anchorContext) async {
+  Future<void> _showSubtitleSelectionMenu(BuildContext anchorContext) async {
     if (_subtitleStreams.isEmpty) return;
 
     _cancelHideControlsTimer();
 
-    final RenderBox? button =
-        anchorContext.findRenderObject() as RenderBox?;
+    final RenderBox? button = anchorContext.findRenderObject() as RenderBox?;
     final overlay = Navigator.of(context).overlay;
     final RenderBox? overlayBox =
         overlay?.context.findRenderObject() as RenderBox?;
@@ -2215,14 +2274,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final double maxLeft = overlaySize.width - panelWidth - rightMargin;
 
     if (maxLeft < minLeftMargin) {
-      panelWidth =
-          (overlaySize.width - minLeftMargin - rightMargin).clamp(120.0, panelWidth);
+      panelWidth = (overlaySize.width - minLeftMargin - rightMargin)
+          .clamp(120.0, panelWidth);
       left = minLeftMargin;
     } else {
       left = left.clamp(minLeftMargin, maxLeft);
     }
-    final double bottom =
-        (overlaySize.height - buttonOffset.dy) + spacing;
+    final double bottom = (overlaySize.height - buttonOffset.dy) + spacing;
 
     final scrollController = ScrollController();
 
@@ -2296,19 +2354,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                               (index) {
                                 final label = _formatSubtitleStream(
                                     _subtitleStreams[index]);
-                                final isDefault =
-                                    (_subtitleStreams[index]['IsDefault']
-                                            as bool?) ==
-                                        true;
-                                final hasDefaultTag =
-                                    label.contains('默认');
+                                final isDefault = (_subtitleStreams[index]
+                                        ['IsDefault'] as bool?) ==
+                                    true;
+                                final hasDefaultTag = label.contains('默认');
                                 final isSelected =
                                     index == _selectedSubtitleStreamIndex;
 
-                                final displayLabel =
-                                    isDefault && !hasDefaultTag
-                                        ? '$label (默认)'
-                                        : label;
+                                final displayLabel = isDefault && !hasDefaultTag
+                                    ? '$label (默认)'
+                                    : label;
 
                                 return Material(
                                   color: Colors.transparent,
@@ -2363,14 +2418,54 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     scrollController.dispose();
     _resetHideControlsTimer();
 
-    if (result != null &&
-        result >= 0 &&
-        result < _subtitleStreams.length) {
+    if (result != null && result >= 0 && result < _subtitleStreams.length) {
       setState(() {
         _selectedSubtitleStreamIndex = result;
         _hasManuallySelectedSubtitle = true;
       });
       _saveStreamSelections();
+      _updateSubtitleUrl();
+    }
+  }
+
+  /// ✅ 更新字幕URL
+  Future<void> _updateSubtitleUrl() async {
+    if (_api == null || _selectedSubtitleStreamIndex == null) {
+      setState(() {
+        _subtitleUrl = null;
+      });
+      return;
+    }
+
+    try {
+      final subtitleStream = _subtitleStreams[_selectedSubtitleStreamIndex!];
+      final subtitleIndex = subtitleStream['Index'] as int?;
+
+      if (subtitleIndex != null) {
+        final url = await _api!.buildSubtitleUrl(
+          itemId: widget.itemId,
+          subtitleStreamIndex: subtitleIndex,
+          format: 'vtt',
+        );
+        if (mounted) {
+          setState(() {
+            _subtitleUrl = url;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _subtitleUrl = null;
+          });
+        }
+      }
+    } catch (e) {
+      _playerLog('❌ [Player] Update subtitle URL failed: $e');
+      if (mounted) {
+        setState(() {
+          _subtitleUrl = null;
+        });
+      }
     }
   }
 
@@ -2615,37 +2710,37 @@ class _ControlsState extends State<_Controls>
                                 ),
                               // ✅ 播放进度条
                               SliderTheme(
-                        data: SliderThemeData(
-                          trackHeight: 3,
-                          thumbShape: RoundSliderThumbShape(
-                            enabledThumbRadius: _thumbAnimation.value,
-                          ),
-                          overlayShape: const RoundSliderOverlayShape(
-                            overlayRadius: 16,
-                          ),
-                          activeTrackColor: Colors.white,
-                          inactiveTrackColor:
-                              Colors.white.withValues(alpha: 0.3),
-                          thumbColor: Colors.white,
+                                data: SliderThemeData(
+                                  trackHeight: 3,
+                                  thumbShape: RoundSliderThumbShape(
+                                    enabledThumbRadius: _thumbAnimation.value,
+                                  ),
+                                  overlayShape: const RoundSliderOverlayShape(
+                                    overlayRadius: 16,
+                                  ),
+                                  activeTrackColor: Colors.white,
+                                  inactiveTrackColor:
+                                      Colors.white.withValues(alpha: 0.3),
+                                  thumbColor: Colors.white,
                                   overlayColor:
                                       Colors.white.withValues(alpha: 0.15),
-                        ),
-                        child: Slider(
-                          value: sliderValue,
-                          onChangeStart: (v) {
-                            widget.onDragStart();
-                          },
-                          onChanged: (v) {
+                                ),
+                                child: Slider(
+                                  value: sliderValue,
+                                  onChangeStart: (v) {
+                                    widget.onDragStart();
+                                  },
+                                  onChanged: (v) {
                                     final target = Duration(
                                         seconds: (v * totalSeconds).round());
-                            widget.onDragging(target);
-                          },
-                          onChangeEnd: (v) {
+                                    widget.onDragging(target);
+                                  },
+                                  onChangeEnd: (v) {
                                     final target = Duration(
                                         seconds: (v * totalSeconds).round());
-                            widget.onDragEnd(target);
-                          },
-                        ),
+                                    widget.onDragEnd(target);
+                                  },
+                                ),
                               ),
                             ],
                           );
@@ -2656,44 +2751,44 @@ class _ControlsState extends State<_Controls>
                 ),
                 const SizedBox(width: 12),
                 // ✅ 字幕按钮
-                 if (widget.subtitleStreams.isNotEmpty)
-                   Builder(
-                     builder: (btnContext) {
-                       _subtitleAnchorContext = btnContext;
-                       return CupertinoButton(
-                         padding: const EdgeInsets.all(8),
-                         minSize: 0,
-                         onPressed: () => widget.onSubtitleTap(btnContext),
-                         child: const Icon(
-                           Icons.subtitles_rounded,
-                           color: Colors.white,
-                           size: 24,
-                         ),
-                       );
-                     },
-                   ),
+                if (widget.subtitleStreams.isNotEmpty)
+                  Builder(
+                    builder: (btnContext) {
+                      _subtitleAnchorContext = btnContext;
+                      return CupertinoButton(
+                        padding: const EdgeInsets.all(8),
+                        minSize: 0,
+                        onPressed: () => widget.onSubtitleTap(btnContext),
+                        child: const Icon(
+                          Icons.subtitles_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      );
+                    },
+                  ),
                 // ✅ 音频按钮
-                 if (widget.audioStreams.isNotEmpty)
-                   Builder(
-                     builder: (btnContext) {
-                       return CupertinoButton(
-                         padding: const EdgeInsets.all(8),
-                         minSize: 0,
-                         onPressed: () => widget
-                             .onAudioTap(_subtitleAnchorContext ?? btnContext),
-                         child: const Icon(
-                           Icons.audiotrack_rounded,
-                           color: Colors.white,
-                           size: 24,
-                         ),
-                       );
-                     },
-                   ),
+                if (widget.audioStreams.isNotEmpty)
+                  Builder(
+                    builder: (btnContext) {
+                      return CupertinoButton(
+                        padding: const EdgeInsets.all(8),
+                        minSize: 0,
+                        onPressed: () => widget
+                            .onAudioTap(_subtitleAnchorContext ?? btnContext),
+                        child: const Icon(
+                          Icons.audiotrack_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      );
+                    },
+                  ),
               ],
             ),
           ),
         ),
-          ),
+      ),
     );
   }
 

@@ -564,6 +564,22 @@ class EmbyApi {
     return _dio.options.baseUrl + '/Users/$userId/Images/Primary';
   }
 
+  // ✅ 获取字幕URL
+  Future<String> buildSubtitleUrl({
+    required String itemId,
+    required int subtitleStreamIndex,
+    String format = 'vtt', // vtt, srt, ass, ssa
+  }) async {
+    final prefs = await sp.SharedPreferences.getInstance();
+    final token = prefs.getString('emby_token') ?? '';
+    final baseUrl = _dio.options.baseUrl;
+
+    // Emby API 字幕URL格式: /Videos/{itemId}/Subtitles/{subtitleStreamIndex}/Stream.{format}
+    final url =
+        '$baseUrl/Videos/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?api_key=$token';
+    return url;
+  }
+
   // Prefer HLS master for adaptive bitrate
   Future<MediaSourceUrl> buildHlsUrl(String itemId) async {
     // ✅ 从 SharedPreferences 获取 token（因为 dio headers 是在拦截器中动态设置的）
