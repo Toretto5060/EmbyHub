@@ -25,12 +25,14 @@ class CustomSubtitleOverlay extends StatefulWidget {
     required this.position,
     required this.subtitleUrl,
     this.isVisible = true,
+    this.showControls = false,
     super.key,
   });
 
   final Duration position;
   final String? subtitleUrl;
   final bool isVisible;
+  final bool showControls; // ✅ 控制栏显示状态
 
   @override
   State<CustomSubtitleOverlay> createState() => _CustomSubtitleOverlayState();
@@ -291,11 +293,19 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       return const SizedBox.shrink();
     }
 
+    // ✅ 根据控制栏显示状态调整位置
+    // 默认位置：距离底部 20
+    // 控制栏显示时：距离底部 100（控制栏高度约 80 + 间距 20，更靠近控制栏）
+    final bottomOffset = widget.showControls ? 85.0 : 20.0;
+
     // ✅ 移除时间戳显示，只显示字幕内容
     // ✅ 使用固定 key 确保组件复用
-    return Positioned(
+    // ✅ 使用 AnimatedPositioned 添加平滑的上移下移动画
+    return AnimatedPositioned(
       key: const ValueKey('subtitle-overlay'),
-      bottom: 80,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      bottom: bottomOffset,
       left: 0,
       right: 0,
       child: IgnorePointer(
@@ -303,23 +313,21 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
           child: Container(
             constraints: const BoxConstraints(maxWidth: 800),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(4),
-            ),
+            // ✅ 去除背景装饰
             child: Text(
               displayText,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
                 fontSize: 18,
                 fontWeight: FontWeight.w500,
                 height: 1.4,
+                // ✅ 轻量字体阴影，确保文字清晰可见
                 shadows: [
                   Shadow(
-                    color: Colors.black,
+                    color: Colors.black.withValues(alpha: 0.6),
                     blurRadius: 4,
-                    offset: Offset(0, 1),
+                    offset: const Offset(0, 1),
                   ),
                 ],
               ),

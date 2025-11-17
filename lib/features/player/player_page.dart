@@ -1165,6 +1165,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   position: _position,
                   subtitleUrl: _subtitleUrl,
                   isVisible: true, // 始终显示字幕（当有字幕时）
+                  showControls: _showControls, // ✅ 传递控制栏显示状态
                 ),
 
               // ✅ 触摸检测层（当控制层隐藏时，用于显示控制层）
