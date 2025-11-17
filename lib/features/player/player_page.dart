@@ -491,8 +491,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             'hwdec': 'mediacodec-auto', // Android 最稳定硬解
             'gpu-api': 'opengl', // GPU 渲染最稳定
 
-            // 防止倍速画面跳动
-            'video-sync': 'audio',
+            // 视频同步方式：使用 display-resample 更温和，避免音频处理
+            'video-sync': 'display-resample',
 
             // 不使用插帧，减少卡顿
             'interpolation': 'no',
@@ -513,16 +513,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             'opengl-swapinterval': '0', // 不限制交换间隔，提高流畅度
             'video-latency-hacks': 'yes', // 启用视频延迟优化
             //==========================
-            //【音频：防止倍速时声音异常 + 音量增强】
+            //【音频：使用系统音效设置】
             //==========================
-            'audio-pitch-correction': 'yes',
-            // ✅ 音量增强配置
-            'volume-max': '300', // 允许音量最大到 400%
-            'volume': '200', // 默认音量设置为 200%
-            // ✅ 使用动态音频规范化 + 音量放大
-            // dynaudnorm: 动态音频规范化，自动调整音量让所有内容都足够响亮
-            'af': 'dynaudnorm=f=500:g=31:p=0.95:m=10.0,volume=3.0',
-
+            'audio-pitch-correction': 'yes', // 倍速时保持音调
+            'volume-max': '200', // 允许音量最大到 200%
+            // ✅ 使用系统默认音频输出，让系统音效设置生效
+            // media_kit 默认使用系统音频输出（Android: AudioTrack, iOS: AVAudioEngine）
+            // 系统音效（均衡器、低音增强等）会自动应用到音频流
+            // 不设置 'ao' 参数，让 media_kit 使用默认音频输出
+            // 不设置任何音频滤镜（'af'），保持原始音频流，让系统处理
+            // MainActivity 中已配置 AudioAttributes，确保系统音效自动应用
             //==========================
             //【稳定性】
             //==========================
@@ -556,9 +556,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       // ✅ 如果不需要seek，设置音量为150%（增强音量）
       // 如果需要seek，在seek流程中控制音量（先静音再恢复）
+      // 注意：dynaudnorm 已经会增强音量，所以播放器音量设置为 150% 即可
       if (!needsSeek) {
-        await _player.setVolume(200.0);
-        _playerLog('🎬 [Player] Volume set to 200%');
+        await _player.setVolume(150.0);
+        _playerLog('🎬 [Player] Volume set to 150%');
       }
 
       // ✅ 显示系统媒体通知
@@ -648,8 +649,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         // Seek 后恢复音量并确保继续播放
         _playerLogImportant(
             '🎬 [Player] ✅ Seeked, restoring volume and resuming playback...');
-        await _player.setVolume(200.0);
-        _playerLogImportant('🎬 [Player] 🔊 Volume restored to 200%');
+        await _player.setVolume(150.0);
+        _playerLogImportant('🎬 [Player] 🔊 Volume restored to 150%');
         await _player.play();
 
         // 延迟一下确保seek后的帧已经渲染

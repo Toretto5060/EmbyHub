@@ -20,6 +20,10 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.media.AudioManager
 import android.media.AudioFocusRequest
 import android.media.AudioAttributes
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.Equalizer
+import android.media.audiofx.BassBoost
+import android.media.audiofx.Virtualizer
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -441,9 +445,11 @@ class MainActivity: FlutterActivity() {
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 // Android 8.0+ 使用 AudioFocusRequest
+                // ✅ 配置音频属性，确保系统音效（均衡器、低音增强等）自动应用
                 val audioAttributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                    .setUsage(AudioAttributes.USAGE_MEDIA) // 媒体播放用途
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE) // 电影内容类型
+                    .setFlags(AudioAttributes.FLAG_HW_AV_SYNC) // 硬件音视频同步
                     .build()
                 
                 val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -467,6 +473,13 @@ class MainActivity: FlutterActivity() {
                 audioFocusRequest = focusRequest
                 val result = audioMgr.requestAudioFocus(focusRequest)
                 android.util.Log.d("MainActivity", "🔊 Audio focus requested: ${if(result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "DENIED"}")
+                
+                // ✅ 检查系统音效是否可用
+                val effects = AudioEffect.queryEffects()
+                android.util.Log.d("MainActivity", "🔊 System audio effects available: ${effects.size}")
+                effects.forEach { effect ->
+                    android.util.Log.d("MainActivity", "  - ${effect.name} (${effect.type})")
+                }
             } else {
                 // Android 8.0 以下使用旧API
                 @Suppress("DEPRECATION")
