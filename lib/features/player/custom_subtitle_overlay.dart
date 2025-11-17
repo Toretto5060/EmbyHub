@@ -322,10 +322,17 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
                 fontSize: 18,
                 fontWeight: FontWeight.w500,
                 height: 1.4,
-                // ✅ 轻量字体阴影，确保文字清晰可见
+                // ✅ 增强字体阴影，确保文字清晰可见
                 shadows: [
+                  // 主阴影：深色、大模糊半径
                   Shadow(
-                    color: Colors.black.withValues(alpha: 0.6),
+                    color: Colors.black.withValues(alpha: 1.0),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                  // 辅助阴影：增强轮廓效果
+                  Shadow(
+                    color: Colors.black.withValues(alpha: 0.8),
                     blurRadius: 4,
                     offset: const Offset(0, 1),
                   ),
