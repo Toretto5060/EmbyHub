@@ -581,8 +581,8 @@ class EmbyApi {
     }
   }
 
-  // ✅ 获取字幕URL（使用PlaybackInfo获取正确的MediaSourceId）
-  Future<String> buildSubtitleUrl({
+  // ✅ 获取字幕URL（尝试多种格式以兼容不同的 Emby 版本）
+  Future<List<String>> buildSubtitleUrls({
     required String itemId,
     required int subtitleStreamIndex,
     String? mediaSourceId,
@@ -592,42 +592,46 @@ class EmbyApi {
     final token = prefs.getString('emby_token') ?? '';
     final baseUrl = _dio.options.baseUrl;
 
-    // ✅ 根据Emby API文档，字幕URL格式为：
-    // /Videos/{itemId}/Subtitles/{subtitleStreamIndex}/Stream.{format}?api_key={token}
-    // 或者使用MediaSourceId：
-    // /Videos/{itemId}/Subtitles/{subtitleStreamIndex}/Stream.{format}?MediaSourceId={mediaSourceId}&api_key={token}
+    final urls = <String>[];
 
-    String url =
-        '$baseUrl/Videos/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?api_key=$token';
-
-    // ✅ 如果有MediaSourceId，添加到URL中
+    // ✅ 格式1: /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}
+    // 这是最标准的格式，mediaSourceId 作为路径的一部分
     if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
-      url += '&MediaSourceId=$mediaSourceId';
+      urls.add(
+          '$baseUrl/Videos/$itemId/$mediaSourceId/Subtitles/$subtitleStreamIndex/Stream.$format?api_key=$token');
     }
 
-    return url;
-  }
+    // ✅ 格式2: /Videos/{itemId}/Subtitles/{index}/Stream.{format} (不带 MediaSourceId)
+    // 适用于 mediaSourceId 等于 itemId 的情况
+    urls.add(
+        '$baseUrl/Videos/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?api_key=$token');
 
-  // ✅ 尝试使用 Items 端点构建字幕URL（备用方案）
-  Future<String> buildSubtitleUrlWithItems({
-    required String itemId,
-    required int subtitleStreamIndex,
-    String? mediaSourceId,
-    String format = 'vtt',
-  }) async {
-    final prefs = await sp.SharedPreferences.getInstance();
-    final token = prefs.getString('emby_token') ?? '';
-    final baseUrl = _dio.options.baseUrl;
-
-    String url =
-        '$baseUrl/Items/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?api_key=$token';
-
-    // ✅ 如果有MediaSourceId，添加到URL中
+    // ✅ 格式3: /Videos/{itemId}/Subtitles/{index}/Stream.{format}?MediaSourceId={mediaSourceId}
+    // MediaSourceId 作为查询参数
     if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
-      url += '&MediaSourceId=$mediaSourceId';
+      urls.add(
+          '$baseUrl/Videos/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?MediaSourceId=$mediaSourceId&api_key=$token');
     }
 
-    return url;
+    // ✅ 格式4: /Items/{itemId}/Subtitles/{index}/Stream.{format}
+    // Items 端点（备用方案）
+    urls.add(
+        '$baseUrl/Items/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?api_key=$token');
+
+    // ✅ 格式5: /Items/{itemId}/Subtitles/{index}/Stream.{format}?MediaSourceId={mediaSourceId}
+    if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+      urls.add(
+          '$baseUrl/Items/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?MediaSourceId=$mediaSourceId&api_key=$token');
+    }
+
+    print('🔥🔥🔥 [API] Generated ${urls.length} subtitle URL variants');
+    print(
+        '🔥 [API] itemId: $itemId, subtitleStreamIndex: $subtitleStreamIndex, mediaSourceId: $mediaSourceId');
+    for (var i = 0; i < urls.length; i++) {
+      print('🔥 [API] Subtitle URL $i: ${urls[i]}');
+    }
+
+    return urls;
   }
 
   // Prefer HLS master for adaptive bitrate

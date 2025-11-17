@@ -1874,7 +1874,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
   }
 
-  /// ✅ 更新字幕URL
+  /// ✅ 更新字幕URL（尝试多种格式找到可用的）
   Future<void> _updateSubtitleUrl() async {
     if (_api == null || _selectedSubtitleStreamIndex == null) {
       setState(() {
@@ -1904,18 +1904,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
 
       if (subtitleIndex != null) {
-        // ✅ 使用 PlaybackInfo 获取的 MediaSourceId 构建字幕URL
-        final url = await _api!.buildSubtitleUrl(
+        // ✅ 获取所有可能的字幕 URL 格式
+        final urls = await _api!.buildSubtitleUrls(
           itemId: widget.itemId,
           subtitleStreamIndex: subtitleIndex,
           mediaSourceId: _mediaSourceId,
           format: 'vtt',
         );
-        _playerLog('🎬 [Player] Subtitle URL (with MediaSourceId): $url');
 
-        if (mounted) {
+        print('🔥🔥🔥 [Player] Generated ${urls.length} subtitle URL variants');
+        for (var i = 0; i < urls.length; i++) {
+          print('🔥 [Player] URL $i: ${urls[i]}');
+        }
+
+        // ✅ 将所有 URL 传递给字幕组件，让它尝试每一个直到成功
+        if (mounted && urls.isNotEmpty) {
+          final combinedUrl = urls.join('|||');
+          print(
+              '🔥 [Player] Setting subtitle URL: ${combinedUrl.substring(0, combinedUrl.length > 100 ? 100 : combinedUrl.length)}...');
           setState(() {
-            _subtitleUrl = url;
+            // 使用特殊格式传递多个 URL，用 '|||' 分隔
+            _subtitleUrl = combinedUrl;
           });
         }
       } else {

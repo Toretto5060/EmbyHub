@@ -1,9 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-/// ✅ 字幕条目
 class SubtitleEntry {
   final Duration start;
   final Duration end;
@@ -20,7 +20,6 @@ class SubtitleEntry {
   }
 }
 
-/// ✅ 自定义字幕显示组件
 class CustomSubtitleOverlay extends StatefulWidget {
   const CustomSubtitleOverlay({
     required this.position,
@@ -41,18 +40,12 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
   List<SubtitleEntry> _subtitles = [];
   bool _isLoading = false;
   String? _error;
-  Timer? _updateTimer;
+  int _lastFoundIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _loadSubtitles();
-    // ✅ 定时更新字幕显示（每100ms检查一次）
-    _updateTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      if (mounted) {
-        setState(() {});
-      }
-    });
   }
 
   @override
@@ -61,15 +54,9 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     if (oldWidget.subtitleUrl != widget.subtitleUrl) {
       _loadSubtitles();
     }
+    // ✅ 移除手动 setState，Flutter 会自动重建（widget.position 变化时）
   }
 
-  @override
-  void dispose() {
-    _updateTimer?.cancel();
-    super.dispose();
-  }
-
-  /// ✅ 加载字幕文件
   Future<void> _loadSubtitles() async {
     if (widget.subtitleUrl == null || widget.subtitleUrl!.isEmpty) {
       setState(() {
@@ -85,31 +72,43 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       _error = null;
     });
 
-    try {
-      final response = await http.get(Uri.parse(widget.subtitleUrl!));
-      if (response.statusCode == 200) {
-        final content = response.body;
-        final subtitles = _parseVTT(content);
-        setState(() {
-          _subtitles = subtitles;
-          _isLoading = false;
-          _error = null;
-        });
-      } else {
-        setState(() {
-          _isLoading = false;
-          _error = '加载字幕失败: ${response.statusCode}';
-        });
+    final urls = widget.subtitleUrl!.split('|||');
+    String? lastError;
+
+    for (var i = 0; i < urls.length; i++) {
+      final url = urls[i].trim();
+      if (url.isEmpty) continue;
+
+      try {
+        final response = await http.get(Uri.parse(url));
+
+        if (response.statusCode == 200) {
+          final content = utf8.decode(response.bodyBytes);
+          final subtitles = _parseVTT(content);
+
+          // ✅ 不归零，使用原始时间戳
+          setState(() {
+            _subtitles = subtitles;
+            _isLoading = false;
+            _error = null;
+            _lastFoundIndex = 0;
+          });
+          return;
+        } else {
+          lastError = '${response.statusCode}';
+        }
+      } catch (e) {
+        lastError = '$e';
       }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _error = '加载字幕失败: $e';
-      });
     }
+
+    setState(() {
+      _isLoading = false;
+      _error = '加载字幕失败: $lastError';
+    });
   }
 
-  /// ✅ 解析 VTT 格式字幕
+  /// ✅ 支持多种 VTT 时间格式：HH:MM:SS.mmm 或 MM:SS.mmm
   List<SubtitleEntry> _parseVTT(String content) {
     final entries = <SubtitleEntry>[];
     final lines = content.split('\n');
@@ -118,22 +117,29 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     Duration? startTime;
     Duration? endTime;
 
+    // ✅ 支持含小时和不含小时的格式
+    // 格式1: HH:MM:SS.mmm --> HH:MM:SS.mmm (或 H:MM:SS.mmm)
+    // 格式2: MM:SS.mmm --> MM:SS.mmm (或 M:SS.mmm)
+    final timePatternWithHours = RegExp(
+      r'(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})',
+    );
+    final timePatternNoHours = RegExp(
+      r'(\d{1,2}):(\d{2})\.(\d{3})\s*-->\s*(\d{1,2}):(\d{2})\.(\d{3})',
+    );
+
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i].trim();
 
-      // 跳过空行和注释
       if (line.isEmpty ||
           line.startsWith('WEBVTT') ||
-          line.startsWith('NOTE')) {
+          line.startsWith('NOTE') ||
+          line.startsWith('STYLE')) {
         continue;
       }
 
-      // 检查是否是时间戳行（格式: 00:00:00.000 --> 00:00:02.000）
-      final timeMatch = RegExp(
-              r'(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})')
-          .firstMatch(line);
-      if (timeMatch != null) {
-        // 如果有之前的条目，先保存
+      var match = timePatternWithHours.firstMatch(line);
+      if (match != null) {
+        // 保存之前的条目
         if (startTime != null && endTime != null && currentText != null) {
           entries.add(SubtitleEntry(
             start: startTime,
@@ -142,24 +148,50 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
           ));
         }
 
-        // 解析新的时间戳
+        // 含小时格式
         startTime = Duration(
-          hours: int.parse(timeMatch.group(1)!),
-          minutes: int.parse(timeMatch.group(2)!),
-          seconds: int.parse(timeMatch.group(3)!),
-          milliseconds: int.parse(timeMatch.group(4)!),
+          hours: int.parse(match.group(1)!),
+          minutes: int.parse(match.group(2)!),
+          seconds: int.parse(match.group(3)!),
+          milliseconds: int.parse(match.group(4)!),
         );
         endTime = Duration(
-          hours: int.parse(timeMatch.group(5)!),
-          minutes: int.parse(timeMatch.group(6)!),
-          seconds: int.parse(timeMatch.group(7)!),
-          milliseconds: int.parse(timeMatch.group(8)!),
+          hours: int.parse(match.group(5)!),
+          minutes: int.parse(match.group(6)!),
+          seconds: int.parse(match.group(7)!),
+          milliseconds: int.parse(match.group(8)!),
         );
         currentText = '';
         continue;
       }
 
-      // 如果是文本行
+      match = timePatternNoHours.firstMatch(line);
+      if (match != null) {
+        // 保存之前的条目
+        if (startTime != null && endTime != null && currentText != null) {
+          entries.add(SubtitleEntry(
+            start: startTime,
+            end: endTime,
+            text: currentText.trim(),
+          ));
+        }
+
+        // 不含小时格式
+        startTime = Duration(
+          minutes: int.parse(match.group(1)!),
+          seconds: int.parse(match.group(2)!),
+          milliseconds: int.parse(match.group(3)!),
+        );
+        endTime = Duration(
+          minutes: int.parse(match.group(4)!),
+          seconds: int.parse(match.group(5)!),
+          milliseconds: int.parse(match.group(6)!),
+        );
+        currentText = '';
+        continue;
+      }
+
+      // 文本行（支持多行）
       if (startTime != null && endTime != null) {
         if (currentText != null && currentText.isNotEmpty) {
           currentText += '\n$line';
@@ -184,75 +216,99 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     return entries;
   }
 
-  /// ✅ 获取当前应该显示的字幕
   SubtitleEntry? _getCurrentSubtitle() {
     if (!widget.isVisible || _subtitles.isEmpty) {
       return null;
     }
 
-    for (final entry in _subtitles) {
-      if (entry.isActive(widget.position)) {
+    final videoPos = widget.position;
+
+    // ✅ 优化：如果位置差距 > 5秒，直接全表扫描（处理拖拽情况）
+    if (_lastFoundIndex < _subtitles.length) {
+      final lastEntry = _subtitles[_lastFoundIndex];
+      final timeDiff = (videoPos - lastEntry.start).abs();
+
+      if (timeDiff > const Duration(seconds: 5)) {
+        // 位置差距大，全表扫描
+        for (int i = 0; i < _subtitles.length; i++) {
+          final entry = _subtitles[i];
+          if (entry.isActive(videoPos)) {
+            _lastFoundIndex = i;
+            return entry;
+          }
+        }
+        return null;
+      }
+
+      // 否则在附近查找（±1）
+      if (lastEntry.isActive(videoPos)) {
+        return lastEntry;
+      }
+
+      if (_lastFoundIndex + 1 < _subtitles.length) {
+        final nextEntry = _subtitles[_lastFoundIndex + 1];
+        if (nextEntry.isActive(videoPos)) {
+          _lastFoundIndex = _lastFoundIndex + 1;
+          return nextEntry;
+        }
+      }
+
+      if (_lastFoundIndex > 0) {
+        final prevEntry = _subtitles[_lastFoundIndex - 1];
+        if (prevEntry.isActive(videoPos)) {
+          _lastFoundIndex = _lastFoundIndex - 1;
+          return prevEntry;
+        }
+      }
+    }
+
+    // 全表扫描
+    for (int i = 0; i < _subtitles.length; i++) {
+      final entry = _subtitles[i];
+      if (entry.isActive(videoPos)) {
+        _lastFoundIndex = i;
         return entry;
       }
     }
+
     return null;
   }
 
   @override
   Widget build(BuildContext context) {
-    // ✅ 调试信息：检查字幕层状态
-    if (widget.subtitleUrl != null && widget.subtitleUrl!.isNotEmpty) {
-      debugPrint('🎬 [Subtitle] URL: ${widget.subtitleUrl}');
-      debugPrint('🎬 [Subtitle] Position: ${widget.position.inSeconds}s');
-      debugPrint('🎬 [Subtitle] Subtitles count: ${_subtitles.length}');
-      debugPrint('🎬 [Subtitle] Loading: $_isLoading, Error: $_error');
-    }
-
     if (!widget.isVisible ||
         widget.subtitleUrl == null ||
-        widget.subtitleUrl!.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    if (_isLoading) {
-      return const SizedBox.shrink();
-    }
-
-    if (_error != null) {
-      // ✅ 显示错误信息（调试用）
-      debugPrint('🎬 [Subtitle] Error: $_error');
+        widget.subtitleUrl!.isEmpty ||
+        _isLoading ||
+        _error != null) {
       return const SizedBox.shrink();
     }
 
     final currentSubtitle = _getCurrentSubtitle();
-    if (currentSubtitle == null) {
+    final displayText = currentSubtitle?.text ?? '';
+
+    if (displayText.isEmpty) {
       return const SizedBox.shrink();
     }
 
-    debugPrint('🎬 [Subtitle] Current subtitle: ${currentSubtitle.text}');
-
-    // ✅ 字幕显示在底部中央，带背景和阴影
-    // 使用 IgnorePointer 确保字幕不阻挡视频交互，避免影响视频渲染
+    // ✅ 移除时间戳显示，只显示字幕内容
+    // ✅ 使用固定 key 确保组件复用
     return Positioned(
-      bottom: 80, // 在底部控制栏上方
+      key: const ValueKey('subtitle-overlay'),
+      bottom: 80,
       left: 0,
       right: 0,
       child: IgnorePointer(
         child: Center(
           child: Container(
-            constraints: const BoxConstraints(
-              maxWidth: 800, // 最大宽度
-            ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 8,
-            ),
+            constraints: const BoxConstraints(maxWidth: 800),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.7), // 半透明黑色背景
+              color: Colors.black.withValues(alpha: 0.7),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
-              currentSubtitle.text,
+              displayText,
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.white,
