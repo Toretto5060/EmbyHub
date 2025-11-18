@@ -59,6 +59,8 @@ class PlayerControlsState {
     required this.canDecreaseSpeed,
     required this.isLocked,
     required this.onToggleLock,
+    required this.onRewind,
+    required this.onForward,
   });
 
   final bool isInPipMode;
@@ -113,6 +115,8 @@ class PlayerControlsState {
   final bool canDecreaseSpeed;
   final bool isLocked;
   final VoidCallback onToggleLock;
+  final VoidCallback onRewind; // ✅ 快退10秒
+  final VoidCallback onForward; // ✅ 快进20秒
 }
 
 /// ✅ 播放器 UI 控制层
@@ -150,8 +154,7 @@ class PlayerControls extends StatelessWidget {
         // ✅ 锁定按钮（中间左侧，仅在显示控制层时显示）
         // PiP 模式下隐藏
         // 锁定时也会跟随控制栏自动隐藏，点击屏幕可以重新显示控制栏（只显示锁定按钮）
-        if (!state.isInPipMode && state.showControls)
-          _LockButton(state: state),
+        if (!state.isInPipMode && state.showControls) _LockButton(state: state),
 
         // ✅ 顶部控制栏（淡入淡出动画）- 固定高度，不随状态栏变化
         // PiP 模式下隐藏，锁定状态下隐藏
@@ -171,13 +174,14 @@ class PlayerControls extends StatelessWidget {
         if (!state.isInPipMode && !state.isLocked && state.showVideoFitHint)
           _VideoFitHint(state: state, context: context),
 
-        // ✅ 中间播放/暂停按钮（仅在显示控制栏时）
-        // PiP 模式下隐藏，缓冲时也隐藏，锁定状态下隐藏
-        if (!state.isInPipMode &&
-            state.ready &&
-            state.showControls &&
-            !state.isBuffering &&
-            !state.isLocked)
+        // ✅ 快退和快进按钮（一进来就显示，缓冲时也显示）
+        // PiP 模式下隐藏，锁定状态下隐藏
+        if (!state.isInPipMode && state.showControls && !state.isLocked)
+          _SeekButtons(state: state),
+
+        // ✅ 中间播放/暂停按钮（一进来就显示，缓冲时也显示）
+        // PiP 模式下隐藏，锁定状态下隐藏
+        if (!state.isInPipMode && state.showControls && !state.isLocked)
           _PlayPauseButton(state: state),
 
         // ✅ 右侧速度控制（仅在显示控制栏时）
@@ -190,12 +194,15 @@ class PlayerControls extends StatelessWidget {
         if (!state.isInPipMode && !state.isLocked)
           _BottomControlsBar(state: state),
 
-        // ✅ 加载/缓冲指示器（不阻挡点击）
-        // 显示条件：未准备好 或 正在缓冲 或 还未开始播放（position为0）
-        if (!state.ready ||
-            state.isBuffering ||
-            (state.ready && state.position == Duration.zero))
-          _LoadingIndicator(state: state),
+        // ✅ 缓冲信息（显示在播放/暂停按钮下方，放在最后确保在最上层，不被字幕遮挡）
+        // 锁定状态下隐藏
+        if (!state.isInPipMode &&
+            state.showControls &&
+            !state.isLocked &&
+            (!state.ready ||
+                state.isBuffering ||
+                (state.ready && state.position == Duration.zero)))
+          _BufferingInfo(state: state, context: context),
 
         // ✅ 速度档位列表（显示在左侧，放在最后确保在最上层）
         // 锁定状态下隐藏
@@ -577,8 +584,7 @@ class _LockButton extends StatelessWidget {
                       gradient: LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: Theme.of(context).brightness ==
-                                Brightness.dark
+                        colors: Theme.of(context).brightness == Brightness.dark
                             ? [
                                 Colors.grey.shade900.withValues(alpha: 0.6),
                                 Colors.grey.shade800.withValues(alpha: 0.4),
@@ -622,7 +628,7 @@ class _LockButton extends StatelessWidget {
               ),
             );
           }
-          
+
           // ✅ 非锁定状态，跟随控制栏动画
           return SlideTransition(
             position: Tween<Offset>(
@@ -696,9 +702,9 @@ class _LockButton extends StatelessWidget {
   }
 }
 
-/// ✅ 中间播放/暂停按钮
-class _PlayPauseButton extends StatelessWidget {
-  const _PlayPauseButton({required this.state});
+/// ✅ 快退和快进按钮（左右两侧）
+class _SeekButtons extends StatelessWidget {
+  const _SeekButtons({required this.state});
 
   final PlayerControlsState state;
 
@@ -710,37 +716,263 @@ class _PlayPauseButton extends StatelessWidget {
         builder: (context, child) {
           return Opacity(
             opacity: state.controlsAnimation.value * 0.9,
-            child: GestureDetector(
-              onTap: state.onPlayPause,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                transitionBuilder: (child, animation) {
-                  return ScaleTransition(
-                    scale: animation,
-                    child: FadeTransition(
-                      opacity: animation,
-                      child: child,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // ✅ 快退10秒按钮（左侧）
+                _SeekButton(
+                  icon: Icons.replay_10_rounded,
+                  label: '10',
+                  onPressed: state.onRewind,
+                  animation: state.controlsAnimation,
+                ),
+                const SizedBox(width: 24),
+                // ✅ 占位空间（播放/暂停按钮的位置）
+                const SizedBox(width: 80),
+                const SizedBox(width: 24),
+                // ✅ 快进10秒按钮（右侧）
+                _SeekButton(
+                  icon: Icons.forward_10_rounded,
+                  label: '10',
+                  onPressed: state.onForward,
+                  animation: state.controlsAnimation,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// ✅ 中间播放/暂停按钮（包含缓冲指示器）
+class _PlayPauseButton extends StatelessWidget {
+  const _PlayPauseButton({required this.state});
+
+  final PlayerControlsState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final isBuffering = !state.ready ||
+        state.isBuffering ||
+        (state.ready && state.position == Duration.zero);
+
+    return Center(
+      child: AnimatedBuilder(
+        animation: state.controlsAnimation,
+        builder: (context, child) {
+          return Opacity(
+            opacity: state.controlsAnimation.value * 0.9,
+            child: Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                // ✅ 播放/暂停按钮和环绕的缓冲指示器（固定在中心，位置不变）
+                SizedBox(
+                  width: 90,
+                  height: 90,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // ✅ 缓冲指示器（环绕播放/暂停按钮，紧贴按钮）
+                      if (isBuffering)
+                        SizedBox(
+                          width: 90,
+                          height: 90,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white.withValues(alpha: 0.8),
+                            ),
+                          ),
+                        ),
+                      // ✅ 播放/暂停按钮（始终在中心，位置不变）
+                      GestureDetector(
+                        onTap: state.onPlayPause,
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          transitionBuilder: (child, animation) {
+                            return ScaleTransition(
+                              scale: animation,
+                              child: FadeTransition(
+                                opacity: animation,
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: Icon(
+                            state.isPlaying
+                                ? Icons.pause_circle_rounded
+                                : Icons.play_circle_rounded,
+                            key: ValueKey<bool>(state.isPlaying),
+                            color: Colors.white,
+                            size: 80,
+                            shadows: const [
+                              Shadow(
+                                color: Colors.black54,
+                                blurRadius: 20,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// ✅ 缓冲信息（显示在播放/暂停按钮下方）
+class _BufferingInfo extends StatelessWidget {
+  const _BufferingInfo({required this.state, required this.context});
+
+  final PlayerControlsState state;
+  final BuildContext context;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: AnimatedBuilder(
+        animation: state.controlsAnimation,
+        builder: (context, child) {
+          return Opacity(
+            opacity: state.controlsAnimation.value * 0.9,
+            child: Transform.translate(
+              offset: Offset(0, 90 / 2 + 36), // 按钮半径 + 间距
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
                     ),
-                  );
-                },
-                child: Icon(
-                  state.isPlaying
-                      ? Icons.pause_circle_rounded
-                      : Icons.play_circle_rounded,
-                  key: ValueKey<bool>(state.isPlaying),
-                  color: Colors.white,
-                  size: 80,
-                  shadows: const [
-                    Shadow(
-                      color: Colors.black54,
-                      blurRadius: 20,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: Theme.of(context).brightness == Brightness.dark
+                            ? [
+                                Colors.grey.shade900.withValues(alpha: 0.6),
+                                Colors.grey.shade800.withValues(alpha: 0.4),
+                              ]
+                            : [
+                                Colors.white.withValues(alpha: 0.2),
+                                Colors.white.withValues(alpha: 0.1),
+                              ],
+                      ),
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                  ],
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          !state.ready
+                              ? '加载中...'
+                              : state.isBuffering
+                                  ? '缓冲中...'
+                                  : '准备中...',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (state.expectedBitrateKbps != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            state.formatBitrate(state.currentSpeedKbps),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// ✅ 快退/快进按钮
+class _SeekButton extends StatelessWidget {
+  const _SeekButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    required this.animation,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  final Animation<double> animation;
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: animation,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: Theme.of(context).brightness == Brightness.dark
+                    ? [
+                        Colors.grey.shade900.withValues(alpha: 0.6),
+                        Colors.grey.shade800.withValues(alpha: 0.4),
+                      ]
+                    : [
+                        Colors.white.withValues(alpha: 0.2),
+                        Colors.white.withValues(alpha: 0.1),
+                      ],
+              ),
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: CupertinoButton(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              onPressed: onPressed,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    icon,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -941,75 +1173,6 @@ class _BottomControlsBar extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-/// ✅ 加载/缓冲指示器
-class _LoadingIndicator extends StatelessWidget {
-  const _LoadingIndicator({required this.state});
-
-  final PlayerControlsState state;
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: Container(
-          color: Colors.black.withValues(alpha: 0),
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const CupertinoActivityIndicator(
-                    color: Colors.white,
-                    radius: 16,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    !state.ready
-                        ? '加载中...'
-                        : state.isBuffering
-                            ? '缓冲中...'
-                            : '准备中...',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  if (state.expectedBitrateKbps != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      state.formatBitrate(state.currentSpeedKbps),
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                  if (state.qualityLabel != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      '分辨率: ${state.qualityLabel}',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

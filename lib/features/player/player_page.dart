@@ -144,10 +144,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     // ✅ 创建播放器，media_kit会自动启用系统媒体会话
     _player = Player(
       configuration: PlayerConfiguration(
-        title: 'Emby Player',
-        logLevel: MPVLogLevel.error,
-        bufferSize: 256 * 1024 * 1024 // 256MB 缓冲区（降低以减少缓冲区压力）
-      ),
+          title: 'Emby Player',
+          logLevel: MPVLogLevel.error,
+          bufferSize: 256 * 1024 * 1024 // 256MB 缓冲区（降低以减少缓冲区压力）
+          ),
     );
 
     _controller = VideoController(
@@ -1049,12 +1049,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     _cancelHideControlsTimer();
     _hideControlsTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted &&
-          _showControls &&
-          _isPlaying &&
-          !_showSpeedList) {
+      if (mounted && _showControls && _isPlaying && !_showSpeedList) {
         // ✅ 锁定时也允许自动隐藏，锁定按钮会跟随控制栏隐藏
-        
+
         _controlsAnimationController.reverse();
         // ✅ 自动隐藏时也隐藏状态栏
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -1298,6 +1295,29 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                         _startHideControlsTimer();
                       }
                     }
+                  },
+                  onRewind: () async {
+                    // ✅ 快退10秒
+                    final newPosition = _position - const Duration(seconds: 10);
+                    final targetPosition = newPosition < Duration.zero
+                        ? Duration.zero
+                        : newPosition;
+                    await _player.seek(targetPosition);
+                    setState(() {
+                      _position = targetPosition;
+                    });
+                    _resetHideControlsTimer();
+                  },
+                  onForward: () async {
+                    // ✅ 快进20秒
+                    final newPosition = _position + const Duration(seconds: 20);
+                    final targetPosition =
+                        newPosition > _duration ? _duration : newPosition;
+                    await _player.seek(targetPosition);
+                    setState(() {
+                      _position = targetPosition;
+                    });
+                    _resetHideControlsTimer();
                   },
                 ),
               ),
