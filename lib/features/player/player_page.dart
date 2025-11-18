@@ -92,6 +92,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Offset? _longPressPosition;
   double? _originalSpeed; // 保存原始倍速，用于恢复
   Timer? _longPressTimer; // 长按定时器（用于倒退时的定时更新）
+  DateTime? _longPressStartTime; // ✅ 长按开始时间（用于显示按住时长）
 
   // ✅ 视频画面裁切模式
   BoxFit _videoFit = BoxFit.contain; // contain(原始), cover(覆盖), fill(填充)
@@ -755,6 +756,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _isLongPressingForward = false;
         _isLongPressingRewind = false;
         _longPressPosition = null;
+        _longPressStartTime = null; // ✅ 清除长按开始时间
         // ✅ 恢复原始倍速
         if (_originalSpeed != null) {
           _changeSpeed(_originalSpeed!);
@@ -1245,6 +1247,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
                       setState(() {
                         _longPressPosition = details.localPosition;
+                        _longPressStartTime = DateTime.now(); // ✅ 记录长按开始时间
                         if (isRightSide) {
                           // ✅ 长按右侧：3倍速播放
                           _isLongPressingForward = true;
@@ -1402,6 +1405,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   isLongPressingForward: _isLongPressingForward,
                   isLongPressingRewind: _isLongPressingRewind,
                   longPressPosition: _longPressPosition,
+                  longPressStartTime: _longPressStartTime,
                 ),
               ),
             ],

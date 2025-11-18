@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/cupertino.dart';
@@ -63,6 +64,7 @@ class PlayerControlsState {
   final bool isLongPressingForward; // ✅ 是否正在长按快进
   final bool isLongPressingRewind; // ✅ 是否正在长按快退
   final Offset? longPressPosition; // ✅ 长按位置（用于显示水波纹）
+  final DateTime? longPressStartTime; // ✅ 长按开始时间（用于显示按住时长）
 
   const PlayerControlsState({
     required this.isInPipMode,
@@ -122,6 +124,7 @@ class PlayerControlsState {
     this.isLongPressingForward = false,
     this.isLongPressingRewind = false,
     this.longPressPosition,
+    this.longPressStartTime,
   });
 }
 
@@ -216,6 +219,7 @@ class PlayerControls extends StatelessWidget {
           _RippleEffect(
             position: state.longPressPosition!,
             isRewind: state.isLongPressingRewind,
+            startTime: state.longPressStartTime,
           ),
 
         // ✅ 速度档位列表（显示在左侧，放在最后确保在最上层）
@@ -1567,15 +1571,17 @@ class _ControlsState extends State<_Controls>
   }
 }
 
-/// ✅ YouTube风格的长按快进/快退水波纹效果
+/// ✅ 长按快进/快退UI效果（根据图片实现）
 class _RippleEffect extends StatefulWidget {
   const _RippleEffect({
     required this.position,
     required this.isRewind,
+    this.startTime,
   });
 
   final Offset position;
   final bool isRewind;
+  final DateTime? startTime;
 
   @override
   State<_RippleEffect> createState() => _RippleEffectState();
@@ -1584,90 +1590,74 @@ class _RippleEffect extends StatefulWidget {
 class _RippleEffectState extends State<_RippleEffect>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _opacityAnimation;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
+    // ✅ 三个三角形循环动画，每个三角形亮起需要 400ms，总共 1200ms 一个循环
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 400),
+      duration: const Duration(milliseconds: 1200),
     )..repeat();
 
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.2).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeInOut,
-      ),
-    );
-
-    _opacityAnimation = Tween<double>(begin: 0.8, end: 0.3).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeInOut,
-      ),
-    );
+    // ✅ 定时更新按住时长显示
+    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _timer?.cancel();
     super.dispose();
+  }
+
+  // ✅ 计算快进/快退的秒数（按住时长 × 3倍速）
+  int _getSeekedSeconds() {
+    if (widget.startTime == null) return 0;
+    final elapsed = DateTime.now().difference(widget.startTime!);
+    // ✅ 3倍速：每1秒实际时间，视频快进/快退3秒
+    return (elapsed.inMilliseconds * 3 / 1000).round();
   }
 
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    // ✅ 快退时显示在左侧，快进时显示在右侧
+    final isRightSide = !widget.isRewind;
+
+    // ✅ 半圆半径：屏幕高度的一半（让半圆覆盖整个屏幕高度）
+    final double radius = screenSize.height / 1.8;
+    // ✅ 半圆中心位置（屏幕边缘，垂直居中）
+    final double centerX =
+        isRightSide ? screenSize.width * 0.76 : -screenSize.width * 0.5;
+    final double centerY = screenSize.height / 11;
+
     return Positioned.fill(
       child: IgnorePointer(
         child: Stack(
           children: [
-            // ✅ 水波纹中心位置
+            // ✅ 半圆背景（包含三角形和文字）
             Positioned(
-              left: widget.position.dx - 70,
-              top: widget.position.dy - 70,
+              left: isRightSide ? centerX - radius : centerX,
+              top: centerY - radius,
               child: AnimatedBuilder(
                 animation: _controller,
                 builder: (context, child) {
-                  return Transform.scale(
-                    scale: _scaleAnimation.value,
-                    child: Opacity(
-                      opacity: _opacityAnimation.value,
-                      child: Container(
-                        width: 140,
-                        height: 140,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.black.withValues(alpha: 0.6),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.4),
-                            width: 3,
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            // ✅ 快进/快退图标
-                            Icon(
-                              widget.isRewind
-                                  ? Icons.replay_10_rounded
-                                  : Icons.fast_forward_rounded,
-                              color: Colors.white,
-                              size: 56,
-                            ),
-                            const SizedBox(height: 8),
-                            // ✅ 倍速显示
-                            Text(
-                              '3x',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                  // ✅ 计算 CustomPaint 的偏移量
+                  final paintOffsetX = isRightSide ? centerX - radius : centerX;
+                  return CustomPaint(
+                    size: Size(screenSize.width, screenSize.width / 1.1),
+                    painter: _SemicirclePainter(
+                      isRightSide: isRightSide,
+                      animationValue: _controller.value,
+                      seekedSeconds: _getSeekedSeconds(),
+                      screenWidth: screenSize.width,
+                      paintOffsetX: paintOffsetX,
                     ),
                   );
                 },
@@ -1677,6 +1667,152 @@ class _RippleEffectState extends State<_RippleEffect>
         ),
       ),
     );
+  }
+}
+
+/// ✅ 半圆绘制器（包含三个三角形的循环动画和文字）
+class _SemicirclePainter extends CustomPainter {
+  final bool isRightSide;
+  final double animationValue;
+  final int seekedSeconds; // ✅ 快进/快退的秒数
+  final double screenWidth;
+  final double paintOffsetX;
+
+  _SemicirclePainter({
+    required this.isRightSide,
+    required this.animationValue,
+    required this.seekedSeconds,
+    required this.screenWidth,
+    required this.paintOffsetX,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // ✅ 半透明白色背景
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.3)
+      ..style = PaintingStyle.fill;
+
+    // ✅ 绘制半圆
+    final path = Path();
+    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
+
+    if (isRightSide) {
+      // ✅ 开口朝右的半圆（左侧是直线，右侧是圆弧）
+      // 从左上角开始，画直线到左下角，然后画圆弧从右上到右下
+      path.moveTo(0, 0);
+      path.lineTo(0, size.height);
+      // 使用addArc：从顶部（90度）顺时针画180度到底部（270度）
+      path.addArc(rect, 0.5 * 3.14159, 3.14159);
+      path.close();
+    } else {
+      // ✅ 开口朝左的半圆（右侧是直线，左侧是圆弧）
+      // 从右上角开始，画直线到右下角，然后画圆弧从左下到左上
+      path.moveTo(size.width, 0);
+      path.lineTo(size.width, size.height);
+      // 使用addArc：从顶部（90度）逆时针画180度到底部（270度）
+      path.addArc(rect, 0.5 * 3.14159, -3.14159);
+      path.close();
+    }
+
+    canvas.drawPath(path, paint);
+
+    // ✅ 绘制三个三角形（循环亮起）
+    final centerY = size.height / 2;
+    const triangleSize = 16.0;
+    // ✅ 间距小于三角形宽度，让每个三角形压住前一个的角
+    const triangleSpacing = triangleSize * 0.7; // 8.0，让三角形重叠
+    // ✅ 三角形和文字的水平位置（将屏幕坐标转换为 CustomPaint 内部坐标）
+    // 右侧：屏幕 x = screenWidth - 100（距离右边100位置）
+    // 左侧：屏幕 x=100（距离左边100位置）
+    final double screenX = isRightSide ? (screenWidth - 220.0) : 220.0;
+    final double baseX = screenX - paintOffsetX;
+
+    // ✅ 计算每个三角形的亮度（0.0-1.0）
+    double getTriangleBrightness(int index) {
+      // 每个三角形亮起的时间段：0-400ms, 400-800ms, 800-1200ms
+      final phase = (animationValue * 3 + index * (1.0 / 3)) % 1.0;
+      // 每个三角形在 400ms 内从暗到亮再到暗
+      if (phase < 0.33) {
+        return phase * 3.0; // 0.0 -> 1.0
+      } else if (phase < 0.67) {
+        return 1.0 - (phase - 0.33) * 3.0; // 1.0 -> 0.0
+      } else {
+        return 0.0; // ✅ 完全暗，不显示
+      }
+    }
+
+    // ✅ 绘制三个三角形（后一个压前一个）
+    for (int i = 0; i < 3; i++) {
+      final brightness = getTriangleBrightness(i);
+      // ✅ 如果亮度为0，完全不显示（alpha = 0）
+      if (brightness <= 0.0) continue;
+
+      final trianglePaint = Paint()
+        ..color = Colors.white.withValues(alpha: brightness)
+        ..style = PaintingStyle.fill;
+
+      // ✅ 计算三角形位置（后一个压前一个：i=0在最左，i=1在中间压i=0，i=2在最右压i=1）
+      final offsetX = isRightSide
+          ? baseX + i * triangleSpacing // 向右：从左到右排列
+          : baseX - i * triangleSpacing; // 向左：从右到左排列
+      final offsetY = centerY - 12; // ✅ 向上偏移，为文字留出空间
+
+      // ✅ 绘制三角形（向右或向左）
+      final trianglePath = Path();
+      if (isRightSide) {
+        // ✅ 向右的三角形
+        trianglePath.moveTo(offsetX, offsetY - triangleSize / 2);
+        trianglePath.lineTo(offsetX + triangleSize, offsetY);
+        trianglePath.lineTo(offsetX, offsetY + triangleSize / 2);
+      } else {
+        // ✅ 向左的三角形
+        trianglePath.moveTo(offsetX, offsetY - triangleSize / 2);
+        trianglePath.lineTo(offsetX - triangleSize, offsetY);
+        trianglePath.lineTo(offsetX, offsetY + triangleSize / 2);
+      }
+      trianglePath.close();
+
+      canvas.drawPath(trianglePath, trianglePaint);
+    }
+
+    // ✅ 绘制快进/快退秒数文字（半圆内部下方）
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: '${seekedSeconds}秒',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          shadows: [
+            Shadow(
+              color: Colors.black54,
+              blurRadius: 8,
+            ),
+          ],
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    );
+    textPainter.layout();
+
+    // ✅ 文字位置：与三角形对齐，在三角形下方
+    // ✅ 左边文字再靠左一点，右边文字再靠右一点
+    const textOffset = 20.0; // ✅ 文字偏移量
+    final textX = isRightSide
+        ? baseX - textPainter.width / 2 + textOffset // ✅ 右边：向右偏移
+        : baseX - textPainter.width / 2 - textOffset; // ✅ 左边：向左偏移
+    final textY = centerY + 10; // ✅ 在三角形下方
+
+    textPainter.paint(canvas, Offset(textX, textY));
+  }
+
+  @override
+  bool shouldRepaint(covariant _SemicirclePainter oldDelegate) {
+    return oldDelegate.animationValue != animationValue ||
+        oldDelegate.isRightSide != isRightSide ||
+        oldDelegate.seekedSeconds != seekedSeconds;
   }
 }
 
