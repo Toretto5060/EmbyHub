@@ -657,18 +657,45 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
           : item.productionYear;
 
       if (startYear != null) {
-        if (item.endDate != null) {
-          final endYear = DateTime.tryParse(item.endDate!)?.year;
-          if (endYear != null && endYear != startYear) {
-            yearText = '$startYear-$endYear';
+        // ✅ 对于Series类型，根据EndDate和季数判断
+        if (item.type == 'Series') {
+          if (item.endDate != null && item.endDate!.isNotEmpty) {
+            // ✅ 有EndDate，显示年份范围或单个年份
+            final endYear = DateTime.tryParse(item.endDate!)?.year;
+            if (endYear != null && endYear != startYear) {
+              yearText = '$startYear-$endYear';
+            } else {
+              yearText = '$startYear';
+            }
+          } else {
+            // ✅ 没有EndDate，根据季数判断
+            // ChildCount > 1 表示有多季
+            final hasMultipleSeasons = (item.childCount ?? 0) > 1;
+            if (hasMultipleSeasons) {
+              // ✅ 多季的，显示开始年份-当前年份
+              final currentYear = DateTime.now().year;
+              if (currentYear != startYear) {
+                yearText = '$startYear-$currentYear';
+              } else {
+                yearText = '$startYear';
+              }
+            } else {
+              // ✅ 只有一季的，只显示开始年份
+              yearText = '$startYear';
+            }
+          }
+        } else {
+          // ✅ 非Series类型，使用EndDate判断
+          if (item.endDate != null && item.endDate!.isNotEmpty) {
+            final endYear = DateTime.tryParse(item.endDate!)?.year;
+            if (endYear != null && endYear != startYear) {
+              yearText = '$startYear-$endYear';
+            } else {
+              yearText = '$startYear';
+            }
           } else {
             yearText = '$startYear';
           }
-        } else if (item.type == 'Series') {
-          // 电视剧如果没有结束日期，显示"开始年份-现在"
-          yearText = '$startYear-现在';
-        } else {
-          yearText = '$startYear';
         }
       }
     }

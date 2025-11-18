@@ -18,6 +18,16 @@ class BlurNavigationBar extends StatefulWidget
     this.useDynamicOpacity = false,
     this.blurStart = 10.0,
     this.blurEnd = 200.0,
+    // ✅ 新增参数：tab 相关
+    this.libraryType,
+    this.tabs,
+    this.selectedTab = 0,
+    this.onTabChanged,
+    this.itemCount,
+    this.sortLabel,
+    this.onSortTap,
+    this.sortAscending,
+    this.isSortMenuOpen,
     super.key,
   });
 
@@ -32,11 +42,24 @@ class BlurNavigationBar extends StatefulWidget
   final bool useDynamicOpacity;
   final double blurStart;
   final double blurEnd;
+  // ✅ 新增参数
+  final String? libraryType; // 'Movie' 或 'Series'
+  final List<String>? tabs;
+  final int selectedTab;
+  final ValueChanged<int>? onTabChanged;
+  final int? itemCount;
+  final String? sortLabel;
+  final VoidCallback? onSortTap;
+  final bool? sortAscending; // ✅ 排序方向：true=正序，false=倒序
+  final bool? isSortMenuOpen; // ✅ 排序菜单是否打开
 
   @override
   Size get preferredSize {
-    // 返回一个较大的固定高度，实际高度在 build 中动态计算
-    return const Size.fromHeight(100.0);
+    // ✅ 如果有 tab，增加高度
+    final hasTabs = tabs != null && tabs!.isNotEmpty;
+    final tabHeight = hasTabs ? 36.0 : 0.0; // ✅ tab 高度：从44改为36
+    final infoHeight = hasTabs ? 36.0 : 0.0; // tab 下方信息高度
+    return Size.fromHeight(100.0 + tabHeight + infoHeight);
   }
 
   @override
@@ -159,6 +182,8 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
     final Color currentColor = Color.lerp(expandedColor, collapsedColor,
         widget.enableTransition ? _progress : 1.0)!;
 
+    final hasTabs = widget.tabs != null && widget.tabs!.isNotEmpty;
+
     return ClipRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
@@ -167,22 +192,143 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
           decoration: BoxDecoration(
             color: baseColor.withOpacity(backgroundOpacity),
           ),
-          child: SizedBox(
-            height: 44,
-            child: NavigationToolbar(
-              leading: widget.leading != null
-                  ? _wrapWithColor(widget.leading!, currentColor)
-                  : null,
-              middle: widget.middle != null
-                  ? _wrapWithColor(widget.middle!, currentColor)
-                  : null,
-              trailing: widget.trailing != null
-                  ? _wrapWithColor(widget.trailing!, currentColor)
-                  : null,
-              middleSpacing: 16,
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ✅ 基础导航栏
+              SizedBox(
+                height: 44,
+                child: NavigationToolbar(
+                  leading: widget.leading != null
+                      ? _wrapWithColor(widget.leading!, currentColor)
+                      : null,
+                  middle: widget.middle != null
+                      ? _wrapWithColor(widget.middle!, currentColor)
+                      : null,
+                  trailing: widget.trailing != null
+                      ? _wrapWithColor(widget.trailing!, currentColor)
+                      : null,
+                  middleSpacing: 16,
+                ),
+              ),
+              // ✅ Tab 切换
+              if (hasTabs) ...[
+                SizedBox(
+                  height: 36, // ✅ 调小tab高度：从44改为36
+                  width: double.infinity, // ✅ 让SizedBox占满宽度
+                  child: Align(
+                    alignment: Alignment.centerLeft, // ✅ 让tab整体居左对齐
+                    child: _buildTabBar(context, currentColor),
+                  ),
+                ),
+                // ✅ Tab 下方信息：左侧 x项，右侧排序方式
+                Container(
+                  height: 36,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // 左侧：x项
+                      Text(
+                        widget.itemCount != null
+                            ? '${widget.itemCount}项'
+                            : '',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: currentColor.withOpacity(0.7),
+                        ),
+                      ),
+                      // 右侧：排序方式
+                      if (widget.sortLabel != null && widget.onSortTap != null)
+                        GestureDetector(
+                          onTap: widget.onSortTap,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // ✅ 左侧显示排序icon
+                              Icon(
+                                CupertinoIcons.sort_down,
+                                size: 14,
+                                color: currentColor.withOpacity(0.7),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                widget.sortLabel!,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: currentColor.withOpacity(0.7),
+                                ),
+                              ),
+                              // ✅ 第一个icon：上下箭头，代表当前是正序还是倒序（无间距）
+                              Icon(
+                                widget.sortAscending == true
+                                    ? CupertinoIcons.arrow_up
+                                    : CupertinoIcons.arrow_down,
+                                size: 12,
+                                color: currentColor.withOpacity(0.7),
+                              ),
+                              const SizedBox(width: 4),
+                              // ✅ 第二个icon：倒三角/正三角，代表下拉是否打开
+                              Icon(
+                                widget.isSortMenuOpen == true
+                                    ? CupertinoIcons.chevron_up
+                                    : CupertinoIcons.chevron_down,
+                                size: 12,
+                                color: currentColor.withOpacity(0.7),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
+      ),
+    );
+  }
+
+  // ✅ 构建 Tab 栏
+  Widget _buildTabBar(BuildContext context, Color textColor) {
+    if (widget.tabs == null || widget.tabs!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      // ✅ 保留适当的left padding，让tab有左边距，但整体居左显示
+      padding: const EdgeInsets.only(left: 12, right: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start, // ✅ tab居左显示
+        mainAxisSize: MainAxisSize.min, // ✅ 让Row只占用必要的宽度，确保居左显示
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: List.generate(widget.tabs!.length, (index) {
+          final isSelected = index == widget.selectedTab;
+          return GestureDetector(
+            onTap: () => widget.onTabChanged?.call(index),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), // ✅ 调小垂直padding
+              // ✅ 所有tab都从最左边开始，只有right margin作为tab之间的间距
+              margin: const EdgeInsets.only(right: 8), // ✅ tab之间的间距
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? textColor.withOpacity(0.15)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                widget.tabs![index],
+                style: TextStyle(
+                  fontSize: 13, // ✅ 缩小字体
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: textColor.withOpacity(isSelected ? 1.0 : 0.7),
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }

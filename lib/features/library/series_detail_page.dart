@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
@@ -341,7 +342,10 @@ class _SeasonTile extends ConsumerWidget {
             // 季海报（缩略图）
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: _SeasonThumbnail(seasonId: season.id),
+              child: _SeasonThumbnail(
+                seasonId: season.id,
+                seriesId: seriesId,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -389,20 +393,46 @@ class _SeasonTile extends ConsumerWidget {
   }
 }
 
-class _SeasonThumbnail extends ConsumerWidget {
-  const _SeasonThumbnail({required this.seasonId});
+class _SeasonThumbnail extends ConsumerStatefulWidget {
+  const _SeasonThumbnail({
+    required this.seasonId,
+    required this.seriesId,
+  });
   final String? seasonId;
+  final String seriesId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    if (seasonId == null || seasonId!.isEmpty) {
-      return Container(
-        width: 80,
-        height: 120,
-        color: CupertinoColors.systemGrey4,
-        child: const Center(
-          child: Icon(CupertinoIcons.tv, size: 32),
-        ),
+  ConsumerState<_SeasonThumbnail> createState() => _SeasonThumbnailState();
+}
+
+class _SeasonThumbnailState extends ConsumerState<_SeasonThumbnail> {
+  bool _useFallback = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.seasonId == null || widget.seasonId!.isEmpty) {
+      // 如果没有季ID，直接使用电视剧海报
+      return FutureBuilder(
+        future: EmbyApi.create(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return Container(
+              width: 80,
+              height: 120,
+              color: CupertinoColors.systemGrey4,
+            );
+          }
+          final url = snapshot.data!
+              .buildImageUrl(itemId: widget.seriesId, type: 'Primary', maxWidth: 160);
+          return SizedBox(
+            width: 80,
+            height: 120,
+            child: EmbyFadeInImage(
+              imageUrl: url,
+              fit: BoxFit.cover,
+            ),
+          );
+        },
       );
     }
 
@@ -416,17 +446,139 @@ class _SeasonThumbnail extends ConsumerWidget {
             color: CupertinoColors.systemGrey4,
           );
         }
-        final url = snapshot.data!
-            .buildImageUrl(itemId: seasonId!, type: 'Primary', maxWidth: 160);
+        final api = snapshot.data!;
+        
+        // 如果使用备用图片，显示电视剧海报
+        if (_useFallback) {
+          final fallbackUrl = api.buildImageUrl(
+            itemId: widget.seriesId,
+            type: 'Primary',
+            maxWidth: 160,
+          );
+          return SizedBox(
+            width: 80,
+            height: 120,
+            child: EmbyFadeInImage(
+              imageUrl: fallbackUrl,
+              fit: BoxFit.cover,
+            ),
+          );
+        }
+        
+        // 先尝试加载季图片
+        final seasonUrl = api.buildImageUrl(
+          itemId: widget.seasonId!,
+          type: 'Primary',
+          maxWidth: 160,
+        );
         return SizedBox(
           width: 80,
           height: 120,
-          child: EmbyFadeInImage(
-            imageUrl: url,
-            fit: BoxFit.cover,
+          child: _FallbackImage(
+            primaryUrl: seasonUrl,
+            fallbackUrl: api.buildImageUrl(
+              itemId: widget.seriesId,
+              type: 'Primary',
+              maxWidth: 160,
+            ),
+            onFallback: () {
+              if (mounted) {
+                setState(() {
+                  _useFallback = true;
+                });
+              }
+            },
           ),
         );
       },
     );
+  }
+}
+
+class _FallbackImage extends StatefulWidget {
+  const _FallbackImage({
+    required this.primaryUrl,
+    required this.fallbackUrl,
+    required this.onFallback,
+  });
+
+  final String primaryUrl;
+  final String fallbackUrl;
+  final VoidCallback onFallback;
+
+  @override
+  State<_FallbackImage> createState() => _FallbackImageState();
+}
+
+class _FallbackImageState extends State<_FallbackImage> {
+  bool _useFallback = false;
+  bool _isChecking = true;
+
+  @override
+  Widget build(BuildContext context) {
+    // 如果主图片不存在，使用备用图片
+    if (_useFallback) {
+      return EmbyFadeInImage(
+        imageUrl: widget.fallbackUrl,
+        fit: BoxFit.cover,
+      );
+    }
+
+    // 尝试加载主图片
+    return EmbyFadeInImage(
+      imageUrl: widget.primaryUrl,
+      fit: BoxFit.cover,
+      placeholder: _isChecking ? const SizedBox() : null,
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // 检查主图片是否存在
+    _checkImageExists();
+  }
+
+  Future<void> _checkImageExists() async {
+    try {
+      // 使用 HEAD 请求检查图片是否存在（更高效，不下载完整图片）
+      final response = await http
+          .head(Uri.parse(widget.primaryUrl))
+          .timeout(const Duration(seconds: 3));
+      
+      if (mounted) {
+        if (response.statusCode == 200) {
+          // 图片存在，继续加载主图片
+          setState(() {
+            _isChecking = false;
+          });
+        } else {
+          // 图片不存在（404等），直接使用备用图片
+          setState(() {
+            _useFallback = true;
+            _isChecking = false;
+          });
+          widget.onFallback();
+        }
+      }
+    } catch (e) {
+      // 如果检查失败（超时或网络错误），先尝试加载主图片
+      // 给主图片一些时间加载，如果加载失败会由 EmbyFadeInImage 处理
+      if (mounted) {
+        setState(() {
+          _isChecking = false;
+        });
+        // 等待一段时间，如果主图片加载失败，则切换到备用图片
+        Future.delayed(const Duration(seconds: 4), () {
+          if (mounted && !_useFallback) {
+            // 如果主图片还没加载成功，切换到备用图片
+            setState(() {
+              _useFallback = true;
+            });
+            widget.onFallback();
+          }
+        });
+      }
+    }
   }
 }

@@ -15,16 +15,65 @@ import '../../providers/library_provider.dart';
 
 // 排序选项
 enum SortOption {
-  premiereDate('PremiereDate', '首映日期'),
   dateCreated('DateCreated', '创建日期'),
   communityRating('CommunityRating', '公众评分'),
   name('SortName', '标题'),
+  premiereDate('PremiereDate', '首映日期'),
   officialRating('OfficialRating', '官方分级'),
-  productionYear('ProductionYear', '出品年份');
+  productionYear('ProductionYear', '出品年份'),
+  criticRating('CriticRating', '影评人评分'),
+  datePlayed('DatePlayed', '播放日期'),
+  bitrate('Bitrate', '比特率'),
+  fileName('FileName', '文件名'),
+  runtime('Runtime', '播放时长'),
+  dateModified('DateModified', '更新日期'),
+  dateAdded('DateAdded', '最新上线'),
+  // ✅ 内部使用的字段（不显示在UI中，仅用于API调用）
+  dateLastSaved('DateLastSaved', '更新日期（最后保存）'),
+  dateLastSavedForUser('DateLastSavedForUser', '最新上线（最后保存）');
 
   const SortOption(this.value, this.label);
   final String value;
   final String label;
+  
+  // ✅ 根据libraryType获取排序选项列表
+  static List<SortOption> getSortOptionsForType(String? libraryType) {
+    if (libraryType == 'Movie') {
+      // 电影类型：创建日期、公众评分、标题、首映日期、官方分级、出品年份、影评人评分、播放日期、比特率、文件名、播放时长
+      return [
+        SortOption.dateCreated,
+        SortOption.communityRating,
+        SortOption.name,
+        SortOption.premiereDate,
+        SortOption.officialRating,
+        SortOption.productionYear,
+        SortOption.criticRating,
+        SortOption.datePlayed,
+        SortOption.bitrate,
+        SortOption.fileName,
+        SortOption.runtime,
+      ];
+    } else if (libraryType == 'Series') {
+      // 电视剧类型：更新日期、最新上线、创建日期、公众评分、标题、首映日期、官方分级、出品年份、播放日期、播放时长
+      // 注意：DateModified和DateAdded在内部会尝试使用DateLastSaved和DateLastSavedForUser作为备用
+      return [
+        SortOption.dateModified, // ✅ 更新日期（内部会尝试DateLastSaved）
+        SortOption.dateAdded, // ✅ 最新上线（内部会尝试DateLastSavedForUser）
+        SortOption.dateCreated,
+        SortOption.communityRating,
+        SortOption.name,
+        SortOption.premiereDate,
+        SortOption.officialRating,
+        SortOption.productionYear,
+        SortOption.datePlayed, // ✅ 播放日期
+        SortOption.runtime, // ✅ 播放时长
+        // ✅ 移除不适用于Series的选项：criticRating
+      ];
+    } else {
+      // 默认返回所有选项
+      return SortOption.values;
+    }
+  }
 }
 
 // 排序状态
@@ -98,6 +147,75 @@ class SortStateNotifier extends StateNotifier<SortState> {
   }
 }
 
+// ✅ 筛选状态（用于tab筛选）
+class FilterState {
+  final String? filterType; // 'all', 'resume', 'favorite', 'collection', 'genre'
+  final String? genreId; // 类型ID（当filterType为'genre'时使用）
+
+  const FilterState({
+    this.filterType,
+    this.genreId,
+  });
+
+  FilterState copyWith({
+    String? filterType,
+    String? genreId,
+  }) {
+    return FilterState(
+      filterType: filterType ?? this.filterType,
+      genreId: genreId ?? this.genreId,
+    );
+  }
+}
+
+// ✅ 筛选状态 Provider（每个 viewId 独立，支持持久化）
+final filterStateProvider =
+    StateNotifierProvider.family<FilterStateNotifier, FilterState, String>(
+  (ref, viewId) => FilterStateNotifier(viewId),
+);
+
+class FilterStateNotifier extends StateNotifier<FilterState> {
+  FilterStateNotifier(this.viewId) : super(const FilterState()) {
+    _loadState();
+  }
+
+  final String viewId;
+  static const String _prefsKeyPrefix = 'filter_state_';
+
+  String get _prefsKey => '$_prefsKeyPrefix$viewId';
+
+  Future<void> _loadState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final filterType = prefs.getString('${_prefsKey}_filterType');
+      final genreId = prefs.getString('${_prefsKey}_genreId');
+      if (filterType != null) {
+        state = FilterState(
+          filterType: filterType,
+          genreId: genreId,
+        );
+      }
+    } catch (e) {
+      state = const FilterState();
+    }
+  }
+
+  Future<void> updateState(FilterState newState) async {
+    state = newState;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (newState.filterType != null) {
+        await prefs.setString('${_prefsKey}_filterType', newState.filterType!);
+      }
+      if (newState.genreId != null) {
+        await prefs.setString('${_prefsKey}_genreId', newState.genreId!);
+      }
+    } catch (e) {
+      // 保存失败不影响状态更新
+    }
+  }
+}
+
 final itemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
   ref.watch(libraryRefreshTickerProvider);
@@ -106,14 +224,118 @@ final itemsProvider =
   final auth = authAsync.value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
   final api = await ref.read(embyApiProvider.future);
-  // 对于电视剧库，只获取 Series，不获取单集
-  return api.getItemsByParent(
+  
+  // ✅ 先获取少量数据来判断库类型
+  final sampleItems = await api.getItemsByParent(
     userId: auth.userId!,
     parentId: viewId,
-    includeItemTypes: 'Movie,Series,BoxSet,Video', // 不包含 Episode
-    sortBy: sortState.sortBy.value,
-    sortOrder: sortState.ascending ? 'Ascending' : 'Descending',
+    includeItemTypes: 'Movie,Series,BoxSet,Video',
+    limit: 10,
   );
+  
+  // ✅ 判断库类型
+  String? libraryType;
+  if (sampleItems.isNotEmpty) {
+    final movieCount = sampleItems.where((item) => item.type == 'Movie').length;
+    final seriesCount = sampleItems.where((item) => item.type == 'Series').length;
+    libraryType = movieCount > seriesCount ? 'Movie' : 'Series';
+  }
+  
+  // ✅ 获取适用于当前类型的排序选项列表
+  final availableSortOptions = SortOption.getSortOptionsForType(libraryType);
+  
+  // ✅ 检查当前排序字段是否适用于当前类型，如果不适用则映射或使用默认值
+  String sortBy = sortState.sortBy.value;
+  bool ascending = sortState.ascending;
+  
+  if (!availableSortOptions.contains(sortState.sortBy)) {
+    // ✅ 向后兼容：对于不支持的字段，使用默认值
+    if (libraryType == 'Series') {
+      // ✅ 对于Series，使用默认的更新日期排序
+      sortBy = SortOption.dateModified.value;
+      ascending = false;
+      // ✅ 更新状态以保存新的排序字段
+      ref.read(sortStateProvider(viewId).notifier).updateState(
+        SortState(sortBy: SortOption.dateModified, ascending: false),
+      );
+    } else {
+      // ✅ 对于Movie类型，使用默认值
+      sortBy = SortOption.premiereDate.value;
+      ascending = false;
+    }
+  }
+  
+  // 对于电视剧库，只获取 Series，不获取单集
+  // ✅ 添加错误处理，如果排序字段不支持，依次尝试备用字段
+  if (libraryType == 'Series') {
+    // ✅ 对于Series，根据选择的字段确定备用字段列表
+    List<String> seriesSortFields;
+    if (sortBy == SortOption.dateModified.value) {
+      // ✅ "更新日期"：优先使用DateLastSaved，失败则使用DateModified
+      seriesSortFields = [
+        SortOption.dateLastSaved.value,
+        SortOption.dateModified.value,
+      ];
+    } else if (sortBy == SortOption.dateAdded.value) {
+      // ✅ "最新上线"：优先使用DateLastSavedForUser，失败则使用DateAdded
+      seriesSortFields = [
+        SortOption.dateLastSavedForUser.value,
+        SortOption.dateAdded.value,
+      ];
+    } else {
+      // ✅ 其他字段，直接使用
+      seriesSortFields = [sortBy];
+    }
+    
+    // ✅ 依次尝试排序字段
+    for (final field in seriesSortFields) {
+      try {
+        final items = await api.getItemsByParent(
+          userId: auth.userId!,
+          parentId: viewId,
+          includeItemTypes: 'Movie,Series,BoxSet,Video',
+          sortBy: field,
+          sortOrder: ascending ? 'Ascending' : 'Descending',
+        );
+        
+        return items;
+      } catch (e) {
+        // ✅ 如果当前字段失败，尝试下一个
+        continue;
+      }
+    }
+    
+    // ✅ 如果所有字段都失败，使用DateModified作为最后的后备
+    final items = await api.getItemsByParent(
+      userId: auth.userId!,
+      parentId: viewId,
+      includeItemTypes: 'Movie,Series,BoxSet,Video',
+      sortBy: SortOption.dateModified.value,
+      sortOrder: 'Descending',
+    );
+    
+    return items;
+  } else {
+    // ✅ 对于Movie类型，直接使用选择的排序字段
+    try {
+      return await api.getItemsByParent(
+        userId: auth.userId!,
+        parentId: viewId,
+        includeItemTypes: 'Movie,Series,BoxSet,Video',
+        sortBy: sortBy,
+        sortOrder: ascending ? 'Ascending' : 'Descending',
+      );
+    } catch (e) {
+      // ✅ 如果排序失败，使用PremiereDate作为默认排序
+      return await api.getItemsByParent(
+        userId: auth.userId!,
+        parentId: viewId,
+        includeItemTypes: 'Movie,Series,BoxSet,Video',
+        sortBy: SortOption.premiereDate.value,
+        sortOrder: 'Descending',
+      );
+    }
+  }
 });
 
 class LibraryItemsPage extends ConsumerStatefulWidget {
@@ -132,8 +354,19 @@ class LibraryItemsPage extends ConsumerStatefulWidget {
 
 class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     with RouteAware {
-  final _scrollController = ScrollController();
+  final _scrollController = ScrollController(); // ✅ 用于loading/error状态的BlurNavigationBar
   bool _isRouteSubscribed = false;
+  int _selectedTab = 0; // ✅ 当前选中的 tab
+  late final PageController _pageController; // ✅ PageView控制器
+  final Map<int, ScrollController> _pageScrollControllers = {}; // ✅ 每个页面的ScrollController
+  bool _isSortMenuOpen = false; // ✅ 排序菜单是否打开
+  List<ItemInfo>? _cachedItemsList; // ✅ 缓存itemsList，避免重新加载时闪烁
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: 0);
+  }
 
   bool _hasHorizontalArtwork(ItemInfo item) {
     final hasBackdrop = (item.backdropImageTags?.isNotEmpty ?? false) ||
@@ -227,28 +460,89 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
       _isRouteSubscribed = false;
     }
     _scrollController.dispose();
+    _pageController.dispose(); // ✅ 释放PageController
+    // ✅ 释放所有页面的ScrollController
+    for (final controller in _pageScrollControllers.values) {
+      controller.dispose();
+    }
+    _pageScrollControllers.clear();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final items = ref.watch(itemsProvider(widget.viewId));
-    final sortState = ref.watch(sortStateProvider(widget.viewId));
+  // ✅ 根据类型获取 tab 选项
+  List<String> _getTabsForType(String? libraryType, List<ItemInfo> items) {
+    // 如果没有明确类型，根据 items 判断
+    if (libraryType == null && items.isNotEmpty) {
+      final movieCount = items.where((item) => item.type == 'Movie').length;
+      final seriesCount = items.where((item) => item.type == 'Series').length;
+      libraryType = movieCount > seriesCount ? 'Movie' : 'Series';
+    }
 
-    return CupertinoPageScaffold(
-      backgroundColor: CupertinoColors.systemBackground,
-      navigationBar: BlurNavigationBar(
-        leading: buildBlurBackButton(context),
-        middle: buildNavTitle(widget.viewName, context),
-        trailing: _SortButton(
-          viewId: widget.viewId,
-          sortState: sortState,
-        ),
-        scrollController: _scrollController,
-      ),
-      child: items.when(
-        data: (list) {
-          if (list.isEmpty) {
+    if (libraryType == 'Movie') {
+      return ['影片', '继续播放', '收藏', '合集', '类型'];
+    } else if (libraryType == 'Series') {
+      return ['节目', '继续播放', '收藏','类型',];
+    }
+    // 默认返回电影类型的 tabs
+    return ['显示影片', '继续播放', '收藏', '合集', '类型'];
+  }
+
+  // ✅ 判断库类型
+  String? _getLibraryType(List<ItemInfo> items) {
+    if (items.isEmpty) return null;
+    final movieCount = items.where((item) => item.type == 'Movie').length;
+    final seriesCount = items.where((item) => item.type == 'Series').length;
+    return movieCount > seriesCount ? 'Movie' : 'Series';
+  }
+
+  // ✅ 同步指定页面的ScrollController到BlurNavigationBar
+  // 现在直接使用当前页面的ScrollController，所以这个方法主要用于触发重建
+  void _syncScrollControllerForPage(int pageIndex) {
+    // 触发重建，让BlurNavigationBar使用新的ScrollController
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  // ✅ 根据tab筛选数据
+  List<ItemInfo> _filterItems(List<ItemInfo> items, String tab, String? libraryType, WidgetRef ref) {
+    if (tab == '影片' || tab == '节目') {
+      // 显示所有影片/节目
+      return items;
+    } else if (tab == '继续播放') {
+      // 显示有播放进度的项目
+      return items.where((item) {
+        final userData = item.userData ?? {};
+        final playbackTicks = (userData['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+        final totalTicks = item.runTimeTicks ?? 0;
+        return playbackTicks > 0 && playbackTicks < totalTicks;
+      }).toList();
+    } else if (tab == '收藏') {
+      // 显示收藏的项目
+      return items.where((item) {
+        final userData = item.userData ?? {};
+        return userData['IsFavorite'] == true;
+      }).toList();
+    } else if (tab == '合集') {
+      // 显示合集
+      return items.where((item) => item.type == 'BoxSet').toList();
+    } else if (tab == '类型') {
+      // 显示类型筛选（需要从filterState获取）
+      final filterState = ref.read(filterStateProvider(widget.viewId));
+      if (filterState.genreId != null) {
+        return items.where((item) {
+          final genres = item.genres ?? [];
+          return genres.contains(filterState.genreId);
+        }).toList();
+      }
+      return items;
+    }
+    return items;
+  }
+
+  // ✅ 构建tab内容页面
+  Widget _buildTabContent(BuildContext context, WidgetRef ref, List<ItemInfo> items, String tab, int pageIndex) {
+    if (items.isEmpty) {
             return Center(
               child: Padding(
                 padding: EdgeInsets.only(
@@ -258,25 +552,56 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
               ),
             );
           }
-          final rows = _buildRows(list);
+
+    // ✅ 为每个页面创建独立的ScrollController
+    if (!_pageScrollControllers.containsKey(pageIndex)) {
+      // ✅ 每个tab都从顶部开始，不使用保存的滚动位置
+      final controller = ScrollController(initialScrollOffset: 0.0);
+      _pageScrollControllers[pageIndex] = controller;
+      
+      // ✅ 如果这是当前选中的页面，触发重建以更新BlurNavigationBar
+      if (pageIndex == _selectedTab && mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+      }
+    }
+    final pageScrollController = _pageScrollControllers[pageIndex]!;
+
+    // ✅ 计算header高度
+    // BlurNavigationBar的preferredSize是 100.0 + 36(tab) + 36(信息栏) = 172
+    // 其中100包含了statusBar(44)和基础导航栏(44)，所以实际header高度是172
+    // 由于navigationBar是ObstructingPreferredSizeWidget，内容会自动在下方
+    // 但是我们需要在padding中加上header的实际高度，让内容正确显示在header下方
+    final headerHeight = 100.0 + 36.0 + 36.0; // ✅ BlurNavigationBar的preferredSize（tab高度改为36）
 
           return RefreshIndicator(
             displacement: 20,
-            edgeOffset: MediaQuery.of(context).padding.top + 44,
+            // ✅ 下拉刷新的位置应该在内容的最上面（header下方）
+            // edgeOffset是从屏幕顶部到下拉刷新触发位置的距离
+            // 由于navigationBar是ObstructingPreferredSizeWidget，内容会自动在navigationBar下方
+            // 内容从 statusBarHeight + headerHeight 开始，所以edgeOffset应该是这个值
+            // 下拉刷新会在内容的顶部触发（在padding内部）
+            edgeOffset: headerHeight,
             onRefresh: () async {
               ref.invalidate(itemsProvider(widget.viewId));
               await Future.delayed(const Duration(milliseconds: 500));
             },
             child: ListView.builder(
-              controller: _scrollController,
+              controller: pageScrollController,
+              // ✅ padding顶部需要加上header的完整高度（180），让内容在header下方显示
+              // 减少顶部间距，让内容更靠近筛选行
               padding: EdgeInsets.only(
-                top: MediaQuery.of(context).padding.top + 44 + 12,
+                top: headerHeight + 6, // ✅ 从12改为6，让内容更靠近筛选行
                 left: 12,
                 right: 12,
                 bottom: 12,
               ),
-              itemCount: rows.length,
+        itemCount: _buildRows(items).length,
               itemBuilder: (context, rowIndex) {
+          final rows = _buildRows(items);
                 final row = rows[rowIndex];
                 return Padding(
                   padding: EdgeInsets.only(
@@ -318,8 +643,368 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
               },
             ),
           );
-        },
-        loading: () => Center(
+  }
+
+  // ✅ 显示排序下拉菜单（类似_SortButton的实现）
+  void _showSortMenu(BuildContext context, WidgetRef ref, SortState sortState) {
+    // ✅ 打开菜单时更新状态
+    setState(() {
+      _isSortMenuOpen = true;
+    });
+    
+    // ✅ 获取libraryType，用于确定排序选项列表
+    final itemsAsync = ref.read(itemsProvider(widget.viewId));
+    final itemsList = itemsAsync.valueOrNull ?? _cachedItemsList;
+    final libraryType = itemsList != null ? _getLibraryType(itemsList) : null;
+    final sortOptions = SortOption.getSortOptionsForType(libraryType);
+    
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+    final baseColor = isDark
+        ? const Color(0xFF1C1C1E)
+        : const Color(0xFFF2F2F7);
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final selectedColor = CupertinoColors.activeBlue;
+
+    // 获取按钮位置（从导航栏的排序按钮位置）
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+
+    // 计算菜单位置（右上角）
+    final statusBarHeight = MediaQuery.of(context).padding.top;
+    final menuTop = statusBarHeight + 44 + 36 + 8; // 导航栏 + tab + 信息栏 + 间距
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (dialogContext) => Stack(
+        children: [
+          // 半透明背景
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {
+                Navigator.pop(dialogContext);
+                // ✅ 关闭菜单时更新状态
+                setState(() {
+                  _isSortMenuOpen = false;
+                });
+              },
+              child: Container(
+                color: Colors.black.withOpacity(0.3),
+              ),
+            ),
+          ),
+          // 下拉菜单
+          Positioned(
+            top: menuTop,
+            right: 16,
+            child: Material(
+              color: Colors.transparent,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: Container(
+                    width: 180,
+                    constraints: const BoxConstraints(
+                      maxHeight: 400,
+                    ),
+                    decoration: BoxDecoration(
+                      color: baseColor.withOpacity(0.85),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withOpacity(0.1)
+                            : Colors.black.withOpacity(0.1),
+                        width: 0.5,
+                      ),
+                    ),
+                    child: Builder(
+                      builder: (context) {
+                        // ✅ 创建ScrollController，用于滚动到选中项
+                        final scrollController = ScrollController();
+                        // ✅ 计算每个选项的高度（包括divider）
+                        const itemHeight = 48.0; // Container padding(12*2) + 文本高度约24
+                        const dividerHeight = 1.0;
+                        
+                        // ✅ 找到当前选中项的索引
+                        final selectedIndex = sortOptions.indexWhere(
+                          (option) => option == sortState.sortBy,
+                        );
+                        
+                        // ✅ 在显示后滚动到选中项
+                        if (selectedIndex >= 0) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (scrollController.hasClients) {
+                              final targetOffset = selectedIndex * (itemHeight + dividerHeight);
+                              final maxScroll = scrollController.position.maxScrollExtent;
+                              final viewportHeight = scrollController.position.viewportDimension;
+                              // ✅ 滚动到选中项，让它在视口中间
+                              final scrollOffset = (targetOffset - viewportHeight / 2 + itemHeight / 2)
+                                  .clamp(0.0, maxScroll);
+                              scrollController.animateTo(
+                                scrollOffset,
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOut,
+                              );
+                            }
+                          });
+                        }
+                        
+                        return SingleChildScrollView(
+                          controller: scrollController,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (int i = 0; i < sortOptions.length; i++) ...[
+                                if (i > 0)
+                                  Divider(
+                                    height: 1,
+                                    thickness: 0.5,
+                                    color: isDark
+                                        ? Colors.white.withOpacity(0.1)
+                                        : Colors.black.withOpacity(0.1),
+                                  ),
+                                InkWell(
+                                  onTap: () {
+                                    Navigator.pop(dialogContext);
+                                    // ✅ 关闭菜单时更新状态
+                                    setState(() {
+                                      _isSortMenuOpen = false;
+                                    });
+                                    final notifier = ref.read(sortStateProvider(widget.viewId).notifier);
+                                    final currentState = ref.read(sortStateProvider(widget.viewId));
+                                    if (currentState.sortBy == sortOptions[i]) {
+                                      // 相同选项，切换正序/倒序
+                                      notifier.updateState(
+                                        currentState.copyWith(ascending: !currentState.ascending),
+                                      );
+                                    } else {
+                                      // 不同选项，切换到新选项（默认倒序）
+                                      notifier.updateState(
+                                        SortState(
+                                          sortBy: sortOptions[i],
+                                          ascending: false,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            sortOptions[i].label,
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              color: sortState.sortBy == sortOptions[i]
+                                                  ? selectedColor
+                                                  : textColor,
+                                              fontWeight: sortState.sortBy == sortOptions[i]
+                                                  ? FontWeight.w600
+                                                  : FontWeight.w400,
+                                            ),
+                                          ),
+                                        ),
+                                        if (sortState.sortBy == sortOptions[i]) ...[
+                                          const SizedBox(width: 8),
+                                          Icon(
+                                            sortState.ascending
+                                                ? CupertinoIcons.arrow_up
+                                                : CupertinoIcons.arrow_down,
+                                            size: 14,
+                                            color: selectedColor,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ 构建导航栏（独立方法，避免依赖itemsProvider的变化）
+  ObstructingPreferredSizeWidget _buildNavigationBar(BuildContext context, WidgetRef ref, List<ItemInfo> itemsList, int filteredCount) {
+    final sortState = ref.watch(sortStateProvider(widget.viewId));
+    final libraryType = _getLibraryType(itemsList);
+    final tabs = _getTabsForType(libraryType, itemsList);
+    final sortLabel = sortState.sortBy.label;
+    
+    // ✅ 确保当前页面的ScrollController已创建
+    final currentScrollController = _pageScrollControllers.containsKey(_selectedTab) 
+        ? _pageScrollControllers[_selectedTab]! 
+        : null;
+    
+    return BlurNavigationBar(
+      // ✅ 使用稳定的key，只包含viewId和selectedTab，不包含sortState，避免排序改变时重建
+      key: ValueKey('nav_${widget.viewId}_$_selectedTab'),
+      leading: buildBlurBackButton(context),
+      middle: buildNavTitle(widget.viewName, context),
+      scrollController: currentScrollController,
+      libraryType: libraryType,
+      tabs: tabs,
+      selectedTab: _selectedTab,
+      onTabChanged: (index) {
+        // ✅ 切换tab时，将之前tab的滚动位置归零
+        if (_pageScrollControllers.containsKey(_selectedTab)) {
+          final previousController = _pageScrollControllers[_selectedTab]!;
+          if (previousController.hasClients) {
+            previousController.jumpTo(0.0);
+          }
+        }
+        
+        setState(() {
+          _selectedTab = index;
+        });
+        
+        // ✅ 同步PageView
+        if (_pageController.hasClients) {
+          _pageController.animateToPage(
+            index,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+        }
+        
+        // ✅ 确保新tab的ScrollController已创建并触发重建
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _syncScrollControllerForPage(index);
+          }
+        });
+      },
+      itemCount: filteredCount,
+      sortLabel: sortLabel,
+      sortAscending: sortState.ascending,
+      isSortMenuOpen: _isSortMenuOpen,
+      onSortTap: () {
+        _showSortMenu(context, ref, sortState);
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = ref.watch(itemsProvider(widget.viewId));
+
+    // ✅ 使用valueOrNull来获取当前值，如果有值就使用，避免loading状态导致的闪烁
+    // 当sortState改变时，itemsProvider会重新获取数据，但valueOrNull会保留之前的值
+    final itemsList = items.valueOrNull;
+    
+    // ✅ 如果有新数据，更新缓存；如果没有新数据但缓存存在，使用缓存
+    if (itemsList != null) {
+      _cachedItemsList = itemsList;
+    }
+    
+    // ✅ 使用缓存的数据（如果有），避免重新加载时闪烁
+    final displayItemsList = itemsList ?? _cachedItemsList;
+    
+    // ✅ 如果有数据，直接显示；如果没有数据且正在加载，显示loading；如果出错，显示错误
+    if (displayItemsList != null) {
+      final libraryType = _getLibraryType(displayItemsList);
+      final tabs = _getTabsForType(libraryType, displayItemsList);
+
+      // ✅ 根据当前tab筛选数据
+      final filteredItems = _filterItems(displayItemsList, tabs[_selectedTab], libraryType, ref);
+      final filteredCount = filteredItems.length;
+      
+      return CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.systemBackground,
+        navigationBar: _buildNavigationBar(context, ref, displayItemsList, filteredCount),
+        child: PageView.builder(
+          controller: _pageController,
+          onPageChanged: (index) {
+            // ✅ 切换页面时，将之前页面的滚动位置归零
+            if (_pageScrollControllers.containsKey(_selectedTab)) {
+              final previousController = _pageScrollControllers[_selectedTab]!;
+              if (previousController.hasClients) {
+                previousController.jumpTo(0.0);
+              }
+            }
+            
+            setState(() {
+              _selectedTab = index;
+            });
+            
+            // ✅ 确保新页面的ScrollController已创建并触发重建
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _syncScrollControllerForPage(index);
+              }
+            });
+          },
+          itemCount: tabs.length,
+          itemBuilder: (context, pageIndex) {
+            // ✅ 根据tab筛选数据
+            final pageItems = _filterItems(displayItemsList, tabs[pageIndex], libraryType, ref);
+            return _buildTabContent(context, ref, pageItems, tabs[pageIndex], pageIndex);
+          },
+        ),
+      );
+    }
+    
+    // ✅ 如果没有数据，显示loading或error
+    return items.when(
+      data: (itemsList) {
+        // 这个分支理论上不会执行，因为上面已经处理了
+        final libraryType = _getLibraryType(itemsList);
+        final tabs = _getTabsForType(libraryType, itemsList);
+        final filteredItems = _filterItems(itemsList, tabs[_selectedTab], libraryType, ref);
+        final filteredCount = filteredItems.length;
+        return CupertinoPageScaffold(
+          backgroundColor: CupertinoColors.systemBackground,
+          navigationBar: _buildNavigationBar(context, ref, itemsList, filteredCount),
+          child: PageView.builder(
+            controller: _pageController,
+            onPageChanged: (index) {
+              if (_pageScrollControllers.containsKey(_selectedTab)) {
+                final previousController = _pageScrollControllers[_selectedTab]!;
+                if (previousController.hasClients) {
+                  previousController.jumpTo(0.0);
+                }
+              }
+              setState(() {
+                _selectedTab = index;
+              });
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  _syncScrollControllerForPage(index);
+                }
+              });
+            },
+            itemCount: tabs.length,
+            itemBuilder: (context, pageIndex) {
+              final pageItems = _filterItems(itemsList, tabs[pageIndex], libraryType, ref);
+              return _buildTabContent(context, ref, pageItems, tabs[pageIndex], pageIndex);
+            },
+          ),
+        );
+      },
+      loading: () => CupertinoPageScaffold(
+          backgroundColor: CupertinoColors.systemBackground,
+          navigationBar: BlurNavigationBar(
+            leading: buildBlurBackButton(context),
+            middle: buildNavTitle(widget.viewName, context),
+            scrollController: _scrollController,
+          ),
+          child: Center(
           child: Padding(
             padding: EdgeInsets.only(
               top: MediaQuery.of(context).padding.top + 44,
@@ -327,7 +1012,15 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             child: const CupertinoActivityIndicator(),
           ),
         ),
-        error: (e, _) => Center(
+        ),
+        error: (e, _) => CupertinoPageScaffold(
+          backgroundColor: CupertinoColors.systemBackground,
+          navigationBar: BlurNavigationBar(
+            leading: buildBlurBackButton(context),
+            middle: buildNavTitle(widget.viewName, context),
+            scrollController: _scrollController,
+          ),
+          child: Center(
           child: Padding(
             padding: EdgeInsets.only(
               top: MediaQuery.of(context).padding.top + 44,
@@ -367,22 +1060,50 @@ class _ItemTileState extends ConsumerState<_ItemTile>
     final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = brightness == Brightness.dark;
 
-    // 提取年份信息（与首页逻辑一致）
+    // 提取年份信息
     String? yearText;
     if (item.premiereDate != null && item.premiereDate!.isNotEmpty) {
       final startYear = int.tryParse(item.premiereDate!.substring(0, 4));
       if (startYear != null) {
-        if (item.endDate != null && item.endDate!.isNotEmpty) {
-          final endYear = int.tryParse(item.endDate!.substring(0, 4));
-          if (endYear != null && endYear != startYear) {
-            yearText = '$startYear-$endYear';
+        // ✅ 对于Series类型，根据EndDate和季数判断
+        if (item.type == 'Series') {
+          if (item.endDate != null && item.endDate!.isNotEmpty) {
+            // ✅ 有EndDate，显示年份范围或单个年份
+            final endYear = int.tryParse(item.endDate!.substring(0, 4));
+            if (endYear != null && endYear != startYear) {
+              yearText = '$startYear-$endYear';
+            } else {
+              yearText = '$startYear';
+            }
+          } else {
+            // ✅ 没有EndDate，根据季数判断
+            // ChildCount > 1 表示有多季
+            final hasMultipleSeasons = (item.childCount ?? 0) > 1;
+            if (hasMultipleSeasons) {
+              // ✅ 多季的，显示开始年份-当前年份
+              final currentYear = DateTime.now().year;
+              if (currentYear != startYear) {
+                yearText = '$startYear-$currentYear';
+              } else {
+                yearText = '$startYear';
+              }
+            } else {
+              // ✅ 只有一季的，只显示开始年份
+              yearText = '$startYear';
+            }
+          }
+        } else {
+          // ✅ 非Series类型，使用EndDate判断
+          if (item.endDate != null && item.endDate!.isNotEmpty) {
+            final endYear = int.tryParse(item.endDate!.substring(0, 4));
+            if (endYear != null && endYear != startYear) {
+              yearText = '$startYear-$endYear';
+            } else {
+              yearText = '$startYear';
+            }
           } else {
             yearText = '$startYear';
           }
-        } else if (item.type == 'Series') {
-          yearText = '$startYear-现在';
-        } else {
-          yearText = '$startYear';
         }
       }
     } else if (item.productionYear != null) {
@@ -495,18 +1216,18 @@ class _ItemTileState extends ConsumerState<_ItemTile>
           // 如果不是16:9的，使用AspectRatio固定宽高比
           widget.hasHorizontalArtwork
               ? AspectRatio(
-                  aspectRatio: aspectRatio,
-                  child: Container(
-                    width: widget.cardWidth,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          _Poster(itemId: item.id, itemType: item.type),
+            aspectRatio: aspectRatio,
+            child: Container(
+              width: widget.cardWidth,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _Poster(itemId: item.id, itemType: item.type),
                     // 电影播放完成标记
                     if (item.type == 'Movie' && played)
                       Positioned(
@@ -759,29 +1480,29 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                                                 .withValues(alpha: 0.2),
                                             valueColor:
                                                 AlwaysStoppedAnimation<Color>(
-                                              const Color(0xFFFFB74D)
-                                                  .withValues(alpha: 0.95),
-                                            ),
-                                          );
-                                        },
+                                        const Color(0xFFFFB74D)
+                                            .withValues(alpha: 0.95),
                                       ),
-                                    ),
-                                  ],
+                                    );
+                                  },
                                 ),
                               ),
-                            ),
-                          // 当没有进度条时仍显示评分
-                          if (!showProgress && ratingChip != null)
-                            Positioned(
-                              bottom: 4,
-                              right: 4,
-                              child: ratingChip,
-                            ),
-                        ],
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
+                    // 当没有进度条时仍显示评分
+                    if (!showProgress && ratingChip != null)
+                      Positioned(
+                        bottom: 4,
+                        right: 4,
+                        child: ratingChip,
+                      ),
+                  ],
                 ),
+              ),
+            ),
+          ),
           const SizedBox(height: 6),
           Text(
             item.name,
@@ -875,195 +1596,4 @@ class _RowEntry {
 
   final ItemInfo item;
   final bool hasHorizontalArtwork;
-}
-
-// 排序按钮组件
-class _SortButton extends ConsumerWidget {
-  const _SortButton({
-    required this.viewId,
-    required this.sortState,
-  });
-
-  final String viewId;
-  final SortState sortState;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
-
-    return GestureDetector(
-      onTap: () => _showSortMenu(context, ref),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withOpacity(0.15)
-              : Colors.black.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              CupertinoIcons.sort_down,
-              size: 16,
-              color: isDark ? Colors.white : Colors.black87,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              sortState.sortBy.label,
-              style: TextStyle(
-                fontSize: 13,
-                color: isDark ? Colors.white : Colors.black87,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Icon(
-              sortState.ascending
-                  ? CupertinoIcons.arrow_up
-                  : CupertinoIcons.arrow_down,
-              size: 12,
-              color: isDark ? Colors.white70 : Colors.black54,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showSortMenu(BuildContext context, WidgetRef ref) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
-    final baseColor = isDark
-        ? const Color(0xFF1C1C1E)
-        : const Color(0xFFF2F2F7);
-    final textColor = isDark ? Colors.white : Colors.black87;
-    final selectedColor = CupertinoColors.activeBlue;
-
-    // 获取按钮位置
-    final RenderBox? buttonBox = context.findRenderObject() as RenderBox?;
-    final RenderBox? overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (buttonBox == null || overlay == null) return;
-
-    final buttonPosition = buttonBox.localToGlobal(Offset.zero);
-    final buttonSize = buttonBox.size;
-
-    showDialog(
-      context: context,
-      barrierColor: Colors.transparent,
-      builder: (dialogContext) => Stack(
-        children: [
-          // 半透明背景
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: () => Navigator.pop(dialogContext),
-              child: Container(
-                color: Colors.black.withOpacity(0.3),
-              ),
-            ),
-          ),
-          // 下拉菜单
-          Positioned(
-            top: buttonPosition.dy + buttonSize.height + 8,
-            right: MediaQuery.of(context).size.width - buttonPosition.dx - buttonSize.width,
-            child: Material(
-              color: Colors.transparent,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    width: 180,
-                    constraints: const BoxConstraints(
-                      maxHeight: 400,
-                    ),
-                    decoration: BoxDecoration(
-                      color: baseColor.withOpacity(0.85),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isDark
-                            ? Colors.white.withOpacity(0.1)
-                            : Colors.black.withOpacity(0.1),
-                        width: 0.5,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (int i = 0; i < SortOption.values.length; i++) ...[
-                          if (i > 0)
-                            Divider(
-                              height: 1,
-                              thickness: 0.5,
-                              color: isDark
-                                  ? Colors.white.withOpacity(0.1)
-                                  : Colors.black.withOpacity(0.1),
-                            ),
-                          InkWell(
-                            onTap: () {
-                              Navigator.pop(dialogContext);
-                              final notifier = ref.read(sortStateProvider(viewId).notifier);
-                              final currentState = ref.read(sortStateProvider(viewId));
-                              if (currentState.sortBy == SortOption.values[i]) {
-                                // 相同选项，切换正序/倒序
-                                notifier.updateState(
-                                  currentState.copyWith(ascending: !currentState.ascending),
-                                );
-                              } else {
-                                // 不同选项，切换到新选项（默认倒序）
-                                notifier.updateState(
-                                  SortState(sortBy: SortOption.values[i], ascending: false),
-                                );
-                              }
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 12,
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      SortOption.values[i].label,
-                                      style: TextStyle(
-                                        color: sortState.sortBy == SortOption.values[i]
-                                            ? selectedColor
-                                            : textColor,
-                                        fontSize: 15,
-                                        fontWeight: sortState.sortBy == SortOption.values[i]
-                                            ? FontWeight.w600
-                                            : FontWeight.normal,
-                                      ),
-                                    ),
-                                  ),
-                                  if (sortState.sortBy == SortOption.values[i]) ...[
-                                    const SizedBox(width: 8),
-                                    Icon(
-                                      sortState.ascending
-                                          ? CupertinoIcons.arrow_up
-                                          : CupertinoIcons.arrow_down,
-                                      size: 14,
-                                      color: selectedColor,
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

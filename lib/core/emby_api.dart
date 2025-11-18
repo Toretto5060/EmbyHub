@@ -222,12 +222,123 @@ class EmbyApi {
       // Latest API returns an array directly, not wrapped in Items
       if (res.data is List) {
         final list = (res.data as List).cast<Map<String, dynamic>>();
+        // ✅ 处理Series合并逻辑
+        _processMergedSeries(list);
         return list.map((e) => ItemInfo.fromJson(e)).toList();
       }
       return [];
     } catch (e) {
       _apiLog('getLatestItems error: $e');
       return [];
+    }
+  }
+
+  // ✅ 提取基础Series名称（去除数字后缀，如"地球脉动 3" -> "地球脉动"）
+  static String _extractBaseSeriesName(String name) {
+    // 匹配模式：名称 + 空格 + 数字（如"地球脉动 3"、"Planet Earth 2"）
+    final regex = RegExp(r'^(.+?)\s+(\d+)$');
+    final match = regex.firstMatch(name.trim());
+    if (match != null) {
+      return match.group(1)!.trim();
+    }
+    return name.trim();
+  }
+
+  // ✅ 处理Series合并逻辑（过滤重复Series并累加未观看集数）
+  static void _processMergedSeries(List<Map<String, dynamic>> list) {
+    // ✅ 检测可能的重复Series（如"地球脉动"和"地球脉动 3"）
+    final seriesJsonList = list.where((item) => item['Type'] == 'Series').toList();
+    final seriesNames = <String, List<Map<String, dynamic>>>{};
+    for (final json in seriesJsonList) {
+      final name = json['Name'] as String? ?? '';
+      if (name.isEmpty) continue;
+      
+      // ✅ 提取基础名称（去除数字后缀，如"地球脉动 3" -> "地球脉动"）
+      final baseName = _extractBaseSeriesName(name);
+      if (!seriesNames.containsKey(baseName)) {
+        seriesNames[baseName] = [];
+      }
+      seriesNames[baseName]!.add(json);
+    }
+    
+    // ✅ 识别应该被过滤的Series（那些应该是季但被识别为独立Series的项目）
+    final itemsToFilter = <String>{};
+    // ✅ 记录需要更新UnplayedItemCount的基础Series
+    final baseSeriesToUpdate = <String, int>{}; // baseSeriesId -> 需要累加的未观看集数
+    
+    for (final entry in seriesNames.entries) {
+      if (entry.value.length > 1) {
+        // ✅ 找出基础名称的Series（没有数字后缀）
+        Map<String, dynamic>? baseSeries;
+        final numberedSeries = <Map<String, dynamic>>[];
+        
+        for (final json in entry.value) {
+          final name = json['Name'] as String? ?? '';
+          final baseName = _extractBaseSeriesName(name);
+          if (name == baseName) {
+            // ✅ 这是基础名称的Series
+            baseSeries = json;
+          } else {
+            // ✅ 这是带数字后缀的Series
+            numberedSeries.add(json);
+          }
+        }
+        
+        // ✅ 如果找到了基础Series且有ChildCount，则过滤掉带数字后缀的Series
+        if (baseSeries != null && numberedSeries.isNotEmpty) {
+          final baseChildCount = baseSeries['ChildCount'] as int? ?? 0;
+          if (baseChildCount > 0) {
+            final baseSeriesId = baseSeries['Id'] as String? ?? '';
+            int totalUnplayedFromMerged = 0;
+            
+            // ✅ 计算合并进来的Series的未观看集数总和
+            for (final json in numberedSeries) {
+              final id = json['Id'] as String? ?? '';
+              itemsToFilter.add(id);
+              
+              // ✅ 获取该Series的未观看集数
+              final userData = json['UserData'] as Map<String, dynamic>?;
+              if (userData != null) {
+                final unplayedCount = (userData['UnplayedItemCount'] as num?)?.toInt() ?? 0;
+                if (unplayedCount > 0) {
+                  totalUnplayedFromMerged += unplayedCount;
+                }
+              }
+            }
+            
+            // ✅ 如果有未观看集数需要累加，记录到baseSeriesToUpdate
+            if (totalUnplayedFromMerged > 0 && baseSeriesId.isNotEmpty) {
+              baseSeriesToUpdate[baseSeriesId] = totalUnplayedFromMerged;
+            }
+          }
+        }
+      }
+    }
+    
+    // ✅ 更新基础Series的UnplayedItemCount
+    if (baseSeriesToUpdate.isNotEmpty) {
+      for (final item in list) {
+        final id = item['Id'] as String? ?? '';
+        if (baseSeriesToUpdate.containsKey(id)) {
+          final additionalUnplayed = baseSeriesToUpdate[id]!;
+          // ✅ 确保UserData存在
+          if (item['UserData'] == null) {
+            item['UserData'] = <String, dynamic>{};
+          }
+          final userData = item['UserData'] as Map<String, dynamic>;
+          final currentUnplayed = (userData['UnplayedItemCount'] as num?)?.toInt() ?? 0;
+          final newUnplayed = currentUnplayed + additionalUnplayed;
+          userData['UnplayedItemCount'] = newUnplayed;
+        }
+      }
+    }
+    
+    // ✅ 过滤掉应该被移除的Series
+    if (itemsToFilter.isNotEmpty) {
+      list.removeWhere((item) {
+        final id = item['Id'] as String? ?? '';
+        return itemsToFilter.contains(id);
+      });
     }
   }
 
@@ -245,7 +356,7 @@ class EmbyApi {
       'Limit': limit,
       'Recursive': true,
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag,DateLastSaved,DateLastSavedForUser,DateModified,DateAdded,UserData',
     };
 
     // 如果指定了类型，使用指定的；否则使用默认的
@@ -266,6 +377,10 @@ class EmbyApi {
     final res =
         await _dio.get('/Users/$userId/Items', queryParameters: queryParams);
     final list = (res.data['Items'] as List).cast<Map<String, dynamic>>();
+    
+    // ✅ 处理Series合并逻辑
+    _processMergedSeries(list);
+    
     return list.map((e) => ItemInfo.fromJson(e)).toList();
   }
 
@@ -453,10 +568,16 @@ class EmbyApi {
   }) async {
     try {
       _apiLog('getSeasons: userId=$userId, seriesId=$seriesId');
+      
+      // ✅ 先获取Series的详细信息（包括名称）
+      final seriesInfo = await getItem(userId, seriesId);
+      final seriesName = seriesInfo.name;
+      
+      // ✅ 获取正常季列表
       final res = await _dio.get('/Shows/$seriesId/Seasons', queryParameters: {
         'UserId': userId,
         'Fields':
-            'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+            'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,UserData',
       });
       _apiLog('getSeasons response: ${res.data}');
 
@@ -478,7 +599,238 @@ class EmbyApi {
 
       final list = items.cast<Map<String, dynamic>>();
       _apiLog('getSeasons: Found ${list.length} seasons');
-      return list.map((e) => ItemInfo.fromJson(e)).toList();
+      
+      // ✅ 统一格式化所有季的名称为"第x季"格式（无空格）
+      final seasons = list.map((e) {
+        final seasonItem = ItemInfo.fromJson(e);
+        final originalName = seasonItem.name.trim();
+        int? seasonNumber;
+        
+        // ✅ 优先从名称中提取数字（更准确）
+        // 支持格式：第x季、第 x 季、季 x、季x、Season x、Sx等
+        // ⚠️ 只提取阿拉伯数字，不提取中文数字（一二三）
+        final seasonNamePatterns = [
+          RegExp(r'第\s*(\d+)\s*季'),           // 第1季、第 1 季（只匹配阿拉伯数字）
+          RegExp(r'季\s*(\d+)', caseSensitive: false),  // 季 1、季1（只匹配阿拉伯数字）
+          RegExp(r'Season\s*(\d+)', caseSensitive: false), // Season 1（只匹配阿拉伯数字）
+          RegExp(r'\bS(\d+)\b', caseSensitive: false),  // S1、S01（只匹配阿拉伯数字）
+        ];
+        
+        for (final pattern in seasonNamePatterns) {
+          final match = pattern.firstMatch(originalName);
+          if (match != null) {
+            // ✅ 确保提取的是阿拉伯数字（\d+只匹配0-9）
+            final numStr = match.group(1)!;
+            final num = int.tryParse(numStr);
+            // ✅ 允许提取 0（S0 特辑）和正数
+            if (num != null && num >= 0) {
+              seasonNumber = num;
+              break;
+            }
+          }
+        }
+        
+        // ✅ 如果从名称中无法提取，且parentIndexNumber有效，使用parentIndexNumber
+        // ⚠️ 但只有当名称看起来像季名称时才使用（避免"三叉戟"这样的名称被误格式化）
+        // ✅ 允许 parentIndexNumber 为 0（特辑）
+        if (seasonNumber == null && seasonItem.parentIndexNumber != null && seasonItem.parentIndexNumber! >= 0) {
+          // ✅ 检查名称是否包含季相关的关键词（必须包含）
+          final hasSeasonKeyword = RegExp(r'(季|Season|S\d+)', caseSensitive: false).hasMatch(originalName);
+          // ✅ 或者名称本身就是纯数字（如"0"、"1"、"2"等）
+          final isPureNumber = RegExp(r'^\d+$').hasMatch(originalName);
+          if (hasSeasonKeyword || isPureNumber) {
+            seasonNumber = seasonItem.parentIndexNumber;
+          }
+        }
+        
+        // ✅ 格式化名称为"第x季"或"特辑"（无空格）
+        // ⚠️ 只有当成功提取到数字时才格式化，否则保持原名
+        final formattedSeasonName = seasonNumber != null 
+            ? (seasonNumber == 0 ? '特辑' : '第$seasonNumber季')
+            : originalName; // 如果无法提取数字，保持原名
+        
+        // ✅ 如果名称有变化，创建新的ItemInfo
+        if (formattedSeasonName != originalName || seasonNumber != seasonItem.parentIndexNumber) {
+          return ItemInfo(
+            id: seasonItem.id,
+            name: formattedSeasonName,
+            type: seasonItem.type,
+            overview: seasonItem.overview,
+            runTimeTicks: seasonItem.runTimeTicks,
+            userData: seasonItem.userData,
+            seriesName: seasonItem.seriesName,
+            parentIndexNumber: seasonNumber ?? seasonItem.parentIndexNumber,
+            indexNumber: seasonItem.indexNumber,
+            seriesId: seasonItem.seriesId,
+            seasonId: seasonItem.seasonId,
+            seriesPrimaryImageTag: seasonItem.seriesPrimaryImageTag,
+            seasonPrimaryImageTag: seasonItem.seasonPrimaryImageTag,
+            imageTags: seasonItem.imageTags,
+            backdropImageTags: seasonItem.backdropImageTags,
+            parentThumbItemId: seasonItem.parentThumbItemId,
+            parentThumbImageTag: seasonItem.parentThumbImageTag,
+            parentBackdropItemId: seasonItem.parentBackdropItemId,
+            parentBackdropImageTags: seasonItem.parentBackdropImageTags,
+            genres: seasonItem.genres,
+            mediaSources: seasonItem.mediaSources,
+            performers: seasonItem.performers,
+            externalUrls: seasonItem.externalUrls,
+            premiereDate: seasonItem.premiereDate,
+            endDate: seasonItem.endDate,
+            productionYear: seasonItem.productionYear,
+            communityRating: seasonItem.communityRating,
+            childCount: seasonItem.childCount,
+            providerIds: seasonItem.providerIds,
+            dateCreated: seasonItem.dateCreated,
+            status: seasonItem.status,
+          );
+        }
+        
+        return seasonItem;
+      }).toList();
+      
+      // ✅ 尝试补充被识别为独立Series但应该是季的项目
+      try {
+        // ✅ 获取Series的ParentId（从Series信息中获取）
+        final seriesDetailRes = await _dio.get('/Users/$userId/Items/$seriesId', queryParameters: {
+          'Fields': 'ParentId',
+        });
+        final seriesParentId = seriesDetailRes.data['ParentId'] as String?;
+        
+        if (seriesParentId != null) {
+          // ✅ 获取同一个ParentId下的所有Series
+          final allSeriesRes = await _dio.get('/Users/$userId/Items', queryParameters: {
+            'ParentId': seriesParentId,
+            'IncludeItemTypes': 'Series',
+            'Recursive': true,
+            'Fields': 'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,UserData',
+          });
+          
+          final allSeriesList = (allSeriesRes.data['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+          
+          // ✅ 查找应该是这个Series的季的项目
+          for (final seriesJson in allSeriesList) {
+            final name = seriesJson['Name'] as String? ?? '';
+            final id = seriesJson['Id'] as String? ?? '';
+            
+            // ✅ 跳过当前Series本身
+            if (id == seriesId) continue;
+            
+            // ✅ 检查名称是否匹配"Series名称 + 数字"的模式
+            final baseName = _extractBaseSeriesName(name);
+            if (baseName == seriesName && name != seriesName) {
+              // ✅ 这是一个应该作为季的Series
+              
+              // ✅ 检查是否已经在季列表中
+              final alreadyInSeasons = seasons.any((season) => season.id == id);
+              if (!alreadyInSeasons) {
+                // ✅ 提取季数字（从名称中提取，如"地球脉动 3" -> "3"）
+                // 只匹配"名称 + 空格 + 数字"的模式，避免误匹配
+                final regex = RegExp(r'^(.+?)\s+(\d+)$');
+                final match = regex.firstMatch(name.trim());
+                final seasonNumberStr = match?.group(2);
+                int? seasonNumber;
+                
+                if (seasonNumberStr != null) {
+                  seasonNumber = int.tryParse(seasonNumberStr);
+                  // ✅ 验证数字合理性（0-100之间，0表示特辑）
+                  if (seasonNumber != null && (seasonNumber < 0 || seasonNumber > 100)) {
+                    seasonNumber = null;
+                  }
+                }
+                
+                // ✅ 创建ItemInfo并修改名称为"第X季"或"特辑"格式
+                final seasonItem = ItemInfo.fromJson(seriesJson);
+                final formattedSeasonName = seasonNumber != null 
+                    ? (seasonNumber == 0 ? '特辑' : '第$seasonNumber季')
+                    : name;
+                
+                // ✅ 确保UserData存在，如果不存在则创建
+                Map<String, dynamic>? userData = seasonItem.userData;
+                if (userData == null) {
+                  userData = {};
+                }
+                
+                // ✅ 如果UserData中没有UnplayedItemCount或为0，尝试从该Series的所有集中计算
+                final unplayedCount = (userData['UnplayedItemCount'] as num?)?.toInt() ?? 0;
+                if (unplayedCount == 0) {
+                  try {
+                    // ✅ 获取该Series的所有集来计算未观看集数
+                    final episodesRes = await _dio.get('/Shows/$id/Episodes', queryParameters: {
+                      'UserId': userId,
+                      'Fields': 'UserData',
+                    });
+                    if (episodesRes.data is Map<String, dynamic>) {
+                      final episodes = episodesRes.data['Items'] as List?;
+                      if (episodes != null) {
+                        int calculatedUnplayed = 0;
+                        for (final episode in episodes) {
+                          final episodeUserData = episode['UserData'] as Map<String, dynamic>?;
+                          if (episodeUserData != null) {
+                            final played = episodeUserData['Played'] as bool? ?? false;
+                            if (!played) {
+                              calculatedUnplayed++;
+                            }
+                          }
+                        }
+                        if (calculatedUnplayed > 0) {
+                          userData = Map<String, dynamic>.from(userData);
+                          userData['UnplayedItemCount'] = calculatedUnplayed;
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    // ✅ 如果计算失败，使用原有的UserData
+                    _apiLog('getSeasons: Failed to calculate UnplayedItemCount for $id: $e');
+                  }
+                }
+                
+                // ✅ 创建一个新的ItemInfo，使用格式化后的名称和更新后的UserData
+                final modifiedSeasonItem = ItemInfo(
+                  id: seasonItem.id,
+                  name: formattedSeasonName,
+                  type: seasonItem.type,
+                  overview: seasonItem.overview,
+                  runTimeTicks: seasonItem.runTimeTicks,
+                  userData: userData,
+                  seriesName: seasonItem.seriesName,
+                  parentIndexNumber: seasonNumber,
+                  indexNumber: seasonItem.indexNumber,
+                  seriesId: seasonItem.seriesId,
+                  seasonId: seasonItem.seasonId,
+                  seriesPrimaryImageTag: seasonItem.seriesPrimaryImageTag,
+                  seasonPrimaryImageTag: seasonItem.seasonPrimaryImageTag,
+                  imageTags: seasonItem.imageTags,
+                  backdropImageTags: seasonItem.backdropImageTags,
+                  parentThumbItemId: seasonItem.parentThumbItemId,
+                  parentThumbImageTag: seasonItem.parentThumbImageTag,
+                  parentBackdropItemId: seasonItem.parentBackdropItemId,
+                  parentBackdropImageTags: seasonItem.parentBackdropImageTags,
+                  genres: seasonItem.genres,
+                  mediaSources: seasonItem.mediaSources,
+                  performers: seasonItem.performers,
+                  externalUrls: seasonItem.externalUrls,
+                  premiereDate: seasonItem.premiereDate,
+                  endDate: seasonItem.endDate,
+                  productionYear: seasonItem.productionYear,
+                  communityRating: seasonItem.communityRating,
+                  childCount: seasonItem.childCount,
+                  providerIds: seasonItem.providerIds,
+                  dateCreated: seasonItem.dateCreated,
+                  status: seasonItem.status,
+                );
+                
+                seasons.add(modifiedSeasonItem);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // ✅ 如果补充失败，不影响正常返回
+        _apiLog('getSeasons: Failed to supplement seasons: $e');
+      }
+      
+      return seasons;
     } catch (e, stack) {
       _apiLog('getSeasons error: $e');
       _apiLog('Stack trace: $stack');
@@ -495,6 +847,50 @@ class EmbyApi {
     try {
       _apiLog(
           'getEpisodes: userId=$userId, seriesId=$seriesId, seasonId=$seasonId');
+      
+      // ✅ 先检查seasonId是否实际上是一个Series（被误识别为独立Series的季）
+      try {
+        final seasonItemRes = await _dio.get('/Users/$userId/Items/$seasonId', queryParameters: {
+          'Fields': 'Type',
+        });
+        final seasonType = seasonItemRes.data['Type'] as String?;
+        
+        // ✅ 如果seasonId是一个Series类型，使用不同的API获取集信息
+        if (seasonType == 'Series') {
+          // ✅ 使用seasonId作为seriesId来获取集（因为这个"季"实际上是一个独立的Series）
+          final res = await _dio.get('/Shows/$seasonId/Episodes', queryParameters: {
+            'UserId': userId,
+            'Fields':
+                'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+          });
+          _apiLog('getEpisodes (Series mode) response: ${res.data}');
+
+          if (res.data is! Map<String, dynamic>) {
+            _apiLog('getEpisodes: Response is not a Map');
+            return [];
+          }
+
+          final items = res.data['Items'];
+          if (items == null) {
+            _apiLog('getEpisodes: No Items field in response');
+            return [];
+          }
+
+          if (items is! List) {
+            _apiLog('getEpisodes: Items is not a List');
+            return [];
+          }
+
+          final list = items.cast<Map<String, dynamic>>();
+          _apiLog('getEpisodes: Found ${list.length} episodes');
+          return list.map((e) => ItemInfo.fromJson(e)).toList();
+        }
+      } catch (e) {
+        // ✅ 如果检查失败，继续使用原来的逻辑
+        _apiLog('getEpisodes: Failed to check season type, using default logic: $e');
+      }
+      
+      // ✅ 正常的季获取逻辑
       final res = await _dio.get('/Shows/$seriesId/Episodes', queryParameters: {
         'UserId': userId,
         'SeasonId': seasonId,
@@ -632,13 +1028,6 @@ class EmbyApi {
     if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
       urls.add(
           '$baseUrl/Items/$itemId/Subtitles/$subtitleStreamIndex/Stream.$format?MediaSourceId=$mediaSourceId&api_key=$token');
-    }
-
-    print('🔥🔥🔥 [API] Generated ${urls.length} subtitle URL variants');
-    print(
-        '🔥 [API] itemId: $itemId, subtitleStreamIndex: $subtitleStreamIndex, mediaSourceId: $mediaSourceId');
-    for (var i = 0; i < urls.length; i++) {
-      print('🔥 [API] Subtitle URL $i: ${urls[i]}');
     }
 
     return urls;
@@ -810,6 +1199,7 @@ class ItemInfo {
     this.childCount,
     this.providerIds,
     this.dateCreated,
+    this.status,
   });
 
   final String? id;
@@ -841,6 +1231,7 @@ class ItemInfo {
   final int? childCount; // 子项目数量（剧集的总集数）
   final Map<String, dynamic>? providerIds; // 第三方ID（包含豆瓣）
   final String? dateCreated;
+  final String? status; // Series状态：Ended, Canceled, In Production, Continuing
   final List<ExternalUrlInfo>? externalUrls;
 
   // 获取评分和来源
@@ -915,6 +1306,7 @@ class ItemInfo {
       childCount: (json['ChildCount'] as num?)?.toInt(),
       providerIds: json['ProviderIds'] as Map<String, dynamic>?,
       dateCreated: json['DateCreated'] as String?,
+      status: json['Status'] as String?,
     );
   }
 }
