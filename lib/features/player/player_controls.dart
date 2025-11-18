@@ -171,12 +171,17 @@ class PlayerControls extends StatelessWidget {
           _TopControlsBar(state: state, context: context),
 
         // ✅ 拖动进度条时的时间预览（与顶部工具条水平对齐）
+        // 长按快进/快退时也显示
         // PiP 模式下隐藏，锁定状态下隐藏
         if (!state.isInPipMode &&
             !state.isLocked &&
-            state.isDraggingProgress &&
-            state.draggingPosition != null)
-          _DraggingTimePreview(state: state),
+            ((state.isDraggingProgress && state.draggingPosition != null) ||
+                (state.isLongPressingForward || state.isLongPressingRewind)))
+          _DraggingTimePreview(
+            state: state,
+            isLongPressing:
+                state.isLongPressingForward || state.isLongPressingRewind,
+          ),
 
         // ✅ 视频裁切模式提示（tooltip样式，显示在按钮下方）
         // PiP 模式下隐藏，锁定状态下隐藏
@@ -455,12 +460,22 @@ class _TopControlsBar extends StatelessWidget {
 
 /// ✅ 拖动进度条时的时间预览
 class _DraggingTimePreview extends StatelessWidget {
-  const _DraggingTimePreview({required this.state});
+  const _DraggingTimePreview({
+    required this.state,
+    this.isLongPressing = false,
+  });
 
   final PlayerControlsState state;
+  final bool isLongPressing; // ✅ 是否是长按快进/快退
 
   @override
   Widget build(BuildContext context) {
+    // ✅ 获取要显示的位置
+    // 长按快进/快退时，位置会实时更新，直接使用当前位置
+    // 拖动进度条时，使用拖动位置
+    final displayPosition =
+        isLongPressing ? state.position : state.draggingPosition!;
+
     return Positioned(
       top: 20, // ✅ 与顶部工具条对齐（top: 20）
       left: 0,
@@ -496,7 +511,7 @@ class _DraggingTimePreview extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    '${state.formatTime(state.draggingPosition!)} / ${state.formatTime(state.duration)}',
+                    '${state.formatTime(displayPosition)} / ${state.formatTime(state.duration)}',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 15,
@@ -749,21 +764,23 @@ class _SeekButtons extends StatelessWidget {
               children: [
                 // ✅ 快退10秒按钮（左侧）
                 _SeekButton(
-                  icon: Icons.replay_10_rounded,
+                  icon: Icons.replay_rounded,
                   label: '10',
                   onPressed: state.onRewind,
                   animation: state.controlsAnimation,
+                  isRewind: true, // ✅ 标识是快退按钮
                 ),
                 const SizedBox(width: 24),
                 // ✅ 占位空间（播放/暂停按钮的位置）
                 const SizedBox(width: 80),
                 const SizedBox(width: 24),
-                // ✅ 快进10秒按钮（右侧）
+                // ✅ 快进20秒按钮（右侧）
                 _SeekButton(
-                  icon: Icons.forward_10_rounded,
-                  label: '10',
+                  icon: Icons.replay_rounded, // ✅ 使用 replay 图标，通过 Transform 翻转
+                  label: '20',
                   onPressed: state.onForward,
                   animation: state.controlsAnimation,
+                  isRewind: false, // ✅ 标识是快进按钮
                 ),
               ],
             ),
@@ -953,12 +970,14 @@ class _SeekButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     required this.animation,
+    required this.isRewind,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onPressed;
   final Animation<double> animation;
+  final bool isRewind; // ✅ 是否是快退按钮
 
   @override
   Widget build(BuildContext context) {
@@ -988,23 +1007,58 @@ class _SeekButton extends StatelessWidget {
             child: CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               onPressed: onPressed,
-              child: Column(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    icon,
-                    color: Colors.white,
-                    size: 32,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    label,
-                    style: const TextStyle(
+                  // ✅ 快退时，数字在左侧
+                  if (isRewind)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  // ✅ 图标（快进时水平翻转）
+                  Transform(
+                    alignment: Alignment.center,
+                    transform: Matrix4.identity()
+                      ..scale(isRewind ? 1.0 : -1.0, 1.0), // ✅ 快进时水平翻转
+                    child: Icon(
+                      icon,
                       color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                      size: 32,
                     ),
                   ),
+                  // ✅ 快进时，数字在右侧
+                  if (!isRewind)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
