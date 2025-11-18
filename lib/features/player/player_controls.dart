@@ -65,6 +65,10 @@ class PlayerControlsState {
   final bool isLongPressingRewind; // ✅ 是否正在长按快退
   final Offset? longPressPosition; // ✅ 长按位置（用于显示水波纹）
   final DateTime? longPressStartTime; // ✅ 长按开始时间（用于显示按住时长）
+  final bool isAdjustingBrightness; // ✅ 是否正在调整亮度
+  final bool isAdjustingVolume; // ✅ 是否正在调整音量
+  final double? currentBrightness; // ✅ 当前亮度（0.0-1.0）
+  final double? currentVolume; // ✅ 当前音量（0.0-100.0）
 
   const PlayerControlsState({
     required this.isInPipMode,
@@ -125,6 +129,10 @@ class PlayerControlsState {
     this.isLongPressingRewind = false,
     this.longPressPosition,
     this.longPressStartTime,
+    this.isAdjustingBrightness = false,
+    this.isAdjustingVolume = false,
+    this.currentBrightness,
+    this.currentVolume,
   });
 }
 
@@ -241,6 +249,12 @@ class PlayerControls extends StatelessWidget {
             state.showControls &&
             !state.isLocked)
           _SpeedList(state: state, context: context),
+
+        // ✅ 亮度/音量调整提示（显示在屏幕中间，不受锁定影响）
+        if (state.isAdjustingBrightness && state.currentBrightness != null)
+          _BrightnessIndicator(brightness: state.currentBrightness!),
+        if (state.isAdjustingVolume && state.currentVolume != null)
+          _VolumeIndicator(volume: state.currentVolume!),
       ],
     );
   }
@@ -1910,4 +1924,134 @@ class _TooltipArrowPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// ✅ 亮度调整指示器
+class _BrightnessIndicator extends StatelessWidget {
+  const _BrightnessIndicator({required this.brightness});
+
+  final double brightness; // ✅ 0.0-1.0
+
+  @override
+  Widget build(BuildContext context) {
+    final brightnessPercent = (brightness * 100).round();
+
+    return Center(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 16,
+            ),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: Theme.of(context).brightness == Brightness.dark
+                    ? [
+                        Colors.grey.shade900.withValues(alpha: 0.7),
+                        Colors.grey.shade800.withValues(alpha: 0.5),
+                      ]
+                    : [
+                        Colors.white.withValues(alpha: 0.25),
+                        Colors.white.withValues(alpha: 0.15),
+                      ],
+              ),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.brightness_6_rounded,
+                  color: Colors.white,
+                  size: 28,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  '$brightnessPercent%',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ✅ 音量调整指示器
+class _VolumeIndicator extends StatelessWidget {
+  const _VolumeIndicator({required this.volume});
+
+  final double volume; // ✅ 0.0-100.0
+
+  @override
+  Widget build(BuildContext context) {
+    final volumePercent = volume.round();
+
+    return Center(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 16,
+            ),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: Theme.of(context).brightness == Brightness.dark
+                    ? [
+                        Colors.grey.shade900.withValues(alpha: 0.7),
+                        Colors.grey.shade800.withValues(alpha: 0.5),
+                      ]
+                    : [
+                        Colors.white.withValues(alpha: 0.25),
+                        Colors.white.withValues(alpha: 0.15),
+                      ],
+              ),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  volumePercent == 0
+                      ? Icons.volume_off_rounded
+                      : volumePercent < 50
+                          ? Icons.volume_down_rounded
+                          : Icons.volume_up_rounded,
+                  color: Colors.white,
+                  size: 28,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  '$volumePercent%',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

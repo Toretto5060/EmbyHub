@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui';
 
 import 'package:flutter/cupertino.dart';
@@ -104,6 +105,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ 进度条拖动状态
   bool _isDraggingProgress = false;
   Duration? _draggingPosition;
+
+  // ✅ 亮度/音量控制状态
+  bool _isAdjustingBrightness = false; // ✅ 是否正在调整亮度
+  bool _isAdjustingVolume = false; // ✅ 是否正在调整音量
+  double? _currentBrightness; // ✅ 当前亮度（0.0-1.0）
+  double? _currentVolume; // ✅ 当前音量（0-100）
+  double? _brightnessAdjustStartValue; // ✅ 开始调整时的亮度
+  double? _volumeAdjustStartValue; // ✅ 开始调整时的音量
+  double? _originalBrightness; // ✅ 进入播放页面时的原始亮度（退出时恢复）
+  Offset? _verticalDragStartPosition; // ✅ 垂直拖动开始位置
+  bool _hasTriggeredVolumeAdjust = false; // ✅ 是否已触发音量调整
+  bool _hasTriggeredBrightnessAdjust = false; // ✅ 是否已触发亮度调整
+  DateTime? _verticalDragStartTime; // ✅ 垂直拖动开始时间（用于计算速度）
 
   // ✅ 视频标题（用于显示和 PiP）
   String _videoTitle = '';
@@ -565,6 +579,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // 注意：dynaudnorm 已经会增强音量，所以播放器音量设置为 150% 即可
       if (!needsSeek) {
         await _player.setVolume(100.0);
+        _currentVolume = 100.0; // ✅ 保存当前音量
         _playerLog('🎬 [Player] Volume set to 100%');
       }
 
@@ -676,6 +691,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           // ✅ 不在这里设置 _isBuffering = false
           // _isBuffering 由 buffering stream 控制，确保缓冲完成后才消失
         });
+        // ✅ 获取当前亮度和音量，并保存原始亮度
+        _getCurrentBrightness().then((_) {
+          if (_originalBrightness == null && _currentBrightness != null) {
+            _originalBrightness = _currentBrightness;
+          }
+        });
+        _getCurrentVolume();
       }
       _playerLog(
           '🎬 [Player] ✅ Ready to play, isPlaying: $_isPlaying, isBuffering: $_isBuffering');
@@ -707,6 +729,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _syncProgress(_position, force: true, markComplete: markComplete);
     unawaited(_player.dispose());
     _speedTimer?.cancel();
+
+    // ✅ 恢复原始亮度
+    if (_originalBrightness != null) {
+      _setBrightness(_originalBrightness!);
+    }
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -730,6 +757,78 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('playback_speed', v);
     _playerLog('🎬 [Player] ✅ Playback speed changed to: ${v}x');
+  }
+
+  // ✅ 设置屏幕亮度
+  Future<void> _setBrightness(double brightness) async {
+    try {
+      if (Platform.isAndroid) {
+        const platform = MethodChannel('com.embyhub/brightness');
+        await platform
+            .invokeMethod('setBrightness', {'brightness': brightness});
+      } else if (Platform.isIOS) {
+        // iOS 使用系统 API
+        const platform = MethodChannel('com.embyhub/brightness');
+        await platform
+            .invokeMethod('setBrightness', {'brightness': brightness});
+      }
+    } catch (e) {
+      _playerLog('🎬 [Player] Failed to set brightness: $e');
+    }
+  }
+
+  // ✅ 获取当前屏幕亮度
+  Future<void> _getCurrentBrightness() async {
+    try {
+      if (Platform.isAndroid || Platform.isIOS) {
+        const platform = MethodChannel('com.embyhub/brightness');
+        final brightness = await platform.invokeMethod<double>('getBrightness');
+        if (brightness != null && mounted) {
+          setState(() {
+            _currentBrightness = brightness;
+          });
+        }
+      }
+    } catch (e) {
+      _playerLog('🎬 [Player] Failed to get brightness: $e');
+    }
+  }
+
+  // ✅ 获取当前系统音量
+  Future<void> _getCurrentVolume() async {
+    try {
+      if (Platform.isAndroid) {
+        const platform = MethodChannel('com.embyhub/brightness');
+        final volume = await platform.invokeMethod<double>('getVolume');
+        if (volume != null && mounted) {
+          setState(() {
+            _currentVolume = volume;
+          });
+        }
+      } else if (Platform.isIOS) {
+        const platform = MethodChannel('com.embyhub/brightness');
+        final volume = await platform.invokeMethod<double>('getVolume');
+        if (volume != null && mounted) {
+          setState(() {
+            _currentVolume = volume;
+          });
+        }
+      }
+    } catch (e) {
+      _playerLog('🎬 [Player] Failed to get volume: $e');
+    }
+  }
+
+  // ✅ 设置系统音量
+  Future<void> _setSystemVolume(double volume) async {
+    try {
+      if (Platform.isAndroid || Platform.isIOS) {
+        const platform = MethodChannel('com.embyhub/brightness');
+        await platform.invokeMethod('setVolume', {'volume': volume});
+      }
+    } catch (e) {
+      _playerLog('🎬 [Player] Failed to set volume: $e');
+    }
   }
 
   // ✅ 增加速度档位
@@ -1389,6 +1488,159 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                       // ✅ 长按取消：恢复原始倍速
                       _stopLongPress();
                     },
+                    // ✅ 垂直滑动：左侧控制亮度，右侧控制音量
+                    // 只在没有显示其他播放控制UI时生效（不受锁定影响）
+                    // 防误触：判断是否是缓慢垂直滑动
+                    onVerticalDragStart: (details) {
+                      if (!_ready || _isInPipMode || _showControls) return;
+
+                      final screenWidth = MediaQuery.of(context).size.width;
+                      final touchX = details.localPosition.dx;
+                      final isRightSide = touchX > screenWidth / 2;
+
+                      _verticalDragStartPosition = details.localPosition;
+                      _verticalDragStartTime = DateTime.now();
+                      _hasTriggeredVolumeAdjust = false;
+                      _hasTriggeredBrightnessAdjust = false;
+
+                      if (isRightSide) {
+                        // ✅ 右侧：准备控制音量（但还未触发）
+                        _volumeAdjustStartValue = _currentVolume ?? 50.0;
+                      } else {
+                        // ✅ 左侧：准备控制亮度（但还未触发）
+                        _brightnessAdjustStartValue = _currentBrightness ?? 0.5;
+                      }
+                    },
+                    onVerticalDragUpdate: (details) async {
+                      if (!_ready || _isInPipMode || _showControls) return;
+                      if (_verticalDragStartPosition == null ||
+                          _verticalDragStartTime == null) return;
+
+                      final screenWidth = MediaQuery.of(context).size.width;
+                      final screenHeight = MediaQuery.of(context).size.height;
+                      final touchX = details.localPosition.dx;
+                      final isRightSide = touchX > screenWidth / 2;
+
+                      // ✅ 计算滑动距离
+                      final deltaX = (details.localPosition.dx -
+                              _verticalDragStartPosition!.dx)
+                          .abs();
+                      final deltaY = (_verticalDragStartPosition!.dy -
+                              details.localPosition.dy)
+                          .abs();
+                      final deltaYPercent = deltaY / screenHeight;
+
+                      // ✅ 计算滑动时间
+                      final elapsed =
+                          DateTime.now().difference(_verticalDragStartTime!);
+                      final elapsedSeconds = elapsed.inMilliseconds / 1000.0;
+
+                      // ✅ 判断是否已经触发（如果已触发，则去除所有限制）
+                      final isAlreadyTriggered = _hasTriggeredVolumeAdjust ||
+                          _hasTriggeredBrightnessAdjust;
+
+                      if (!isAlreadyTriggered) {
+                        // ✅ 防误触判断（仅在未触发时检查）：
+                        // 1. 必须是垂直滑动（水平位移小于垂直位移的 30%）
+                        // 2. 必须是缓慢滑动（速度不能太快，至少需要滑动屏幕高度的 4% 且时间超过 0.2 秒）
+                        // 3. 滑动速度不能超过屏幕高度/秒（避免快速滑动误触）
+                        final isVerticalSwipe =
+                            deltaX < deltaY * 0.3; // ✅ 水平位移小于垂直位移的30%
+                        final minDistance = 0.04; // ✅ 至少滑动屏幕高度的4%
+                        final minTime = 0.2; // ✅ 至少需要0.2秒
+                        final maxSpeed = 2.0; // ✅ 最大速度：2倍屏幕高度/秒
+
+                        final hasMinDistance = deltaYPercent >= minDistance;
+                        final hasMinTime = elapsedSeconds >= minTime;
+                        final speed = deltaYPercent /
+                            elapsedSeconds.clamp(0.01, 1.0); // ✅ 避免除零
+                        final isSlowSwipe = speed <= maxSpeed;
+
+                        // ✅ 判断是否满足触发条件
+                        final shouldTrigger = isVerticalSwipe &&
+                            hasMinDistance &&
+                            hasMinTime &&
+                            isSlowSwipe;
+
+                        if (!shouldTrigger) {
+                          // ✅ 不满足条件，不触发
+                          return;
+                        }
+
+                        // ✅ 触发调整
+                        if (isRightSide && !_hasTriggeredVolumeAdjust) {
+                          _hasTriggeredVolumeAdjust = true;
+                          _isAdjustingVolume = true;
+                          if (mounted) setState(() {});
+                        } else if (!isRightSide &&
+                            !_hasTriggeredBrightnessAdjust) {
+                          _hasTriggeredBrightnessAdjust = true;
+                          _isAdjustingBrightness = true;
+                          if (mounted) setState(() {});
+                        }
+                      }
+
+                      // ✅ 已触发后，去除所有限制，只要手指没有松开就可以自由调整
+                      // 不再检查垂直滑动、距离、时间、速度等任何限制
+                      final deltaYForAdjust = _verticalDragStartPosition!.dy -
+                          details.localPosition.dy;
+                      final deltaPercent = deltaYForAdjust / screenHeight;
+
+                      if (_isAdjustingVolume && _hasTriggeredVolumeAdjust) {
+                        // ✅ 右侧：调整系统音量（0-100）
+                        final newVolume =
+                            (_volumeAdjustStartValue! + deltaPercent * 100)
+                                .clamp(0.0, 100.0);
+                        await _setSystemVolume(newVolume);
+                        if (mounted) {
+                          setState(() {
+                            _currentVolume = newVolume;
+                          });
+                        }
+                      } else if (_isAdjustingBrightness &&
+                          _hasTriggeredBrightnessAdjust) {
+                        // ✅ 左侧：调整亮度（0-1）
+                        final newBrightness =
+                            (_brightnessAdjustStartValue! + deltaPercent)
+                                .clamp(0.0, 1.0);
+                        await _setBrightness(newBrightness);
+                        if (mounted) {
+                          setState(() {
+                            _currentBrightness = newBrightness;
+                          });
+                        }
+                      }
+                    },
+                    onVerticalDragEnd: (details) {
+                      // ✅ 手指松开时，停止触发
+                      _verticalDragStartPosition = null;
+                      _verticalDragStartTime = null;
+                      _hasTriggeredVolumeAdjust = false;
+                      _hasTriggeredBrightnessAdjust = false;
+                      // ✅ 延迟隐藏，让用户看到最终数值
+                      Future.delayed(const Duration(seconds: 1), () {
+                        if (mounted) {
+                          setState(() {
+                            _isAdjustingBrightness = false;
+                            _isAdjustingVolume = false;
+                          });
+                        }
+                      });
+                    },
+                    onVerticalDragCancel: () {
+                      // ✅ 取消拖动时，停止触发
+                      _verticalDragStartPosition = null;
+                      _verticalDragStartTime = null;
+                      _hasTriggeredVolumeAdjust = false;
+                      _hasTriggeredBrightnessAdjust = false;
+                      // ✅ 立即隐藏弹窗
+                      if (mounted) {
+                        setState(() {
+                          _isAdjustingBrightness = false;
+                          _isAdjustingVolume = false;
+                        });
+                      }
+                    },
                     behavior: HitTestBehavior.opaque,
                     child: Container(color: Colors.transparent),
                   ),
@@ -1524,6 +1776,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   isLongPressingRewind: _isLongPressingRewind,
                   longPressPosition: _longPressPosition,
                   longPressStartTime: _longPressStartTime,
+                  isAdjustingBrightness: _isAdjustingBrightness,
+                  isAdjustingVolume: _isAdjustingVolume,
+                  currentBrightness: _currentBrightness,
+                  currentVolume: _currentVolume,
                 ),
               ),
             ],

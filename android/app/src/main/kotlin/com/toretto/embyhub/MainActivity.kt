@@ -24,6 +24,8 @@ import android.media.audiofx.AudioEffect
 import android.media.audiofx.Equalizer
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Virtualizer
+import android.provider.Settings
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -31,6 +33,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity: FlutterActivity() {
     private val pipChannelName = "app.pip"
     private val platformChannelName = "com.embyhub/platform"
+    private val brightnessChannelName = "com.embyhub/brightness"
     private var pipChannel: MethodChannel? = null
     private var isPipExpanded = false // PiP 窗口是否放大
     private var currentPlayingState = true // 当前播放状态
@@ -166,6 +169,70 @@ class MainActivity: FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        
+        // ✅ 亮度/音量控制 channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, brightnessChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setBrightness" -> {
+                    val brightness = call.argument<Double>("brightness") ?: 0.5
+                    setBrightness(brightness)
+                    result.success(true)
+                }
+                "getBrightness" -> {
+                    val brightness = getBrightness()
+                    result.success(brightness)
+                }
+                "setVolume" -> {
+                    val volume = call.argument<Double>("volume") ?: 50.0
+                    setSystemVolume(volume)
+                    result.success(true)
+                }
+                "getVolume" -> {
+                    val volume = getSystemVolume()
+                    result.success(volume)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+    
+    // ✅ 设置屏幕亮度
+    private fun setBrightness(brightness: Double) {
+        val window = window
+        val layoutParams = window.attributes
+        layoutParams.screenBrightness = brightness.toFloat().coerceIn(0f, 1f)
+        window.attributes = layoutParams
+    }
+    
+    // ✅ 获取当前屏幕亮度
+    private fun getBrightness(): Double {
+        return try {
+            val brightness = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS)
+            (brightness / 255.0).toDouble().coerceIn(0.0, 1.0)
+        } catch (e: Exception) {
+            // 如果无法获取系统亮度，返回窗口亮度
+            val window = window
+            val layoutParams = window.attributes
+            layoutParams.screenBrightness.coerceIn(0f, 1f).toDouble()
+        }
+    }
+    
+    // ✅ 设置系统音量
+    private fun setSystemVolume(volume: Double) {
+        audioManager?.let { am ->
+            val maxVolume = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val targetVolume = (volume / 100.0 * maxVolume).toInt().coerceIn(0, maxVolume)
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
+        }
+    }
+    
+    // ✅ 获取当前系统音量
+    private fun getSystemVolume(): Double {
+        return audioManager?.let { am ->
+            val currentVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val maxVolume = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            (currentVolume.toDouble() / maxVolume * 100.0).coerceIn(0.0, 100.0)
+        } ?: 50.0
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
