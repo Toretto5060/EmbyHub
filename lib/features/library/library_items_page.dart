@@ -1,7 +1,9 @@
+import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
@@ -11,9 +13,95 @@ import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../providers/library_provider.dart';
 
+// 排序选项
+enum SortOption {
+  premiereDate('PremiereDate', '首映日期'),
+  dateCreated('DateCreated', '创建日期'),
+  communityRating('CommunityRating', '公众评分'),
+  name('SortName', '标题'),
+  officialRating('OfficialRating', '官方分级'),
+  productionYear('ProductionYear', '出品年份');
+
+  const SortOption(this.value, this.label);
+  final String value;
+  final String label;
+}
+
+// 排序状态
+class SortState {
+  final SortOption sortBy;
+  final bool ascending; // true=正序, false=倒序
+
+  const SortState({
+    this.sortBy = SortOption.premiereDate,
+    this.ascending = false, // 默认倒序（最新的在前）
+  });
+
+  SortState copyWith({
+    SortOption? sortBy,
+    bool? ascending,
+  }) {
+    return SortState(
+      sortBy: sortBy ?? this.sortBy,
+      ascending: ascending ?? this.ascending,
+    );
+  }
+}
+
+// 排序状态 Provider（每个 viewId 独立，支持持久化）
+final sortStateProvider =
+    StateNotifierProvider.family<SortStateNotifier, SortState, String>(
+  (ref, viewId) => SortStateNotifier(viewId),
+);
+
+class SortStateNotifier extends StateNotifier<SortState> {
+  SortStateNotifier(this.viewId) : super(const SortState()) {
+    _loadState();
+  }
+
+  final String viewId;
+  static const String _prefsKeyPrefix = 'sort_state_';
+
+  String get _prefsKey => '$_prefsKeyPrefix$viewId';
+
+  Future<void> _loadState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sortByValue = prefs.getString('${_prefsKey}_sortBy');
+      final ascending = prefs.getBool('${_prefsKey}_ascending');
+
+      if (sortByValue != null) {
+        final sortBy = SortOption.values.firstWhere(
+          (option) => option.value == sortByValue,
+          orElse: () => SortOption.premiereDate,
+        );
+        state = SortState(
+          sortBy: sortBy,
+          ascending: ascending ?? false,
+        );
+      }
+    } catch (e) {
+      // 如果加载失败，使用默认值
+      state = const SortState();
+    }
+  }
+
+  Future<void> updateState(SortState newState) async {
+    state = newState;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('${_prefsKey}_sortBy', newState.sortBy.value);
+      await prefs.setBool('${_prefsKey}_ascending', newState.ascending);
+    } catch (e) {
+      // 保存失败不影响状态更新
+    }
+  }
+}
+
 final itemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
   ref.watch(libraryRefreshTickerProvider);
+  final sortState = ref.watch(sortStateProvider(viewId));
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
@@ -23,6 +111,8 @@ final itemsProvider =
     userId: auth.userId!,
     parentId: viewId,
     includeItemTypes: 'Movie,Series,BoxSet,Video', // 不包含 Episode
+    sortBy: sortState.sortBy.value,
+    sortOrder: sortState.ascending ? 'Ascending' : 'Descending',
   );
 });
 
@@ -143,12 +233,17 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   @override
   Widget build(BuildContext context) {
     final items = ref.watch(itemsProvider(widget.viewId));
+    final sortState = ref.watch(sortStateProvider(widget.viewId));
 
     return CupertinoPageScaffold(
       backgroundColor: CupertinoColors.systemBackground,
       navigationBar: BlurNavigationBar(
         leading: buildBlurBackButton(context),
         middle: buildNavTitle(widget.viewName, context),
+        trailing: _SortButton(
+          viewId: widget.viewId,
+          sortState: sortState,
+        ),
         scrollController: _scrollController,
       ),
       child: items.when(
@@ -632,4 +727,195 @@ class _RowEntry {
 
   final ItemInfo item;
   final bool hasHorizontalArtwork;
+}
+
+// 排序按钮组件
+class _SortButton extends ConsumerWidget {
+  const _SortButton({
+    required this.viewId,
+    required this.sortState,
+  });
+
+  final String viewId;
+  final SortState sortState;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+
+    return GestureDetector(
+      onTap: () => _showSortMenu(context, ref),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withOpacity(0.15)
+              : Colors.black.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              CupertinoIcons.sort_down,
+              size: 16,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              sortState.sortBy.label,
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white : Colors.black87,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              sortState.ascending
+                  ? CupertinoIcons.arrow_up
+                  : CupertinoIcons.arrow_down,
+              size: 12,
+              color: isDark ? Colors.white70 : Colors.black54,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSortMenu(BuildContext context, WidgetRef ref) {
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+    final baseColor = isDark
+        ? const Color(0xFF1C1C1E)
+        : const Color(0xFFF2F2F7);
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final selectedColor = CupertinoColors.activeBlue;
+
+    // 获取按钮位置
+    final RenderBox? buttonBox = context.findRenderObject() as RenderBox?;
+    final RenderBox? overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (buttonBox == null || overlay == null) return;
+
+    final buttonPosition = buttonBox.localToGlobal(Offset.zero);
+    final buttonSize = buttonBox.size;
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (dialogContext) => Stack(
+        children: [
+          // 半透明背景
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => Navigator.pop(dialogContext),
+              child: Container(
+                color: Colors.black.withOpacity(0.3),
+              ),
+            ),
+          ),
+          // 下拉菜单
+          Positioned(
+            top: buttonPosition.dy + buttonSize.height + 8,
+            right: MediaQuery.of(context).size.width - buttonPosition.dx - buttonSize.width,
+            child: Material(
+              color: Colors.transparent,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: Container(
+                    width: 180,
+                    constraints: const BoxConstraints(
+                      maxHeight: 400,
+                    ),
+                    decoration: BoxDecoration(
+                      color: baseColor.withOpacity(0.85),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withOpacity(0.1)
+                            : Colors.black.withOpacity(0.1),
+                        width: 0.5,
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (int i = 0; i < SortOption.values.length; i++) ...[
+                          if (i > 0)
+                            Divider(
+                              height: 1,
+                              thickness: 0.5,
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.1)
+                                  : Colors.black.withOpacity(0.1),
+                            ),
+                          InkWell(
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              final notifier = ref.read(sortStateProvider(viewId).notifier);
+                              final currentState = ref.read(sortStateProvider(viewId));
+                              if (currentState.sortBy == SortOption.values[i]) {
+                                // 相同选项，切换正序/倒序
+                                notifier.updateState(
+                                  currentState.copyWith(ascending: !currentState.ascending),
+                                );
+                              } else {
+                                // 不同选项，切换到新选项（默认倒序）
+                                notifier.updateState(
+                                  SortState(sortBy: SortOption.values[i], ascending: false),
+                                );
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      SortOption.values[i].label,
+                                      style: TextStyle(
+                                        color: sortState.sortBy == SortOption.values[i]
+                                            ? selectedColor
+                                            : textColor,
+                                        fontSize: 15,
+                                        fontWeight: sortState.sortBy == SortOption.values[i]
+                                            ? FontWeight.w600
+                                            : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ),
+                                  if (sortState.sortBy == SortOption.values[i]) ...[
+                                    const SizedBox(width: 8),
+                                    Icon(
+                                      sortState.ascending
+                                          ? CupertinoIcons.arrow_up
+                                          : CupertinoIcons.arrow_down,
+                                      size: 14,
+                                      color: selectedColor,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

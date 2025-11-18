@@ -236,7 +236,9 @@ class EmbyApi {
       required String parentId,
       int startIndex = 0,
       int limit = 60,
-      String? includeItemTypes}) async {
+      String? includeItemTypes,
+      String? sortBy,
+      String? sortOrder}) async {
     final queryParams = {
       'ParentId': parentId,
       'StartIndex': startIndex,
@@ -251,6 +253,14 @@ class EmbyApi {
       queryParams['IncludeItemTypes'] = includeItemTypes;
     } else {
       queryParams['IncludeItemTypes'] = 'Movie,Series,BoxSet,Video';
+    }
+
+    // 添加排序参数
+    if (sortBy != null && sortBy.isNotEmpty) {
+      queryParams['SortBy'] = sortBy;
+    }
+    if (sortOrder != null && sortOrder.isNotEmpty) {
+      queryParams['SortOrder'] = sortOrder;
     }
 
     final res =
