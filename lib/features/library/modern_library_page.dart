@@ -673,6 +673,42 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
       }
     }
 
+    // 计算电影播放进度和剩余时间
+    int clampTicks(int value, int max) {
+      if (value < 0) return 0;
+      if (max <= 0) return value;
+      if (value > max) return max;
+      return value;
+    }
+
+    final userData = item.userData ?? {};
+    final totalTicks = item.runTimeTicks ?? 0;
+    final playbackTicks =
+        (userData['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+    final playedTicks = clampTicks(playbackTicks, totalTicks);
+    final played = userData['Played'] == true ||
+        (totalTicks > 0 && playedTicks >= totalTicks);
+    final showProgress =
+        item.type == 'Movie' && !played && totalTicks > 0 && playedTicks > 0;
+    final progress = totalTicks > 0 ? playedTicks / totalTicks : 0.0;
+    final remainingTicks =
+        totalTicks > playedTicks ? totalTicks - playedTicks : 0;
+    final remainingDuration = Duration(microseconds: remainingTicks ~/ 10);
+
+    String formatRemaining(Duration d) {
+      if (d <= Duration.zero) {
+        return '0s';
+      }
+      if (d.inHours >= 1) {
+        final minutes = d.inMinutes.remainder(60);
+        return minutes > 0 ? '${d.inHours}h ${minutes}m' : '${d.inHours}h';
+      }
+      if (d.inMinutes >= 1) {
+        return '${d.inMinutes}m';
+      }
+      return '${d.inSeconds}s';
+    }
+
     return Container(
       width: cardWidth,
       margin: const EdgeInsets.only(left: 6, right: 6),
@@ -702,8 +738,97 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                 borderRadius: BorderRadius.circular(8),
                 child: AspectRatio(
                   aspectRatio: aspectRatio,
-                  child: _buildLatestPoster(context, ref, item,
-                      hasBackdrop: hasBackdrop),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _buildLatestPoster(context, ref, item,
+                          hasBackdrop: hasBackdrop),
+                      // 电视剧/动漫剩余集数显示在右上角
+                      if ((item.type == 'Series') && item.userData != null)
+                        Builder(
+                          builder: (context) {
+                            final unplayedCount =
+                                (item.userData!['UnplayedItemCount'] as num?)
+                                    ?.toInt();
+                            if (unplayedCount != null && unplayedCount > 0) {
+                              return Positioned(
+                                top: 4,
+                                right: 4,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: CupertinoColors.systemRed,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    '$unplayedCount',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
+                            return const SizedBox.shrink();
+                          },
+                        ),
+                      // 电影播放进度条和剩余时间
+                      if (showProgress)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.8),
+                                  Colors.black.withValues(alpha: 0.0),
+                                ],
+                              ),
+                              borderRadius: const BorderRadius.only(
+                                bottomLeft: Radius.circular(8),
+                                bottomRight: Radius.circular(8),
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  '剩余 ${formatRemaining(remainingDuration)}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(999),
+                                  child: LinearProgressIndicator(
+                                    value: progress.clamp(0.0, 1.0),
+                                    minHeight: 4,
+                                    backgroundColor:
+                                        Colors.white.withValues(alpha: 0.2),
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      const Color(0xFFFFB74D)
+                                          .withValues(alpha: 0.95),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
