@@ -6,6 +6,64 @@ import 'package:media_kit/media_kit.dart';
 
 /// ✅ 播放器控制状态数据类
 class PlayerControlsState {
+  final bool isInPipMode;
+  final bool ready;
+  final bool showControls;
+  final bool isBuffering;
+  final bool isPlaying;
+  final Duration position;
+  final Duration duration;
+  final Duration bufferPosition;
+  final bool isDraggingProgress;
+  final Duration? draggingPosition;
+  final String videoTitle;
+  final BoxFit videoFit;
+  final bool showVideoFitHint;
+  final double speed;
+  final bool showSpeedList;
+  final List<double> speedOptions;
+  final double? expectedBitrateKbps;
+  final double? currentSpeedKbps;
+  final String? qualityLabel;
+  final List<Map<String, dynamic>> audioStreams;
+  final List<Map<String, dynamic>> subtitleStreams;
+  final int? selectedAudioStreamIndex;
+  final int? selectedSubtitleStreamIndex;
+  final Animation<double> controlsAnimation;
+  final ScrollController speedListScrollController;
+  final Player player;
+  final VoidCallback onToggleVideoFit;
+  final VoidCallback onEnterPip;
+  final VoidCallback onToggleOrientation;
+  final VoidCallback onPlayPause;
+  final VoidCallback onIncreaseSpeed;
+  final VoidCallback onDecreaseSpeed;
+  final Future<void> Function(double) onChangeSpeed;
+  final VoidCallback onScrollToSelectedSpeed;
+  final ValueChanged<BuildContext> onShowAudioSelectionMenu;
+  final ValueChanged<BuildContext> onShowSubtitleSelectionMenu;
+  final VoidCallback onDragStart;
+  final ValueChanged<Duration> onDragging;
+  final ValueChanged<Duration> onDragEnd;
+  final VoidCallback onResetHideControlsTimer;
+  final VoidCallback onCancelHideControlsTimer;
+  final ValueChanged<VoidCallback> onSetState;
+  final ValueChanged<bool> onShowSpeedListChanged;
+  final VoidCallback onToggleControls;
+  final IconData Function() getVideoFitIcon;
+  final String Function() getVideoFitName;
+  final String Function(Duration) formatTime;
+  final String Function(double?) formatBitrate;
+  final bool canIncreaseSpeed;
+  final bool canDecreaseSpeed;
+  final bool isLocked;
+  final VoidCallback onToggleLock;
+  final VoidCallback onRewind; // ✅ 快退10秒
+  final VoidCallback onForward; // ✅ 快进20秒
+  final bool isLongPressingForward; // ✅ 是否正在长按快进
+  final bool isLongPressingRewind; // ✅ 是否正在长按快退
+  final Offset? longPressPosition; // ✅ 长按位置（用于显示水波纹）
+
   const PlayerControlsState({
     required this.isInPipMode,
     required this.ready,
@@ -61,62 +119,10 @@ class PlayerControlsState {
     required this.onToggleLock,
     required this.onRewind,
     required this.onForward,
+    this.isLongPressingForward = false,
+    this.isLongPressingRewind = false,
+    this.longPressPosition,
   });
-
-  final bool isInPipMode;
-  final bool ready;
-  final bool showControls;
-  final bool isBuffering;
-  final bool isPlaying;
-  final Duration position;
-  final Duration duration;
-  final Duration bufferPosition;
-  final bool isDraggingProgress;
-  final Duration? draggingPosition;
-  final String videoTitle;
-  final BoxFit videoFit;
-  final bool showVideoFitHint;
-  final double speed;
-  final bool showSpeedList;
-  final List<double> speedOptions;
-  final double? expectedBitrateKbps;
-  final double? currentSpeedKbps;
-  final String? qualityLabel;
-  final List<Map<String, dynamic>> audioStreams;
-  final List<Map<String, dynamic>> subtitleStreams;
-  final int? selectedAudioStreamIndex;
-  final int? selectedSubtitleStreamIndex;
-  final Animation<double> controlsAnimation;
-  final ScrollController speedListScrollController;
-  final Player player;
-  final VoidCallback onToggleVideoFit;
-  final VoidCallback onEnterPip;
-  final VoidCallback onToggleOrientation;
-  final VoidCallback onPlayPause;
-  final VoidCallback onIncreaseSpeed;
-  final VoidCallback onDecreaseSpeed;
-  final Future<void> Function(double) onChangeSpeed;
-  final VoidCallback onScrollToSelectedSpeed;
-  final ValueChanged<BuildContext> onShowAudioSelectionMenu;
-  final ValueChanged<BuildContext> onShowSubtitleSelectionMenu;
-  final VoidCallback onDragStart;
-  final ValueChanged<Duration> onDragging;
-  final ValueChanged<Duration> onDragEnd;
-  final VoidCallback onResetHideControlsTimer;
-  final VoidCallback onCancelHideControlsTimer;
-  final ValueChanged<VoidCallback> onSetState;
-  final ValueChanged<bool> onShowSpeedListChanged;
-  final VoidCallback onToggleControls;
-  final IconData Function() getVideoFitIcon;
-  final String Function() getVideoFitName;
-  final String Function(Duration) formatTime;
-  final String Function(double?) formatBitrate;
-  final bool canIncreaseSpeed;
-  final bool canDecreaseSpeed;
-  final bool isLocked;
-  final VoidCallback onToggleLock;
-  final VoidCallback onRewind; // ✅ 快退10秒
-  final VoidCallback onForward; // ✅ 快进20秒
 }
 
 /// ✅ 播放器 UI 控制层
@@ -203,6 +209,14 @@ class PlayerControls extends StatelessWidget {
                 state.isBuffering ||
                 (state.ready && state.position == Duration.zero)))
           _BufferingInfo(state: state, context: context),
+
+        // ✅ 水波纹效果（长按快进/快退时显示）
+        if ((state.isLongPressingForward || state.isLongPressingRewind) &&
+            state.longPressPosition != null)
+          _RippleEffect(
+            position: state.longPressPosition!,
+            isRewind: state.isLongPressingRewind,
+          ),
 
         // ✅ 速度档位列表（显示在左侧，放在最后确保在最上层）
         // 锁定状态下隐藏
@@ -1550,6 +1564,119 @@ class _ControlsState extends State<_Controls>
     final m = d.inMinutes % 60;
     final s = d.inSeconds % 60;
     return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
+  }
+}
+
+/// ✅ YouTube风格的长按快进/快退水波纹效果
+class _RippleEffect extends StatefulWidget {
+  const _RippleEffect({
+    required this.position,
+    required this.isRewind,
+  });
+
+  final Offset position;
+  final bool isRewind;
+
+  @override
+  State<_RippleEffect> createState() => _RippleEffectState();
+}
+
+class _RippleEffectState extends State<_RippleEffect>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _opacityAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    )..repeat();
+
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.2).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeInOut,
+      ),
+    );
+
+    _opacityAnimation = Tween<double>(begin: 0.8, end: 0.3).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeInOut,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Stack(
+          children: [
+            // ✅ 水波纹中心位置
+            Positioned(
+              left: widget.position.dx - 70,
+              top: widget.position.dy - 70,
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  return Transform.scale(
+                    scale: _scaleAnimation.value,
+                    child: Opacity(
+                      opacity: _opacityAnimation.value,
+                      child: Container(
+                        width: 140,
+                        height: 140,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.black.withValues(alpha: 0.6),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.4),
+                            width: 3,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // ✅ 快进/快退图标
+                            Icon(
+                              widget.isRewind
+                                  ? Icons.replay_10_rounded
+                                  : Icons.fast_forward_rounded,
+                              color: Colors.white,
+                              size: 56,
+                            ),
+                            const SizedBox(height: 8),
+                            // ✅ 倍速显示
+                            Text(
+                              '3x',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

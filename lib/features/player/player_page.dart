@@ -86,6 +86,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ 控制栏锁定状态（锁定后隐藏其他控件，只显示锁定按钮）
   bool _isLocked = false;
 
+  // ✅ 长按快进/快退状态
+  bool _isLongPressingForward = false;
+  bool _isLongPressingRewind = false;
+  Offset? _longPressPosition;
+  double? _originalSpeed; // 保存原始倍速，用于恢复
+  Timer? _longPressTimer; // 长按定时器（用于倒退时的定时更新）
+
   // ✅ 视频画面裁切模式
   BoxFit _videoFit = BoxFit.contain; // contain(原始), cover(覆盖), fill(填充)
   Timer? _hideControlsTimer;
@@ -689,6 +696,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _playingSub?.cancel(); // ✅ 取消播放状态订阅
     _hideControlsTimer?.cancel();
     _videoFitHintTimer?.cancel(); // ✅ 取消视频裁切模式提示计时器
+    _longPressTimer?.cancel(); // ✅ 取消长按定时器
     _speedListScrollController.dispose(); // ✅ 释放速度列表滚动控制器
     _controlsAnimationController.dispose();
     final markComplete =
@@ -737,6 +745,43 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final newSpeed = _speedOptions[currentIndex - 1];
       await _changeSpeed(newSpeed);
     }
+  }
+
+  // ✅ 停止长按
+  void _stopLongPress() {
+    _longPressTimer?.cancel();
+    if (_isLongPressingForward || _isLongPressingRewind) {
+      setState(() {
+        _isLongPressingForward = false;
+        _isLongPressingRewind = false;
+        _longPressPosition = null;
+        // ✅ 恢复原始倍速
+        if (_originalSpeed != null) {
+          _changeSpeed(_originalSpeed!);
+          _originalSpeed = null;
+        }
+      });
+    }
+  }
+
+  // ✅ 开始倒退定时器
+  void _startRewindTimer() {
+    _longPressTimer?.cancel();
+    _longPressTimer =
+        Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (!_isLongPressingRewind || !mounted) {
+        timer.cancel();
+        return;
+      }
+      // ✅ 每100ms倒退一次（3倍速倒退）
+      final newPosition = _position - const Duration(milliseconds: 300);
+      final targetPosition =
+          newPosition < Duration.zero ? Duration.zero : newPosition;
+      _player.seek(targetPosition);
+      setState(() {
+        _position = targetPosition;
+      });
+    });
   }
 
   // ✅ 检查是否可以增加速度
@@ -1174,19 +1219,54 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   isLocked: _isLocked, // ✅ 传递锁定状态
                 ),
 
-              // ✅ 触摸检测层（当控制层隐藏时，用于显示控制层）
+              // ✅ 触摸检测层（当控制层隐藏时，用于显示控制层；长按快进/快退）
               // 必须在 UI 控制层之前，让 UI 控制层能处理事件
               Positioned.fill(
                 child: IgnorePointer(
-                  // ✅ 当控制层显示时，忽略触摸检测层
-                  // 当控制层隐藏时，触摸检测层可以接收事件来显示控制层
-                  ignoring: _showControls,
+                  // ✅ 当控制层显示且未锁定时，忽略触摸检测层
+                  // 当控制层隐藏或锁定时，触摸检测层可以接收事件
+                  ignoring: _showControls && !_isLocked,
                   child: GestureDetector(
                     onTap: () {
                       // ✅ 点击屏幕显示控制栏
-                      if (!_showSpeedList) {
+                      if (!_showSpeedList &&
+                          !_isLongPressingForward &&
+                          !_isLongPressingRewind) {
                         _toggleControls();
                       }
+                    },
+                    onLongPressStart: (details) {
+                      // ✅ 长按开始：检测左右侧屏幕
+                      if (!_ready || _isInPipMode) return;
+
+                      final screenWidth = MediaQuery.of(context).size.width;
+                      final touchX = details.localPosition.dx;
+                      final isRightSide = touchX > screenWidth / 2;
+
+                      setState(() {
+                        _longPressPosition = details.localPosition;
+                        if (isRightSide) {
+                          // ✅ 长按右侧：3倍速播放
+                          _isLongPressingForward = true;
+                          _originalSpeed = _speed;
+                          _changeSpeed(3.0);
+                        } else {
+                          // ✅ 长按左侧：3倍速倒退
+                          _isLongPressingRewind = true;
+                          _originalSpeed = _speed;
+                          _changeSpeed(3.0);
+                          // ✅ 开始定时倒退
+                          _startRewindTimer();
+                        }
+                      });
+                    },
+                    onLongPressEnd: (details) {
+                      // ✅ 长按结束：恢复原始倍速
+                      _stopLongPress();
+                    },
+                    onLongPressCancel: () {
+                      // ✅ 长按取消：恢复原始倍速
+                      _stopLongPress();
                     },
                     behavior: HitTestBehavior.opaque,
                     child: Container(color: Colors.transparent),
@@ -1319,6 +1399,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     });
                     _resetHideControlsTimer();
                   },
+                  isLongPressingForward: _isLongPressingForward,
+                  isLongPressingRewind: _isLongPressingRewind,
+                  longPressPosition: _longPressPosition,
                 ),
               ),
             ],
