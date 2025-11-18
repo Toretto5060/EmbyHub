@@ -91,7 +91,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isLongPressingRewind = false;
   Offset? _longPressPosition;
   double? _originalSpeed; // 保存原始倍速，用于恢复
+  bool? _wasPlayingBeforeRewind; // ✅ 保存快退前的播放状态
   Timer? _longPressTimer; // 长按定时器（用于倒退时的定时更新）
+  Timer? _speedAccelerationTimer; // ✅ 倍速加速定时器（用于平滑加速到3倍速）
   DateTime? _longPressStartTime; // ✅ 长按开始时间（用于显示按住时长）
 
   // ✅ 视频画面裁切模式
@@ -698,6 +700,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _hideControlsTimer?.cancel();
     _videoFitHintTimer?.cancel(); // ✅ 取消视频裁切模式提示计时器
     _longPressTimer?.cancel(); // ✅ 取消长按定时器
+    _speedAccelerationTimer?.cancel(); // ✅ 取消倍速加速定时器
     _speedListScrollController.dispose(); // ✅ 释放速度列表滚动控制器
     _controlsAnimationController.dispose();
     final markComplete =
@@ -749,9 +752,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   }
 
   // ✅ 停止长按
-  void _stopLongPress() {
+  void _stopLongPress() async {
     _longPressTimer?.cancel();
+    _speedAccelerationTimer?.cancel(); // ✅ 取消倍速加速定时器
     if (_isLongPressingForward || _isLongPressingRewind) {
+      final wasRewinding = _isLongPressingRewind;
+      final shouldResume = _wasPlayingBeforeRewind == true;
+
       setState(() {
         _isLongPressingForward = false;
         _isLongPressingRewind = false;
@@ -762,15 +769,56 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _changeSpeed(_originalSpeed!);
           _originalSpeed = null;
         }
+        _wasPlayingBeforeRewind = null; // ✅ 清除快退前的播放状态
       });
+
+      // ✅ 如果之前是快退且之前正在播放，则恢复播放
+      if (wasRewinding && shouldResume) {
+        await _player.play();
+        setState(() {
+          _isPlaying = true;
+        });
+      }
     }
+  }
+
+  // ✅ 开始倍速加速（从当前倍速平滑加速到3倍速，1秒内完成）
+  void _startSpeedAcceleration() {
+    _speedAccelerationTimer?.cancel();
+    final startSpeed = _speed;
+    final targetSpeed = 3.0;
+    final duration = const Duration(seconds: 1); // ✅ 1秒内完成加速
+    const updateInterval = Duration(milliseconds: 50); // ✅ 每50ms更新一次
+    final totalSteps = duration.inMilliseconds / updateInterval.inMilliseconds;
+    final speedStep = (targetSpeed - startSpeed) / totalSteps;
+
+    int step = 0;
+    _speedAccelerationTimer = Timer.periodic(updateInterval, (timer) {
+      if (!mounted || (!_isLongPressingForward && !_isLongPressingRewind)) {
+        timer.cancel();
+        return;
+      }
+
+      step++;
+      final currentSpeed = startSpeed + (speedStep * step);
+      final clampedSpeed = currentSpeed.clamp(startSpeed, targetSpeed);
+
+      // ✅ 更新倍速（不触发 setState，直接调用 _changeSpeed）
+      _player.setRate(clampedSpeed);
+      _speed = clampedSpeed;
+
+      // ✅ 如果达到目标倍速，停止定时器
+      if (clampedSpeed >= targetSpeed) {
+        timer.cancel();
+      }
+    });
   }
 
   // ✅ 开始倒退定时器
   void _startRewindTimer() {
     _longPressTimer?.cancel();
     _longPressTimer =
-        Timer.periodic(const Duration(milliseconds: 100), (timer) {
+        Timer.periodic(const Duration(milliseconds: 100), (timer) async {
       if (!_isLongPressingRewind || !mounted) {
         timer.cancel();
         return;
@@ -779,7 +827,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final newPosition = _position - const Duration(milliseconds: 300);
       final targetPosition =
           newPosition < Duration.zero ? Duration.zero : newPosition;
-      _player.seek(targetPosition);
+
+      // ✅ seek 到目标位置
+      await _player.seek(targetPosition);
+
+      // ✅ 短暂播放一帧以强制更新画面，然后立即暂停
+      // 这样可以确保画面实时更新，但不会真正播放（因为立即暂停）
+      await _player.play();
+      // ✅ 使用 microtask 确保在下一帧之前暂停，避免画面播放
+      await Future.microtask(() {});
+      await _player.pause();
+
       setState(() {
         _position = targetPosition;
       });
@@ -1245,19 +1303,30 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                       final touchX = details.localPosition.dx;
                       final isRightSide = touchX > screenWidth / 2;
 
+                      // ✅ 如果是快退且正在播放，先暂停
+                      if (!isRightSide && _isPlaying) {
+                        _wasPlayingBeforeRewind = true;
+                        _player.pause();
+                      } else {
+                        _wasPlayingBeforeRewind = false;
+                      }
+
                       setState(() {
                         _longPressPosition = details.localPosition;
                         _longPressStartTime = DateTime.now(); // ✅ 记录长按开始时间
                         if (isRightSide) {
-                          // ✅ 长按右侧：3倍速播放
+                          // ✅ 长按右侧：从当前倍速平滑加速到3倍速播放
                           _isLongPressingForward = true;
                           _originalSpeed = _speed;
-                          _changeSpeed(3.0);
+                          _startSpeedAcceleration(); // ✅ 开始平滑加速
                         } else {
-                          // ✅ 长按左侧：3倍速倒退
+                          // ✅ 长按左侧：从当前倍速平滑加速到3倍速倒退
                           _isLongPressingRewind = true;
                           _originalSpeed = _speed;
-                          _changeSpeed(3.0);
+                          if (_wasPlayingBeforeRewind == true) {
+                            _isPlaying = false; // ✅ 更新播放状态
+                          }
+                          _startSpeedAcceleration(); // ✅ 开始平滑加速
                           // ✅ 开始定时倒退
                           _startRewindTimer();
                         }

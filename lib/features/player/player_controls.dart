@@ -193,6 +193,16 @@ class PlayerControls extends StatelessWidget {
         if (!state.isInPipMode && state.showControls && !state.isLocked)
           _PlayPauseButton(state: state),
 
+        // ✅ 加载指示器（当播放/暂停按钮不显示时，在按钮位置显示 loading）
+        // PiP 模式下隐藏，锁定状态下隐藏
+        if (!state.isInPipMode &&
+            !state.showControls &&
+            !state.isLocked &&
+            (!state.ready ||
+                state.isBuffering ||
+                (state.ready && state.position == Duration.zero)))
+          _LoadingIndicator(state: state),
+
         // ✅ 右侧速度控制（仅在显示控制栏时）
         // PiP 模式下隐藏，锁定状态下隐藏
         if (!state.isInPipMode && state.showControls && !state.isLocked)
@@ -204,9 +214,9 @@ class PlayerControls extends StatelessWidget {
           _BottomControlsBar(state: state),
 
         // ✅ 缓冲信息（显示在播放/暂停按钮下方，放在最后确保在最上层，不被字幕遮挡）
+        // 不受控制栏显示/隐藏影响，只要在加载/缓冲时就显示
         // 锁定状态下隐藏
         if (!state.isInPipMode &&
-            state.showControls &&
             !state.isLocked &&
             (!state.ready ||
                 state.isBuffering ||
@@ -847,6 +857,23 @@ class _PlayPauseButton extends StatelessWidget {
   }
 }
 
+/// ✅ 加载指示器（显示在播放/暂停按钮位置，当按钮不显示时）
+class _LoadingIndicator extends StatelessWidget {
+  const _LoadingIndicator({required this.state});
+
+  final PlayerControlsState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: CupertinoActivityIndicator(
+        radius: 20,
+        color: Colors.white.withValues(alpha: 0.9),
+      ),
+    );
+  }
+}
+
 /// ✅ 缓冲信息（显示在播放/暂停按钮下方）
 class _BufferingInfo extends StatelessWidget {
   const _BufferingInfo({required this.state, required this.context});
@@ -857,71 +884,63 @@ class _BufferingInfo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: AnimatedBuilder(
-        animation: state.controlsAnimation,
-        builder: (context, child) {
-          return Opacity(
-            opacity: state.controlsAnimation.value * 0.9,
-            child: Transform.translate(
-              offset: Offset(0, 90 / 2 + 36), // 按钮半径 + 间距
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: Theme.of(context).brightness == Brightness.dark
-                            ? [
-                                Colors.grey.shade900.withValues(alpha: 0.6),
-                                Colors.grey.shade800.withValues(alpha: 0.4),
-                              ]
-                            : [
-                                Colors.white.withValues(alpha: 0.2),
-                                Colors.white.withValues(alpha: 0.1),
-                              ],
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          !state.ready
-                              ? '加载中...'
-                              : state.isBuffering
-                                  ? '缓冲中...'
-                                  : '准备中...',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (state.expectedBitrateKbps != null) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            state.formatBitrate(state.currentSpeedKbps),
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13,
-                            ),
-                          ),
+      child: Transform.translate(
+        offset: Offset(0, 90 / 2 + 36), // 按钮半径 + 间距
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 10,
+              ),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: Theme.of(context).brightness == Brightness.dark
+                      ? [
+                          Colors.grey.shade900.withValues(alpha: 0.6),
+                          Colors.grey.shade800.withValues(alpha: 0.4),
+                        ]
+                      : [
+                          Colors.white.withValues(alpha: 0.2),
+                          Colors.white.withValues(alpha: 0.1),
                         ],
-                      ],
+                ),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    !state.ready
+                        ? '加载中...'
+                        : state.isBuffering
+                            ? '缓冲中...'
+                            : '准备中...',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
+                  if (state.expectedBitrateKbps != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      state.formatBitrate(state.currentSpeedKbps),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
