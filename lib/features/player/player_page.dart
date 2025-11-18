@@ -329,9 +329,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         await prefs.setInt(
             'item_${widget.itemId}_audio', _selectedAudioStreamIndex!);
       }
+      // ✅ 支持保存-1（不显示字幕）
       if (_selectedSubtitleStreamIndex != null) {
         await prefs.setInt(
             'item_${widget.itemId}_subtitle', _selectedSubtitleStreamIndex!);
+        _playerLog(
+            '💾 [Player] 保存字幕选择: ${_selectedSubtitleStreamIndex}, manual: $_hasManuallySelectedSubtitle');
       }
       await prefs.setBool(
           'item_${widget.itemId}_manual_audio', _hasManuallySelectedAudio);
@@ -727,6 +730,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final markComplete =
         _duration > Duration.zero && _position >= _duration * 0.95;
     _syncProgress(_position, force: true, markComplete: markComplete);
+    // ✅ 退出时确保保存字幕和音频选择（不等待，后台执行）
+    unawaited(_saveStreamSelections());
     unawaited(_player.dispose());
     _speedTimer?.cancel();
 
@@ -1878,11 +1883,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (_subtitleStreams.isEmpty) return;
 
     final current = _selectedSubtitleStreamIndex;
+    // ✅ 如果用户选择了"不显示"（-1），则保持不显示，不自动选择
+    if (current == -1) {
+      _updateSubtitleUrl();
+      return;
+    }
     if (current != null && current >= 0 && current < _subtitleStreams.length) {
       return;
     }
 
     if (_hasManuallySelectedSubtitle) {
+      // ✅ 如果用户手动选择过，但值是-1（不显示），则保持不显示
+      if (current == -1) {
+        _updateSubtitleUrl();
+        return;
+      }
       final defaultIndex = _subtitleStreams
           .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
       final fallback = defaultIndex != -1 ? defaultIndex : 0;
@@ -2243,11 +2258,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final scrollController = ScrollController();
 
     void scheduleScroll() {
-      if (_selectedSubtitleStreamIndex == null) return;
+      if (_selectedSubtitleStreamIndex == null ||
+          _selectedSubtitleStreamIndex == -1) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!scrollController.hasClients) return;
         const itemHeight = 48.0;
-        final target = _selectedSubtitleStreamIndex! * itemHeight;
+        // ✅ 如果选择了"不显示"（-1），则不需要滚动；否则需要+1因为第一个是"不显示"选项
+        final target = (_selectedSubtitleStreamIndex! + 1) * itemHeight;
         final maxExtent = scrollController.position.maxScrollExtent;
         final viewport = scrollController.position.viewportDimension;
         final offset =
@@ -2307,27 +2324,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                           controller: scrollController,
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
-                            children: List.generate(
-                              _subtitleStreams.length,
-                              (index) {
-                                final label = _formatSubtitleStream(
-                                    _subtitleStreams[index]);
-                                final isDefault = (_subtitleStreams[index]
-                                        ['IsDefault'] as bool?) ==
-                                    true;
-                                final hasDefaultTag = label.contains('默认');
-                                final isSelected =
-                                    index == _selectedSubtitleStreamIndex;
-
-                                final displayLabel = isDefault && !hasDefaultTag
-                                    ? '$label (默认)'
-                                    : label;
-
-                                return Material(
+                            children: [
+                              // ✅ 只有当字幕数量大于0时才添加"不显示"选项
+                              if (_subtitleStreams.isNotEmpty)
+                                Material(
                                   color: Colors.transparent,
                                   child: InkWell(
                                     onTap: () =>
-                                        Navigator.of(dialogCtx).pop(index),
+                                        Navigator.of(dialogCtx).pop(-1),
                                     child: Padding(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 20,
@@ -2337,17 +2341,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                         children: [
                                           Expanded(
                                             child: Text(
-                                              displayLabel,
+                                              '不显示',
                                               style: TextStyle(
                                                 color: Colors.white,
                                                 fontSize: 15,
-                                                fontWeight: isSelected
-                                                    ? FontWeight.w600
-                                                    : FontWeight.w500,
+                                                fontWeight:
+                                                    _selectedSubtitleStreamIndex ==
+                                                            -1
+                                                        ? FontWeight.w600
+                                                        : FontWeight.w500,
                                               ),
                                             ),
                                           ),
-                                          if (isSelected)
+                                          if (_selectedSubtitleStreamIndex ==
+                                              -1)
                                             const Icon(
                                               Icons.check_rounded,
                                               size: 20,
@@ -2357,9 +2364,63 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       ),
                                     ),
                                   ),
-                                );
-                              },
-                            ),
+                                ),
+                              // ✅ 字幕流列表
+                              ...List.generate(
+                                _subtitleStreams.length,
+                                (index) {
+                                  final label = _formatSubtitleStream(
+                                      _subtitleStreams[index]);
+                                  final isDefault = (_subtitleStreams[index]
+                                          ['IsDefault'] as bool?) ==
+                                      true;
+                                  final hasDefaultTag = label.contains('默认');
+                                  final isSelected =
+                                      index == _selectedSubtitleStreamIndex;
+
+                                  final displayLabel =
+                                      isDefault && !hasDefaultTag
+                                          ? '$label (默认)'
+                                          : label;
+
+                                  return Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () =>
+                                          Navigator.of(dialogCtx).pop(index),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 20,
+                                          vertical: 14,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                displayLabel,
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 15,
+                                                  fontWeight: isSelected
+                                                      ? FontWeight.w600
+                                                      : FontWeight.w500,
+                                                ),
+                                              ),
+                                            ),
+                                            if (isSelected)
+                                              const Icon(
+                                                Icons.check_rounded,
+                                                size: 20,
+                                                color: Colors.white,
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -2376,7 +2437,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     scrollController.dispose();
     _resetHideControlsTimer();
 
-    if (result != null && result >= 0 && result < _subtitleStreams.length) {
+    // ✅ 支持选择"不显示"（-1）或有效的字幕流索引
+    if (result != null &&
+        (result == -1 || (result >= 0 && result < _subtitleStreams.length))) {
       setState(() {
         _selectedSubtitleStreamIndex = result;
         _hasManuallySelectedSubtitle = true;
@@ -2388,7 +2451,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   /// ✅ 更新字幕URL（尝试多种格式找到可用的）
   Future<void> _updateSubtitleUrl() async {
-    if (_api == null || _selectedSubtitleStreamIndex == null) {
+    // ✅ 如果选择的是"不显示"（-1），则清空字幕URL
+    if (_api == null ||
+        _selectedSubtitleStreamIndex == null ||
+        _selectedSubtitleStreamIndex == -1) {
       setState(() {
         _subtitleUrl = null;
       });

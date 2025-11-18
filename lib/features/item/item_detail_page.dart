@@ -19,6 +19,7 @@ import '../../providers/library_provider.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/status_bar_manager.dart';
 import '../../widgets/blur_navigation_bar.dart';
+import '../../utils/app_route_observer.dart';
 
 final itemProvider =
     FutureProvider.family<ItemInfo, String>((ref, itemId) async {
@@ -51,7 +52,8 @@ class ItemDetailPage extends ConsumerStatefulWidget {
   ConsumerState<ItemDetailPage> createState() => _ItemDetailPageState();
 }
 
-class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
+class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
+    with RouteAware {
   final _scrollController = ScrollController();
   static const SystemUiOverlayStyle _lightStatusBar = SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -76,6 +78,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   int? _selectedSubtitleStreamIndex;
   bool _hasManuallySelectedSubtitle = false; // ✅ 标记用户是否手动选择过字幕
   bool _hasManuallySelectedAudio = false; // ✅ 标记用户是否手动选择过音频
+  // ✅ 使用 ValueNotifier 来局部更新字幕选择显示
+  late final ValueNotifier<int?> _subtitleIndexNotifier;
+  bool _isLoadingStreamSelections = false; // ✅ 标记是否正在加载保存的选择
   final GlobalKey _resumeMenuAnchorKey = GlobalKey();
   static const Color _resumeButtonColor = Color(0xFFFFB74D);
   static const Color _playButtonColor = Color(0xFF3F8CFF);
@@ -91,10 +96,14 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   StatusBarStyleController? _statusBarController;
   ModalRoute<dynamic>? _modalRoute;
   Animation<double>? _routeAnimation;
+  bool _isRouteSubscribed = false; // ✅ 路由订阅状态
+  String? _lastItemDataHash; // ✅ 记录上次 item 数据的哈希，用于检测数据变化
 
   @override
   void initState() {
     super.initState();
+    // ✅ 初始化字幕选择 ValueNotifier
+    _subtitleIndexNotifier = ValueNotifier<int?>(null);
     final platformBrightness =
         WidgetsBinding.instance.platformDispatcher.platformBrightness;
     _statusBarStyle = StatusBarManager.currentStyle ??
@@ -113,11 +122,24 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   /// ✅ 加载保存的音频和字幕选择
   Future<void> _loadStreamSelections() async {
     try {
+      _isLoadingStreamSelections = true;
       final prefs = await SharedPreferences.getInstance();
       final hasManualAudio =
           prefs.getBool('item_${widget.itemId}_manual_audio') ?? false;
       final hasManualSubtitle =
           prefs.getBool('item_${widget.itemId}_manual_subtitle') ?? false;
+
+      // ✅ 先设置标记，防止在加载完成前被覆盖
+      if (mounted && hasManualSubtitle) {
+        setState(() {
+          _hasManuallySelectedSubtitle = true;
+        });
+      }
+      if (mounted && hasManualAudio) {
+        setState(() {
+          _hasManuallySelectedAudio = true;
+        });
+      }
 
       // ✅ 只有手动选择过才加载保存的值
       final audioIndex =
@@ -128,11 +150,13 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
         setState(() {
           _selectedAudioStreamIndex = audioIndex;
           _selectedSubtitleStreamIndex = subtitleIndex;
-          _hasManuallySelectedAudio = hasManualAudio;
-          _hasManuallySelectedSubtitle = hasManualSubtitle;
         });
+        // ✅ 同时更新 ValueNotifier，触发局部更新
+        _subtitleIndexNotifier.value = subtitleIndex;
       }
     } catch (e) {
+    } finally {
+      _isLoadingStreamSelections = false;
     }
   }
 
@@ -152,8 +176,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
           'item_${widget.itemId}_manual_audio', _hasManuallySelectedAudio);
       await prefs.setBool('item_${widget.itemId}_manual_subtitle',
           _hasManuallySelectedSubtitle);
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   @override
@@ -165,6 +188,11 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       _modalRoute = newRoute;
       _routeAnimation = newRoute?.animation;
       _routeAnimation?.addStatusListener(_handleRouteAnimationStatus);
+    }
+    // ✅ 订阅路由观察者，用于检测页面返回
+    if (!_isRouteSubscribed && _modalRoute != null) {
+      appRouteObserver.subscribe(this, _modalRoute!);
+      _isRouteSubscribed = true;
     }
   }
 
@@ -180,12 +208,75 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
 
   @override
   void dispose() {
+    // ✅ 取消订阅路由观察者
+    if (_isRouteSubscribed) {
+      appRouteObserver.unsubscribe(this);
+      _isRouteSubscribed = false;
+    }
+    // ✅ 释放 ValueNotifier
+    _subtitleIndexNotifier.dispose();
     _statusBarController?.release();
     _statusBarController = null;
     _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
     _removeRouteListener();
     super.dispose();
+  }
+
+  // ✅ 当从其他页面返回时，itemProvider 会自动重新加载，触发字幕选择刷新
+  @override
+  void didPopNext() {
+    super.didPopNext();
+  }
+
+  /// ✅ 刷新字幕和音频选择（局部更新）
+  Future<void> _refreshStreamSelections() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // ✅ 重新加载 SharedPreferences 确保获取最新值
+      await prefs.reload();
+
+      // ✅ 读取字幕选择
+      int? subtitleIndex = prefs.getInt('item_${widget.itemId}_subtitle');
+      bool hasManualSubtitle =
+          prefs.getBool('item_${widget.itemId}_manual_subtitle') ?? false;
+
+      // ✅ 读取音频选择
+      bool hasManualAudio =
+          prefs.getBool('item_${widget.itemId}_manual_audio') ?? false;
+      int? audioIndex =
+          hasManualAudio ? prefs.getInt('item_${widget.itemId}_audio') : null;
+
+      // ✅ 如果第一次读取时没有找到值，可能是保存还没完成，重新加载一次
+      if ((!hasManualSubtitle && subtitleIndex == null) ||
+          (!hasManualAudio && audioIndex == null)) {
+        await prefs.reload();
+        subtitleIndex = prefs.getInt('item_${widget.itemId}_subtitle');
+        hasManualSubtitle =
+            prefs.getBool('item_${widget.itemId}_manual_subtitle') ?? false;
+        hasManualAudio =
+            prefs.getBool('item_${widget.itemId}_manual_audio') ?? false;
+        audioIndex =
+            hasManualAudio ? prefs.getInt('item_${widget.itemId}_audio') : null;
+      }
+
+      if (mounted) {
+        // ✅ 更新字幕选择
+        _hasManuallySelectedSubtitle = hasManualSubtitle;
+        _selectedSubtitleStreamIndex = subtitleIndex;
+        final oldSubtitleValue = _subtitleIndexNotifier.value;
+        _subtitleIndexNotifier.value = subtitleIndex;
+
+        // ✅ 更新音频选择
+        _hasManuallySelectedAudio = hasManualAudio;
+        _selectedAudioStreamIndex = audioIndex;
+
+        // ✅ 触发 UI 更新（音频选择通过 setState 更新，字幕选择通过 ValueNotifier 更新）
+        setState(() {
+          // setState 会触发整个 _buildMediaInfo 重建，从而更新音频显示
+        });
+      } else {}
+    } catch (e) {}
   }
 
   void _handleScroll() {
@@ -203,6 +294,22 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   @override
   Widget build(BuildContext context) {
     final item = ref.watch(itemProvider(widget.itemId));
+
+    // ✅ 当 itemProvider 重新加载数据时（比如从播放页面返回时），顺便刷新字幕和音频选择
+    // 检测数据变化：当数据有值且与上次不同时，刷新字幕和音频选择
+    item.whenData((data) {
+      // ✅ 使用 userData 的播放进度作为数据变化的标识
+      final playbackTicks =
+          (data.userData?['PlaybackPositionTicks'] as num?)?.toInt();
+      final currentHash = '${data.id}_${playbackTicks ?? 0}';
+
+      // ✅ 如果数据发生变化（不是首次加载），立即刷新字幕和音频选择（不使用 postFrameCallback，减少延迟）
+      if (_lastItemDataHash != null && _lastItemDataHash != currentHash) {
+        // ✅ 直接调用，不使用 postFrameCallback，减少延迟
+        _refreshStreamSelections();
+      }
+      _lastItemDataHash = currentHash;
+    });
 
     return StatusBarStyleScope(
       style: _statusBarStyle,
@@ -728,6 +835,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     final audioStreams = _getAudioStreams(item);
     final subtitleStreams = _getSubtitleStreams(item);
     final selectedAudioIndex = _ensureAudioSelection(audioStreams);
+    // ✅ 注意：selectedSubtitleIndex 只在 ValueNotifier 为 null 时作为后备值使用
+    // ValueListenableBuilder 会优先使用 ValueNotifier 的值
     final selectedSubtitleIndex = _ensureSubtitleSelection(subtitleStreams);
 
     final textColor = isDark ? Colors.white : Colors.black87;
@@ -821,26 +930,116 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       );
     }
 
-    if (subtitleStreams.isNotEmpty &&
-        selectedSubtitleIndex >= 0 &&
-        selectedSubtitleIndex < subtitleStreams.length) {
-      final subtitleStream = subtitleStreams[selectedSubtitleIndex];
-      final subtitleLabel = _formatSubtitleStream(subtitleStream);
-      final hasMultiple = subtitleStreams.length > 1;
+    // ✅ 使用 ValueListenableBuilder 来局部更新字幕显示
+    if (subtitleStreams.isNotEmpty) {
+      // ✅ 添加与上方控件统一的间距
+      if (widgets.isNotEmpty) {
+        widgets.add(const SizedBox(height: 6));
+      }
+      widgets.add(ValueListenableBuilder<int?>(
+        valueListenable: _subtitleIndexNotifier,
+        builder: (context, subtitleIndexFromNotifier, _) {
+          // ✅ 优先使用 ValueNotifier 的值（这是最新的值，包括从播放页面返回时刷新的值）
+          // 如果 ValueNotifier 有值（包括 -1 表示不显示），直接使用它
+          // 如果 ValueNotifier 为 null，使用 selectedSubtitleIndex 作为临时显示
+          // 注意：subtitleIndexFromNotifier 可能为 null（表示未设置），也可能为 -1（表示不显示）
+          final currentIndex = subtitleIndexFromNotifier != null
+              ? subtitleIndexFromNotifier
+              : selectedSubtitleIndex;
 
-      addRow(
-        '字幕',
-        subtitleLabel,
-        highlight: hasMultiple,
-        isDefault: (subtitleStream['IsDefault'] as bool?) == true,
-        onTap: hasMultiple
-            ? (ctx) => _showSubtitleSelectionMenu(
-                  ctx,
-                  subtitleStreams,
-                  selectedSubtitleIndex,
-                )
-            : null,
-      );
+          // ✅ 如果选择了"不显示"（-1），显示"不显示"
+          if (currentIndex == -1) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text('字幕: ', style: textStyle),
+                Expanded(
+                  child: Builder(
+                    builder: (context) {
+                      final key = GlobalKey();
+                      final child = Container(
+                        key: key,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: highlightColor,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '不显示',
+                          style: textStyle,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _showSubtitleSelectionMenu(
+                          key.currentContext ?? context,
+                          subtitleStreams,
+                          currentIndex,
+                        ),
+                        child: child,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          } else if (currentIndex >= 0 &&
+              currentIndex < subtitleStreams.length) {
+            final subtitleStream = subtitleStreams[currentIndex];
+            final subtitleLabel = _formatSubtitleStream(subtitleStream);
+            // ✅ 即使只有一个字幕，也要显示可点击的菜单（因为可以选择"不显示"）
+            final isDefault = (subtitleStream['IsDefault'] as bool?) == true;
+            final valueText = isDefault && !subtitleLabel.contains('默认')
+                ? '$subtitleLabel (默认)'
+                : subtitleLabel;
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text('字幕: ', style: textStyle),
+                Expanded(
+                  // ✅ 始终显示可点击的组件，即使只有一个字幕（可以选择"不显示"）
+                  child: Builder(
+                    builder: (context) {
+                      final key = GlobalKey();
+                      final child = Container(
+                        key: key,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: highlightColor,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          valueText,
+                          style: textStyle,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _showSubtitleSelectionMenu(
+                          key.currentContext ?? context,
+                          subtitleStreams,
+                          currentIndex,
+                        ),
+                        child: child,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          }
+          return const SizedBox.shrink();
+        },
+      ));
     }
 
     return Column(
@@ -1195,27 +1394,57 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     if (subtitleStreams.isEmpty) return -1;
 
     final current = _selectedSubtitleStreamIndex;
+
+    // ✅ 如果正在加载保存的选择，且用户手动选择过，等待加载完成
+    if (_isLoadingStreamSelections && _hasManuallySelectedSubtitle) {
+      // 返回一个临时值，等待加载完成后再更新
+      final defaultIndex = subtitleStreams
+          .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+
+      return defaultIndex != -1 ? defaultIndex : 0;
+    }
+
+    // ✅ 如果用户选择了"不显示"（-1），则保持不显示
+    if (current == -1) {
+      return -1;
+    }
     // ✅ 如果已有有效选择，直接使用
     if (current != null && current >= 0 && current < subtitleStreams.length) {
       return current;
     }
 
-    // ✅ 如果用户手动选择过，使用默认值
+    // ✅ 如果用户手动选择过，但值是-1（不显示），则保持不显示
     if (_hasManuallySelectedSubtitle) {
-      final defaultIndex = subtitleStreams
-          .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
-      final fallback = defaultIndex != -1 ? defaultIndex : 0;
-      Future.microtask(() {
-        if (mounted) {
-          setState(() {
-            _selectedSubtitleStreamIndex = fallback;
-          });
+      if (current == -1) {
+        return -1;
+      }
+      // ✅ 如果用户手动选择过，但当前值为 null（可能还在加载中），等待加载完成
+      if (current == null) {
+        // 如果正在加载，返回默认值作为临时显示，但不保存
+        if (_isLoadingStreamSelections) {
+          final defaultIndex = subtitleStreams
+              .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+          return defaultIndex != -1 ? defaultIndex : 0;
         }
-      });
-      return fallback;
+        // 如果加载完成但值为 null，说明没有保存的值，不应该覆盖
+        // 返回默认值但不保存
+        final defaultIndex = subtitleStreams
+            .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+        return defaultIndex != -1 ? defaultIndex : 0;
+      }
+      // ✅ 如果当前值无效（超出范围），使用默认值但不覆盖保存的值
+      if (current < 0 || current >= subtitleStreams.length) {
+        final defaultIndex = subtitleStreams
+            .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
+        final fallback = defaultIndex != -1 ? defaultIndex : 0;
+        // ✅ 不更新状态，因为用户已经手动选择过，应该等待加载完成
+        return fallback;
+      }
+      // ✅ 当前值有效，直接返回
+      return current;
     }
 
-    // ✅ 智能中文字幕选择
+    // ✅ 智能中文字幕选择（只在用户没有手动选择过时执行）
     int selectedIndex = _findBestChineseSubtitle(subtitleStreams);
 
     // ✅ 如果没有找到中文字幕，使用默认或第一个
@@ -1227,9 +1456,15 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
 
     Future.microtask(() {
       if (mounted) {
+        // ✅ 再次检查：如果加载完成且用户手动选择过，不覆盖
+        if (!_isLoadingStreamSelections && _hasManuallySelectedSubtitle) {
+          return;
+        }
         setState(() {
           _selectedSubtitleStreamIndex = selectedIndex;
         });
+        // ✅ 更新 ValueNotifier
+        _subtitleIndexNotifier.value = selectedIndex;
         _saveStreamSelections();
       }
     });
@@ -1498,34 +1733,54 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.26,
       ),
-      items: List.generate(subtitleStreams.length, (index) {
-        final label = _formatSubtitleStream(subtitleStreams[index]);
-        final isDefault =
-            (subtitleStreams[index]['IsDefault'] as bool?) == true;
-        final hasDefaultTag = label.contains('默认');
-        return PopupMenuItem<int>(
-          value: index,
+      items: [
+        // ✅ 添加"不显示"选项
+        PopupMenuItem<int>(
+          value: -1,
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  isDefault && !hasDefaultTag ? '$label (默认)' : label,
-                ),
+                child: Text('不显示'),
               ),
-              if (index == selected)
+              if (selected == -1)
                 const Icon(Icons.check, size: 18, color: Colors.blue),
             ],
           ),
-        );
-      }),
+        ),
+        // ✅ 字幕流列表
+        ...List.generate(subtitleStreams.length, (index) {
+          final label = _formatSubtitleStream(subtitleStreams[index]);
+          final isDefault =
+              (subtitleStreams[index]['IsDefault'] as bool?) == true;
+          final hasDefaultTag = label.contains('默认');
+          return PopupMenuItem<int>(
+            value: index,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isDefault && !hasDefaultTag ? '$label (默认)' : label,
+                  ),
+                ),
+                if (index == selected)
+                  const Icon(Icons.check, size: 18, color: Colors.blue),
+              ],
+            ),
+          );
+        }),
+      ],
     );
 
-    if (result != null && result >= 0 && result < subtitleStreams.length) {
+    // ✅ 支持选择"不显示"（-1）或有效的字幕流索引
+    if (result != null &&
+        (result == -1 || (result >= 0 && result < subtitleStreams.length))) {
       setState(() {
         _selectedSubtitleStreamIndex = result;
         // ✅ 标记为手动选择
         _hasManuallySelectedSubtitle = true;
       });
+      // ✅ 更新 ValueNotifier，触发局部更新
+      _subtitleIndexNotifier.value = result;
       // ✅ 保存字幕选择
       _saveStreamSelections();
     }
