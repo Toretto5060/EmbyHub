@@ -445,11 +445,18 @@ class MainActivity: FlutterActivity() {
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 // Android 8.0+ 使用 AudioFocusRequest
-                // ✅ 配置音频属性，确保系统音效（均衡器、低音增强等）自动应用
+                // ✅ 配置音频属性，确保系统音效（均衡器、低音增强、杜比音效等）自动应用
                 val audioAttributes = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA) // 媒体播放用途
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE) // 电影内容类型
-                    .setFlags(AudioAttributes.FLAG_HW_AV_SYNC) // 硬件音视频同步
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE) // 电影内容类型（支持杜比音效）
+                    .setFlags(
+                        AudioAttributes.FLAG_HW_AV_SYNC or // 硬件音视频同步
+                        (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            AudioAttributes.FLAG_DEEP_BUFFER // Android 10+ 深度缓冲，支持高质量音频
+                        } else {
+                            0
+                        })
+                    )
                     .build()
                 
                 val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
