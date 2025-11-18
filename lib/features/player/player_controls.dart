@@ -172,9 +172,8 @@ class PlayerControls extends StatelessWidget {
 
         // ✅ 拖动进度条时的时间预览（与顶部工具条水平对齐）
         // 长按快进/快退时也显示
-        // PiP 模式下隐藏，锁定状态下隐藏
+        // 不受锁定状态影响，PiP 模式下隐藏
         if (!state.isInPipMode &&
-            !state.isLocked &&
             ((state.isDraggingProgress && state.draggingPosition != null) ||
                 (state.isLongPressingForward || state.isLongPressingRewind)))
           _DraggingTimePreview(
@@ -199,10 +198,9 @@ class PlayerControls extends StatelessWidget {
           _PlayPauseButton(state: state),
 
         // ✅ 加载指示器（当播放/暂停按钮不显示时，在按钮位置显示 loading）
-        // PiP 模式下隐藏，锁定状态下隐藏
+        // 不受锁定状态影响，PiP 模式下隐藏
         if (!state.isInPipMode &&
             !state.showControls &&
-            !state.isLocked &&
             (!state.ready ||
                 state.isBuffering ||
                 (state.ready && state.position == Duration.zero)))
@@ -219,10 +217,9 @@ class PlayerControls extends StatelessWidget {
           _BottomControlsBar(state: state),
 
         // ✅ 缓冲信息（显示在播放/暂停按钮下方，放在最后确保在最上层，不被字幕遮挡）
-        // 不受控制栏显示/隐藏影响，只要在加载/缓冲时就显示
-        // 锁定状态下隐藏
+        // 不受控制栏显示/隐藏影响，不受锁定状态影响，只要在加载/缓冲时就显示
+        // PiP 模式下隐藏
         if (!state.isInPipMode &&
-            !state.isLocked &&
             (!state.ready ||
                 state.isBuffering ||
                 (state.ready && state.position == Duration.zero)))
