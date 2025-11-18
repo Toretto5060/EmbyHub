@@ -491,19 +491,22 @@ class _ItemTileState extends ConsumerState<_ItemTile>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          AspectRatio(
-            aspectRatio: aspectRatio,
-            child: Container(
-              width: widget.cardWidth,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _Poster(itemId: item.id, itemType: item.type),
+          // ✅ 如果是16:9的，使用固定高度，宽度自适应
+          // 如果不是16:9的，使用AspectRatio固定宽高比
+          widget.hasHorizontalArtwork
+              ? AspectRatio(
+                  aspectRatio: aspectRatio,
+                  child: Container(
+                    width: widget.cardWidth,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _Poster(itemId: item.id, itemType: item.type),
                     // 电影播放完成标记
                     if (item.type == 'Movie' && played)
                       Positioned(
@@ -633,7 +636,152 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                 ),
               ),
             ),
-          ),
+          )
+              // ✅ 16:9的情况：固定高度，宽度自适应
+              : SizedBox(
+                  height: 100, // 固定高度（缩小为原来的75%）
+                  child: Container(
+                    width: widget.cardWidth * 0.75 * 16 / 9, // 宽度根据16:9比例自适应
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _Poster(itemId: item.id, itemType: item.type),
+                          // 电影播放完成标记
+                          if (item.type == 'Movie' && played)
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.85),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  CupertinoIcons.check_mark,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          // 剧集未看集数显示在右上角
+                          if (item.type == 'Series' && item.userData != null)
+                            Builder(
+                              builder: (context) {
+                                final unplayedCount =
+                                    (item.userData!['UnplayedItemCount'] as num?)
+                                        ?.toInt();
+                                if (unplayedCount != null && unplayedCount > 0) {
+                                  return Positioned(
+                                    top: 4,
+                                    right: 4,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: CupertinoColors.systemRed,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        '$unplayedCount',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+                                return const SizedBox.shrink();
+                              },
+                            ),
+                          // 电影播放进度
+                          if (showProgress)
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 6),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                    colors: [
+                                      Colors.black.withValues(alpha: 0.8),
+                                      Colors.black.withValues(alpha: 0.0),
+                                    ],
+                                  ),
+                                  borderRadius: const BorderRadius.only(
+                                    bottomLeft: Radius.circular(8),
+                                    bottomRight: Radius.circular(8),
+                                  ),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          '剩余 ${formatRemaining(remainingDuration)}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        if (ratingChip != null) ratingChip,
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(999),
+                                      child: TweenAnimationBuilder<double>(
+                                        tween: Tween<double>(
+                                          begin: 0.0,
+                                          end: progress.clamp(0.0, 1.0),
+                                        ),
+                                        duration: const Duration(milliseconds: 600),
+                                        curve: Curves.easeOut,
+                                        builder: (context, animatedValue, child) {
+                                          return LinearProgressIndicator(
+                                            value: animatedValue.clamp(0.0, 1.0),
+                                            minHeight: 3,
+                                            backgroundColor: Colors.white
+                                                .withValues(alpha: 0.2),
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                              const Color(0xFFFFB74D)
+                                                  .withValues(alpha: 0.95),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          // 当没有进度条时仍显示评分
+                          if (!showProgress && ratingChip != null)
+                            Positioned(
+                              bottom: 4,
+                              right: 4,
+                              child: ratingChip,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
           const SizedBox(height: 6),
           Text(
             item.name,

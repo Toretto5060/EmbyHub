@@ -407,6 +407,12 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                                   if (items.isEmpty) {
                                     return const SizedBox.shrink();
                                   }
+                                  // ✅ 检查是否所有影片都是16:9的
+                                  // 根据_SimilarCard的逻辑，hasHorizontalArtwork=false时是16:9
+                                  final allAre16x9 = items.every((item) =>
+                                      !_hasHorizontalArtworkForSimilar(item));
+                                  // ✅ 如果是16:9，高度为100（图片90 + 文字约34，取整），否则为190
+                                  final listHeight = allAre16x9 ? 130.0 : 190.0;
                                   return Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
@@ -425,7 +431,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                                       ),
                                       const SizedBox(height: 12),
                                       SizedBox(
-                                        height: 190,
+                                        height: listHeight,
                                         child: ListView.builder(
                                           padding: EdgeInsets.zero,
                                           scrollDirection: Axis.horizontal,
@@ -2278,6 +2284,23 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       }
     }
     return modules[current].visibleFields.isNotEmpty;
+  }
+
+  /// ✅ 判断影片是否有横向艺术图
+  /// 用于判断"其他类似影片"列表的高度
+  /// 注意：返回false表示是16:9（有Primary图片），返回true表示是2:3（有backdrop）
+  bool _hasHorizontalArtworkForSimilar(ItemInfo item) {
+    if (item.backdropImageTags != null && item.backdropImageTags!.isNotEmpty) {
+      return true;
+    }
+    if (item.parentBackdropImageTags != null &&
+        item.parentBackdropImageTags!.isNotEmpty) {
+      return true;
+    }
+    if ((item.imageTags?['Primary'] ?? '').isEmpty) {
+      return false;
+    }
+    return false;
   }
 }
 
