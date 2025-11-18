@@ -57,6 +57,8 @@ class PlayerControlsState {
     required this.formatBitrate,
     required this.canIncreaseSpeed,
     required this.canDecreaseSpeed,
+    required this.isLocked,
+    required this.onToggleLock,
   });
 
   final bool isInPipMode;
@@ -109,6 +111,8 @@ class PlayerControlsState {
   final String Function(double?) formatBitrate;
   final bool canIncreaseSpeed;
   final bool canDecreaseSpeed;
+  final bool isLocked;
+  final VoidCallback onToggleLock;
 }
 
 /// ✅ 播放器 UI 控制层
@@ -127,7 +131,11 @@ class PlayerControls extends StatelessWidget {
       children: [
         // ✅ 空白区域点击检测层（最底层，当控制层显示时，用于隐藏控制层）
         // 使用 translucent 允许事件穿透到按钮，按钮会用 AbsorbPointer 吸收事件
-        if (!state.isInPipMode && state.showControls && !state.showSpeedList)
+        // 锁定状态下不响应点击隐藏
+        if (!state.isInPipMode &&
+            state.showControls &&
+            !state.showSpeedList &&
+            !state.isLocked)
           Positioned.fill(
             child: GestureDetector(
               onTap: () {
@@ -139,38 +147,48 @@ class PlayerControls extends StatelessWidget {
             ),
           ),
 
-        // ✅ 顶部控制栏（淡入淡出动画）- 固定高度，不随状态栏变化
+        // ✅ 锁定按钮（中间左侧，仅在显示控制层时显示）
         // PiP 模式下隐藏
-        if (!state.isInPipMode) _TopControlsBar(state: state, context: context),
+        // 锁定时也会跟随控制栏自动隐藏，点击屏幕可以重新显示控制栏（只显示锁定按钮）
+        if (!state.isInPipMode && state.showControls)
+          _LockButton(state: state),
+
+        // ✅ 顶部控制栏（淡入淡出动画）- 固定高度，不随状态栏变化
+        // PiP 模式下隐藏，锁定状态下隐藏
+        if (!state.isInPipMode && !state.isLocked)
+          _TopControlsBar(state: state, context: context),
 
         // ✅ 拖动进度条时的时间预览（与顶部工具条水平对齐）
-        // PiP 模式下隐藏
+        // PiP 模式下隐藏，锁定状态下隐藏
         if (!state.isInPipMode &&
+            !state.isLocked &&
             state.isDraggingProgress &&
             state.draggingPosition != null)
           _DraggingTimePreview(state: state),
 
         // ✅ 视频裁切模式提示（tooltip样式，显示在按钮下方）
-        // PiP 模式下隐藏
-        if (!state.isInPipMode && state.showVideoFitHint)
+        // PiP 模式下隐藏，锁定状态下隐藏
+        if (!state.isInPipMode && !state.isLocked && state.showVideoFitHint)
           _VideoFitHint(state: state, context: context),
 
         // ✅ 中间播放/暂停按钮（仅在显示控制栏时）
-        // PiP 模式下隐藏，缓冲时也隐藏
+        // PiP 模式下隐藏，缓冲时也隐藏，锁定状态下隐藏
         if (!state.isInPipMode &&
             state.ready &&
             state.showControls &&
-            !state.isBuffering)
+            !state.isBuffering &&
+            !state.isLocked)
           _PlayPauseButton(state: state),
 
         // ✅ 右侧速度控制（仅在显示控制栏时）
-        // PiP 模式下隐藏，一进来就显示
-        if (!state.isInPipMode && state.showControls)
+        // PiP 模式下隐藏，锁定状态下隐藏
+        if (!state.isInPipMode && state.showControls && !state.isLocked)
           _SpeedControl(state: state, context: context),
 
         // ✅ 底部控制栏（淡入淡出动画）
-        // PiP 模式下隐藏
-        if (!state.isInPipMode) _BottomControlsBar(state: state),
+        // PiP 模式下隐藏，锁定状态下隐藏
+        if (!state.isInPipMode && !state.isLocked)
+          _BottomControlsBar(state: state),
 
         // ✅ 加载/缓冲指示器（不阻挡点击）
         // 显示条件：未准备好 或 正在缓冲 或 还未开始播放（position为0）
@@ -180,7 +198,11 @@ class PlayerControls extends StatelessWidget {
           _LoadingIndicator(state: state),
 
         // ✅ 速度档位列表（显示在左侧，放在最后确保在最上层）
-        if (!state.isInPipMode && state.showSpeedList && state.showControls)
+        // 锁定状态下隐藏
+        if (!state.isInPipMode &&
+            state.showSpeedList &&
+            state.showControls &&
+            !state.isLocked)
           _SpeedList(state: state, context: context),
       ],
     );
@@ -523,6 +545,152 @@ class _VideoFitHint extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// ✅ 锁定按钮（中间左侧）
+class _LockButton extends StatelessWidget {
+  const _LockButton({required this.state});
+
+  final PlayerControlsState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 48, // ✅ 往右移动，从 24 改为 48
+      top: 0,
+      bottom: 0,
+      child: AnimatedBuilder(
+        animation: state.controlsAnimation,
+        builder: (context, child) {
+          // ✅ 锁定状态下，不显示滑入动画，直接显示
+          if (state.isLocked && !state.showControls) {
+            return Center(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(28),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: Theme.of(context).brightness ==
+                                Brightness.dark
+                            ? [
+                                Colors.grey.shade900.withValues(alpha: 0.6),
+                                Colors.grey.shade800.withValues(alpha: 0.4),
+                              ]
+                            : [
+                                Colors.white.withValues(alpha: 0.2),
+                                Colors.white.withValues(alpha: 0.1),
+                              ],
+                      ),
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                    child: CupertinoButton(
+                      padding: const EdgeInsets.all(12),
+                      onPressed: () {
+                        state.onToggleLock();
+                        state.onResetHideControlsTimer();
+                      },
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        transitionBuilder: (child, animation) {
+                          return RotationTransition(
+                            turns: animation,
+                            child: FadeTransition(
+                              opacity: animation,
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: Icon(
+                          state.isLocked
+                              ? Icons.lock_rounded
+                              : Icons.lock_open_rounded,
+                          key: ValueKey<bool>(state.isLocked),
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+          
+          // ✅ 非锁定状态，跟随控制栏动画
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(-1, 0), // ✅ 从左侧滑进来
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: state.controlsAnimation,
+              curve: Curves.easeOut,
+            )),
+            child: FadeTransition(
+              opacity: state.controlsAnimation,
+              child: Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(28),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: Theme.of(context).brightness ==
+                                  Brightness.dark
+                              ? [
+                                  Colors.grey.shade900.withValues(alpha: 0.6),
+                                  Colors.grey.shade800.withValues(alpha: 0.4),
+                                ]
+                              : [
+                                  Colors.white.withValues(alpha: 0.2),
+                                  Colors.white.withValues(alpha: 0.1),
+                                ],
+                        ),
+                        borderRadius: BorderRadius.circular(28),
+                      ),
+                      child: CupertinoButton(
+                        padding: const EdgeInsets.all(12),
+                        onPressed: () {
+                          state.onToggleLock();
+                          state.onResetHideControlsTimer();
+                        },
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          transitionBuilder: (child, animation) {
+                            return RotationTransition(
+                              turns: animation,
+                              child: FadeTransition(
+                                opacity: animation,
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: Icon(
+                            state.isLocked
+                                ? Icons.lock_rounded
+                                : Icons.lock_open_rounded,
+                            key: ValueKey<bool>(state.isLocked),
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

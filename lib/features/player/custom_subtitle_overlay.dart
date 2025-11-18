@@ -26,6 +26,7 @@ class CustomSubtitleOverlay extends StatefulWidget {
     required this.subtitleUrl,
     this.isVisible = true,
     this.showControls = false,
+    this.isLocked = false,
     super.key,
   });
 
@@ -33,6 +34,7 @@ class CustomSubtitleOverlay extends StatefulWidget {
   final String? subtitleUrl;
   final bool isVisible;
   final bool showControls; // ✅ 控制栏显示状态
+  final bool isLocked; // ✅ 锁定状态
 
   @override
   State<CustomSubtitleOverlay> createState() => _CustomSubtitleOverlayState();
@@ -293,10 +295,11 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       return const SizedBox.shrink();
     }
 
-    // ✅ 根据控制栏显示状态调整位置
+    // ✅ 根据控制栏显示状态和锁定状态调整位置
     // 默认位置：距离底部 20
-    // 控制栏显示时：距离底部 100（控制栏高度约 80 + 间距 20，更靠近控制栏）
-    final bottomOffset = widget.showControls ? 85.0 : 20.0;
+    // 控制栏显示且未锁定时：距离底部 85（控制栏高度约 80 + 间距，更靠近控制栏）
+    // 锁定时：距离底部 20（底部控制栏隐藏，字幕下移）
+    final bottomOffset = (widget.showControls && !widget.isLocked) ? 85.0 : 20.0;
 
     // ✅ 移除时间戳显示，只显示字幕内容
     // ✅ 使用固定 key 确保组件复用

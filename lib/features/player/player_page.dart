@@ -83,6 +83,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ 控制栏显示/隐藏（初始隐藏，点击屏幕显示）
   bool _showControls = false;
 
+  // ✅ 控制栏锁定状态（锁定后隐藏其他控件，只显示锁定按钮）
+  bool _isLocked = false;
+
   // ✅ 视频画面裁切模式
   BoxFit _videoFit = BoxFit.contain; // contain(原始), cover(覆盖), fill(填充)
   Timer? _hideControlsTimer;
@@ -1012,9 +1015,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     setState(() {
       _showControls = willShow;
       // ✅ 隐藏控制栏时，立即隐藏tooltip和速度列表
+      // 注意：锁定时不自动解锁，保持锁定状态
       if (!willShow) {
         _showVideoFitHint = false;
         _showSpeedList = false;
+        // 不在这里解锁，保持锁定状态
       }
     });
 
@@ -1039,11 +1044,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ 开始自动隐藏控制栏的计时器
   void _startHideControlsTimer() {
     // ✅ 如果速度列表正在显示，不启动隐藏计时器
+    // 注意：锁定时也允许自动隐藏（锁定按钮会跟随隐藏）
     if (_showSpeedList) return;
 
     _cancelHideControlsTimer();
     _hideControlsTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted && _showControls && _isPlaying && !_showSpeedList) {
+      if (mounted &&
+          _showControls &&
+          _isPlaying &&
+          !_showSpeedList) {
+        // ✅ 锁定时也允许自动隐藏，锁定按钮会跟随控制栏隐藏
+        
         _controlsAnimationController.reverse();
         // ✅ 自动隐藏时也隐藏状态栏
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -1052,8 +1063,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         setState(() {
           _showControls = false;
           // ✅ 立即隐藏tooltip和速度列表
+          // 注意：锁定时不自动解锁，保持锁定状态
           _showVideoFitHint = false;
           _showSpeedList = false;
+          // 不在这里解锁，保持锁定状态
         });
       }
     });
@@ -1161,6 +1174,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   subtitleUrl: _subtitleUrl,
                   isVisible: true, // 始终显示字幕（当有字幕时）
                   showControls: _showControls, // ✅ 传递控制栏显示状态
+                  isLocked: _isLocked, // ✅ 传递锁定状态
                 ),
 
               // ✅ 触摸检测层（当控制层隐藏时，用于显示控制层）
@@ -1270,6 +1284,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   formatBitrate: _formatBitrate,
                   canIncreaseSpeed: _canIncreaseSpeed,
                   canDecreaseSpeed: _canDecreaseSpeed,
+                  isLocked: _isLocked,
+                  onToggleLock: () {
+                    setState(() {
+                      _isLocked = !_isLocked;
+                    });
+                    if (_isLocked) {
+                      // 锁定时取消自动隐藏计时器
+                      _cancelHideControlsTimer();
+                    } else {
+                      // 解锁时重新启动自动隐藏计时器（如果正在播放）
+                      if (_isPlaying) {
+                        _startHideControlsTimer();
+                      }
+                    }
+                  },
                 ),
               ),
             ],
