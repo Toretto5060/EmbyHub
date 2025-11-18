@@ -1155,15 +1155,25 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                 child: ClipRRect(
                   clipBehavior: Clip.hardEdge,
                   borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: progress.clamp(0.0, 1.0),
-                    minHeight: 6,
-                    backgroundColor:
-                        (isDarkBackground ? Colors.white : Colors.black)
-                            .withValues(alpha: 0.18),
-                    valueColor: AlwaysStoppedAnimation(
-                      _resumeButtonColor.withValues(alpha: 0.95),
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(
+                      begin: 0.0,
+                      end: progress.clamp(0.0, 1.0),
                     ),
+                    duration: const Duration(milliseconds: 600),
+                    curve: Curves.easeOut,
+                    builder: (context, animatedValue, child) {
+                      return LinearProgressIndicator(
+                        value: animatedValue.clamp(0.0, 1.0),
+                        minHeight: 6,
+                        backgroundColor:
+                            (isDarkBackground ? Colors.white : Colors.black)
+                                .withValues(alpha: 0.18),
+                        valueColor: AlwaysStoppedAnimation(
+                          _resumeButtonColor.withValues(alpha: 0.95),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),

@@ -502,15 +502,25 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                               const SizedBox(height: 4),
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(999),
-                                child: LinearProgressIndicator(
-                                  value: progress.clamp(0.0, 1.0),
-                                  minHeight: 4,
-                                  backgroundColor:
-                                      Colors.white.withValues(alpha: 0.2),
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    const Color(0xFFFFB74D)
-                                        .withValues(alpha: 0.95),
+                                child: TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(
+                                    begin: 0.0,
+                                    end: progress.clamp(0.0, 1.0),
                                   ),
+                                  duration: const Duration(milliseconds: 600),
+                                  curve: Curves.easeOut,
+                                  builder: (context, animatedValue, child) {
+                                    return LinearProgressIndicator(
+                                      value: animatedValue.clamp(0.0, 1.0),
+                                      minHeight: 3,
+                                      backgroundColor:
+                                          Colors.white.withValues(alpha: 0.2),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        const Color(0xFFFFB74D)
+                                            .withValues(alpha: 0.95),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                             ],
