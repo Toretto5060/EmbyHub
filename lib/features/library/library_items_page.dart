@@ -19,7 +19,7 @@ enum SortOption {
   imdbRating('CommunityRating', 'IMDB评分'),
   resolution('Resolution', '分辨率'),
   dateAdded('DateCreated', '加入日期'),
-  premiereDate('PremiereDate', '发行日期'),
+  premiereDate('ProductionYear,PremiereDate', '发行日期'),
   // container('Container', '媒体容器'),
   officialRating('OfficialRating', '分级限制'),
   // director('Director', '导演'),
@@ -259,34 +259,34 @@ final itemsProvider =
   final availableSortOptions = SortOption.getSortOptionsForType(libraryType);
 
   // ✅ 检查当前排序字段是否适用于当前类型，如果不适用则映射或使用默认值
-  String sortBy = sortState.sortBy.value;
+  SortOption currentSortOption = sortState.sortBy;
   bool ascending = sortState.ascending;
 
   if (!availableSortOptions.contains(sortState.sortBy)) {
     // ✅ 向后兼容：对于不支持的字段，使用新列表中的第一个选项作为默认值
     if (libraryType == 'Series') {
       // ✅ 对于Series，使用新列表中的第一个选项（IMDB评分）
-      final defaultOption = availableSortOptions.isNotEmpty
+      currentSortOption = availableSortOptions.isNotEmpty
           ? availableSortOptions.first
           : SortOption.premiereDate;
-      sortBy = defaultOption.value;
-      ascending = false;
-      // ✅ 更新状态以保存新的排序字段
-      ref.read(sortStateProvider(viewId).notifier).updateState(
-            SortState(sortBy: defaultOption, ascending: false),
-          );
     } else {
       // ✅ 对于Movie类型，使用新列表中的第一个选项（电影类型）
-      final defaultOption = availableSortOptions.isNotEmpty
+      currentSortOption = availableSortOptions.isNotEmpty
           ? availableSortOptions.first
           : SortOption.premiereDate;
-      sortBy = defaultOption.value;
-      ascending = false;
-      // ✅ 更新状态以保存新的排序字段
-      ref.read(sortStateProvider(viewId).notifier).updateState(
-            SortState(sortBy: defaultOption, ascending: false),
-          );
     }
+    ascending = false;
+    // ✅ 更新状态以保存新的排序字段
+    ref.read(sortStateProvider(viewId).notifier).updateState(
+          SortState(sortBy: currentSortOption, ascending: false),
+        );
+  }
+
+  // ✅ 构建排序字段，给所有排序增加副排序字段 SortName（除了标题排序、随机排序）
+  String sortBy = currentSortOption.value;
+  if (currentSortOption != SortOption.name &&
+      currentSortOption != SortOption.random) {
+    sortBy = '$sortBy,${SortOption.name.value}';
   }
 
   // 对于电视剧库，只获取 Series，不获取单集
@@ -305,16 +305,22 @@ final itemsProvider =
       final fallbackOption = availableSortOptions.isNotEmpty
           ? availableSortOptions.first
           : SortOption.premiereDate;
+      // ✅ 给 fallback 排序也添加 SortName（除了标题排序、随机排序）
+      String fallbackSortBy = fallbackOption.value;
+      if (fallbackOption != SortOption.name &&
+          fallbackOption != SortOption.random) {
+        fallbackSortBy = '$fallbackSortBy,${SortOption.name.value}';
+      }
       return await api.getItemsByParent(
         userId: auth.userId!,
         parentId: viewId,
         includeItemTypes: 'Movie,Series,BoxSet,Video',
-        sortBy: fallbackOption.value,
+        sortBy: fallbackSortBy,
         sortOrder: 'Descending',
       );
     }
   } else {
-    // ✅ 对于Movie类型，直接使用选择的排序字段
+    // ✅ 对于Movie类型，直接使用选择的排序字段，并启用合集合并
     try {
       return await api.getItemsByParent(
         userId: auth.userId!,
@@ -322,15 +328,20 @@ final itemsProvider =
         includeItemTypes: 'Movie,Series,BoxSet,Video',
         sortBy: sortBy,
         sortOrder: ascending ? 'Ascending' : 'Descending',
+        groupItemsIntoCollections: true, // 启动合集
       );
     } catch (e) {
       // ✅ 如果排序失败，使用PremiereDate作为默认排序
+      // ✅ 给 fallback 排序也添加 SortName
+      String fallbackSortBy =
+          '${SortOption.premiereDate.value},${SortOption.name.value}';
       return await api.getItemsByParent(
         userId: auth.userId!,
         parentId: viewId,
         includeItemTypes: 'Movie,Series,BoxSet,Video',
-        sortBy: SortOption.premiereDate.value,
+        sortBy: fallbackSortBy,
         sortOrder: 'Descending',
+        groupItemsIntoCollections: true,
       );
     }
   }
