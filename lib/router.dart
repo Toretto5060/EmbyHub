@@ -7,6 +7,7 @@ import 'features/home/home_page.dart';
 import 'features/home/bottom_nav_wrapper.dart';
 import 'features/item/item_detail_page.dart';
 import 'features/library/library_items_page.dart';
+import 'features/library/genre_items_page.dart';
 import 'features/library/livetv_page.dart';
 import 'features/library/music_page.dart';
 import 'features/library/series_detail_page.dart';
@@ -82,6 +83,21 @@ GoRouter createRouter() {
                 child: LibraryItemsPage(
                   viewId: viewId,
                   viewName: viewName,
+                ),
+                state: state,
+              );
+            },
+          ),
+          GoRoute(
+            path: '/library/:viewId/genre',
+            pageBuilder: (context, state) {
+              final viewId = state.pathParameters['viewId'] ?? '';
+              // ✅ 使用query参数传递类型名称，避免路径编码问题
+              final genreName = state.uri.queryParameters['name'] ?? '';
+              return buildCupertinoPage(
+                child: GenreItemsPage(
+                  viewId: viewId,
+                  genreName: genreName,
                 ),
                 state: state,
               );

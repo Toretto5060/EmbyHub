@@ -1,3 +1,4 @@
+// 电影/电视剧 列表页面
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -228,6 +229,138 @@ class FilterStateNotifier extends StateNotifier<FilterState> {
     }
   }
 }
+
+// ✅ 获取类型列表
+final genresProvider =
+    FutureProvider.family<List<GenreInfo>, String>((ref, viewId) async {
+  ref.watch(libraryRefreshTickerProvider);
+  final authAsync = ref.watch(authStateProvider);
+  final auth = authAsync.value;
+  if (auth == null || !auth.isLoggedIn) return <GenreInfo>[];
+  final api = await ref.read(embyApiProvider.future);
+
+  try {
+    // ✅ 先获取少量数据来判断库类型
+    final sampleItems = await api.getItemsByParent(
+      userId: auth.userId!,
+      parentId: viewId,
+      includeItemTypes: 'Movie,Series,BoxSet,Video',
+      limit: 10,
+    );
+
+    // ✅ 判断库类型
+    String? includeItemTypes;
+    if (sampleItems.isNotEmpty) {
+      final movieCount =
+          sampleItems.where((item) => item.type == 'Movie').length;
+      final seriesCount =
+          sampleItems.where((item) => item.type == 'Series').length;
+      includeItemTypes = movieCount > seriesCount ? 'Movie' : 'Series';
+    } else {
+      includeItemTypes = 'Movie,Series'; // 默认包含电影和电视剧
+    }
+
+    // ✅ 获取类型列表（已按SortName排序）
+    return await api.getGenres(
+      userId: auth.userId!,
+      parentId: viewId,
+      includeItemTypes: includeItemTypes,
+    );
+  } catch (e) {
+    return <GenreInfo>[];
+  }
+});
+
+// ✅ 获取有播放进度的剧集（Episode），按播放日期排序
+final episodesProvider =
+    FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
+  ref.watch(libraryRefreshTickerProvider);
+  final authAsync = ref.watch(authStateProvider);
+  final auth = authAsync.value;
+  if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
+  final api = await ref.read(embyApiProvider.future);
+
+  try {
+    // ✅ 获取所有剧集（Episode），包含 UserData 以便检查播放进度，按播放日期排序
+    final episodes = await api.getItemsByParent(
+      userId: auth.userId!,
+      parentId: viewId,
+      includeItemTypes: 'Episode',
+      limit: 1000, // ✅ 获取足够多的剧集
+      sortBy: 'DatePlayed', // ✅ 按播放日期排序
+      sortOrder: 'Descending', // ✅ 最近的播放时间在上面
+    );
+
+    // ✅ 筛选出有播放进度的剧集（PlaybackPositionTicks > 0 && < totalTicks）
+    final filtered = episodes.where((episode) {
+      final userData = episode.userData ?? {};
+      final playbackTicks =
+          (userData['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+      final totalTicks = episode.runTimeTicks ?? 0;
+      return playbackTicks > 0 && playbackTicks < totalTicks;
+    }).toList();
+
+    // ✅ 如果没有播放日期，按DatePlayed字段排序（最近的在上）
+    filtered.sort((a, b) {
+      final aDatePlayed = a.userData?['LastPlayedDate'] as String?;
+      final bDatePlayed = b.userData?['LastPlayedDate'] as String?;
+      if (aDatePlayed == null && bDatePlayed == null) return 0;
+      if (aDatePlayed == null) return 1;
+      if (bDatePlayed == null) return -1;
+      return bDatePlayed.compareTo(aDatePlayed); // 降序
+    });
+
+    return filtered;
+  } catch (e) {
+    return <ItemInfo>[];
+  }
+});
+
+// ✅ 获取有播放进度的电影（Movie），包括合集内的影片，按播放日期排序
+final resumeMoviesProvider =
+    FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
+  ref.watch(libraryRefreshTickerProvider);
+  final authAsync = ref.watch(authStateProvider);
+  final auth = authAsync.value;
+  if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
+  final api = await ref.read(embyApiProvider.future);
+
+  try {
+    // ✅ 获取所有电影（Movie），包含合集内的影片，按播放日期排序
+    final movies = await api.getItemsByParent(
+      userId: auth.userId!,
+      parentId: viewId,
+      includeItemTypes: 'Movie',
+      limit: 1000, // ✅ 获取足够多的电影
+      sortBy: 'DatePlayed', // ✅ 按播放日期排序
+      sortOrder: 'Descending', // ✅ 最近的播放时间在上面
+      groupItemsIntoCollections: true, // ✅ 包含合集内的影片
+    );
+
+    // ✅ 筛选出有播放进度的电影（PlaybackPositionTicks > 0 && < totalTicks）
+    final filtered = movies.where((movie) {
+      final userData = movie.userData ?? {};
+      final playbackTicks =
+          (userData['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+      final totalTicks = movie.runTimeTicks ?? 0;
+      return playbackTicks > 0 && playbackTicks < totalTicks;
+    }).toList();
+
+    // ✅ 如果没有播放日期，按DatePlayed字段排序（最近的在上）
+    filtered.sort((a, b) {
+      final aDatePlayed = a.userData?['LastPlayedDate'] as String?;
+      final bDatePlayed = b.userData?['LastPlayedDate'] as String?;
+      if (aDatePlayed == null && bDatePlayed == null) return 0;
+      if (aDatePlayed == null) return 1;
+      if (bDatePlayed == null) return -1;
+      return bDatePlayed.compareTo(aDatePlayed); // 降序
+    });
+
+    return filtered;
+  } catch (e) {
+    return <ItemInfo>[];
+  }
+});
 
 final itemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
@@ -491,17 +624,17 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     }
 
     if (libraryType == 'Movie') {
-      return ['影片', '继续播放', '收藏', '合集', '类型'];
+      return ['影片', '继续观看', '收藏', '合集', '类型'];
     } else if (libraryType == 'Series') {
       return [
         '节目',
-        '继续播放',
+        '继续观看',
         '收藏',
         '类型',
       ];
     }
     // 默认返回电影类型的 tabs
-    return ['显示影片', '继续播放', '收藏', '合集', '类型'];
+    return ['显示影片', '继续观看', '收藏', '合集', '类型'];
   }
 
   // ✅ 判断库类型
@@ -527,8 +660,14 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     if (tab == '影片' || tab == '节目') {
       // 显示所有影片/节目
       return items;
-    } else if (tab == '继续播放') {
-      // 显示有播放进度的项目
+    } else if (tab == '继续观看') {
+      // ✅ 对于电视剧和电影类型，需要获取所有有播放进度的内容
+      // 这个逻辑在 _buildTabContent 中异步处理
+      if (libraryType == 'Series' || libraryType == 'Movie') {
+        // 返回空列表，实际数据在 _buildTabContent 中通过 provider 获取
+        return [];
+      }
+      // ✅ 对于其他类型，显示有播放进度的项目
       return items.where((item) {
         final userData = item.userData ?? {};
         final playbackTicks =
@@ -546,15 +685,8 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
       // 显示合集
       return items.where((item) => item.type == 'BoxSet').toList();
     } else if (tab == '类型') {
-      // 显示类型筛选（需要从filterState获取）
-      final filterState = ref.read(filterStateProvider(widget.viewId));
-      if (filterState.genreId != null) {
-        return items.where((item) {
-          final genres = item.genres ?? [];
-          return genres.contains(filterState.genreId);
-        }).toList();
-      }
-      return items;
+      // ✅ 类型tab只显示类型列表，不显示items内容（点击类型会跳转到新页面）
+      return [];
     }
     return items;
   }
@@ -562,6 +694,122 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   // ✅ 构建tab内容页面
   Widget _buildTabContent(BuildContext context, WidgetRef ref,
       List<ItemInfo> items, String tab, int pageIndex) {
+    // ✅ 获取 libraryType 来判断是否是电视剧类型
+    final itemsAsync = ref.read(itemsProvider(widget.viewId));
+    final itemsList = itemsAsync.valueOrNull ?? _cachedItemsList;
+    final libraryType = itemsList != null ? _getLibraryType(itemsList) : null;
+
+    // ✅ 对于"类型"tab，只显示类型列表（点击类型会跳转到新页面）
+    if (tab == '类型') {
+      final genresAsync = ref.watch(genresProvider(widget.viewId));
+      return genresAsync.when(
+        data: (genres) {
+          if (genres.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: MediaQuery.of(context).padding.top + 44,
+                ),
+                child: const Text('暂无类型'),
+              ),
+            );
+          }
+          return _buildGenreList(context, ref, genres, pageIndex);
+        },
+        loading: () => Center(
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 44,
+            ),
+            child: const CupertinoActivityIndicator(),
+          ),
+        ),
+        error: (_, __) => Center(
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 44,
+            ),
+            child: const Text('加载失败'),
+          ),
+        ),
+      );
+    }
+
+    // ✅ 对于"继续观看"tab，根据类型使用不同的provider
+    if (tab == '继续观看') {
+      if (libraryType == 'Series') {
+        // ✅ 电视剧类型：使用 episodesProvider 获取剧集
+        final episodesAsync = ref.watch(episodesProvider(widget.viewId));
+        return episodesAsync.when(
+          data: (episodes) {
+            if (episodes.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    top: MediaQuery.of(context).padding.top + 44,
+                  ),
+                  child: const Text('此分类暂无内容'),
+                ),
+              );
+            }
+            return _buildTabContentList(context, ref, episodes, pageIndex,
+                isResumeTab: true, libraryType: 'Series');
+          },
+          loading: () => Center(
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 44,
+              ),
+              child: const CupertinoActivityIndicator(),
+            ),
+          ),
+          error: (_, __) => Center(
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 44,
+              ),
+              child: const Text('加载失败'),
+            ),
+          ),
+        );
+      } else if (libraryType == 'Movie') {
+        // ✅ 电影类型：使用 resumeMoviesProvider 获取电影
+        final moviesAsync = ref.watch(resumeMoviesProvider(widget.viewId));
+        return moviesAsync.when(
+          data: (movies) {
+            if (movies.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    top: MediaQuery.of(context).padding.top + 44,
+                  ),
+                  child: const Text('此分类暂无内容'),
+                ),
+              );
+            }
+            return _buildTabContentList(context, ref, movies, pageIndex,
+                isResumeTab: true, libraryType: 'Movie');
+          },
+          loading: () => Center(
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 44,
+              ),
+              child: const CupertinoActivityIndicator(),
+            ),
+          ),
+          error: (_, __) => Center(
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 44,
+              ),
+              child: const Text('加载失败'),
+            ),
+          ),
+        );
+      }
+    }
+
     if (items.isEmpty) {
       return Center(
         child: Padding(
@@ -573,6 +821,13 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
       );
     }
 
+    return _buildTabContentList(context, ref, items, pageIndex);
+  }
+
+  // ✅ 构建tab内容列表（提取公共逻辑）
+  Widget _buildTabContentList(
+      BuildContext context, WidgetRef ref, List<ItemInfo> items, int pageIndex,
+      {bool isResumeTab = false, String? libraryType}) {
     // ✅ 为每个页面创建独立的ScrollController
     if (!_pageScrollControllers.containsKey(pageIndex)) {
       // ✅ 每个tab都从顶部开始，不使用保存的滚动位置
@@ -608,60 +863,720 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
       edgeOffset: headerHeight,
       onRefresh: () async {
         ref.invalidate(itemsProvider(widget.viewId));
+        ref.invalidate(episodesProvider(widget.viewId)); // ✅ 同时刷新剧集数据
+        ref.invalidate(resumeMoviesProvider(widget.viewId)); // ✅ 同时刷新电影数据
+        await Future.delayed(const Duration(milliseconds: 500));
+      },
+      child: isResumeTab
+          ? _buildResumeList(context, ref, items, pageScrollController,
+              libraryType: libraryType)
+          : ListView.builder(
+              controller: pageScrollController,
+              // ✅ padding顶部需要加上header的完整高度（180），让内容在header下方显示
+              // 减少顶部间距，让内容更靠近筛选行
+              padding: EdgeInsets.only(
+                top: headerHeight + 6, // ✅ 从12改为6，让内容更靠近筛选行
+                left: 12,
+                right: 12,
+                bottom: 12,
+              ),
+              itemCount: _buildRows(items).length,
+              itemBuilder: (context, rowIndex) {
+                final rows = _buildRows(items);
+                final row = rows[rowIndex];
+                return Padding(
+                  padding: EdgeInsets.only(
+                    bottom: rowIndex == rows.length - 1 ? 0 : 16,
+                  ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final hasHorizontal =
+                          row.any((entry) => entry.hasHorizontalArtwork);
+                      final columns = hasHorizontal ? 3 : 2;
+                      final spacing = columns > 1 ? 16.0 : 0.0;
+                      final availableWidth = constraints.maxWidth;
+                      final totalSpacing = spacing * (columns - 1);
+                      final cardWidth =
+                          (availableWidth - totalSpacing) / columns;
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (var i = 0; i < columns; i++) ...[
+                            if (i > 0) SizedBox(width: spacing),
+                            SizedBox(
+                              width: cardWidth,
+                              child: i < row.length
+                                  ? _ItemTile(
+                                      item: row[i].item,
+                                      hasHorizontalArtwork:
+                                          row[i].hasHorizontalArtwork,
+                                      cardWidth: cardWidth,
+                                    )
+                                  : const SizedBox.shrink(),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  // ✅ 构建类型列表（显示海报，每行3个）
+  Widget _buildGenreList(BuildContext context, WidgetRef ref,
+      List<GenreInfo> genres, int pageIndex) {
+    // ✅ 为每个页面创建独立的ScrollController
+    if (!_pageScrollControllers.containsKey(pageIndex)) {
+      final controller = ScrollController(initialScrollOffset: 0.0);
+      _pageScrollControllers[pageIndex] = controller;
+
+      if (pageIndex == _selectedTab && mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+      }
+    }
+    final pageScrollController = _pageScrollControllers[pageIndex]!;
+
+    final headerHeight = 100.0 + 36.0; // ✅ BlurNavigationBar的preferredSize
+
+    return RefreshIndicator(
+      displacement: 20,
+      edgeOffset: headerHeight,
+      onRefresh: () async {
+        ref.invalidate(itemsProvider(widget.viewId));
+        ref.invalidate(genresProvider(widget.viewId));
         await Future.delayed(const Duration(milliseconds: 500));
       },
       child: ListView.builder(
         controller: pageScrollController,
-        // ✅ padding顶部需要加上header的完整高度（180），让内容在header下方显示
-        // 减少顶部间距，让内容更靠近筛选行
         padding: EdgeInsets.only(
-          top: headerHeight + 6, // ✅ 从12改为6，让内容更靠近筛选行
+          top: headerHeight + 6,
           left: 12,
           right: 12,
           bottom: 12,
         ),
-        itemCount: _buildRows(items).length,
+        itemCount: (genres.length / 3).ceil(),
         itemBuilder: (context, rowIndex) {
-          final rows = _buildRows(items);
-          final row = rows[rowIndex];
+          final startIndex = rowIndex * 3;
+          final endIndex = (startIndex + 3).clamp(0, genres.length);
+          final rowGenres = genres.sublist(startIndex, endIndex);
+
           return Padding(
             padding: EdgeInsets.only(
-              bottom: rowIndex == rows.length - 1 ? 0 : 16,
+              bottom: rowIndex == (genres.length / 3).ceil() - 1 ? 0 : 12,
             ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final hasHorizontal =
-                    row.any((entry) => entry.hasHorizontalArtwork);
-                final columns = hasHorizontal ? 3 : 2;
-                final spacing = columns > 1 ? 16.0 : 0.0;
-                final availableWidth = constraints.maxWidth;
-                final totalSpacing = spacing * (columns - 1);
-                final cardWidth = (availableWidth - totalSpacing) / columns;
-
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (var i = 0; i < columns; i++) ...[
-                      if (i > 0) SizedBox(width: spacing),
-                      SizedBox(
-                        width: cardWidth,
-                        child: i < row.length
-                            ? _ItemTile(
-                                item: row[i].item,
-                                hasHorizontalArtwork:
-                                    row[i].hasHorizontalArtwork,
-                                cardWidth: cardWidth,
-                              )
-                            : const SizedBox.shrink(),
-                      ),
-                    ],
-                  ],
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: List.generate(3, (colIndex) {
+                if (colIndex >= rowGenres.length) {
+                  return Expanded(child: Container());
+                }
+                final genre = rowGenres[colIndex];
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: colIndex < 2 ? 8 : 0,
+                    ),
+                    child: _buildGenreTile(context, ref, genre),
+                  ),
                 );
-              },
+              }),
             ),
           );
         },
       ),
+    );
+  }
+
+  // ✅ 构建单个类型海报
+  Widget _buildGenreTile(BuildContext context, WidgetRef ref, GenreInfo genre) {
+    final apiAsync = ref.watch(embyApiProvider);
+
+    return GestureDetector(
+      onTap: () {
+        // ✅ 跳转到类型内容页面（使用query参数避免编码问题）
+        context.push(
+          '/library/${widget.viewId}/genre?name=${Uri.encodeComponent(genre.name)}',
+        );
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 120, // ✅ 固定高度
+            width: double.infinity, // ✅ 正方形
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: apiAsync.when(
+                data: (api) {
+                  String? imageUrl;
+                  if (genre.id.isNotEmpty) {
+                    imageUrl = api.buildImageUrl(
+                      itemId: genre.id,
+                      type: 'Primary',
+                      maxWidth: 400,
+                      tag: genre.imageTags?['Primary'],
+                    );
+                  }
+                  if (imageUrl == null || imageUrl.isEmpty) {
+                    return _buildGenrePlaceholder();
+                  }
+                  return EmbyFadeInImage(
+                    imageUrl: imageUrl,
+                    fit: BoxFit.cover,
+                    placeholder: _buildGenrePlaceholder(),
+                  );
+                },
+                loading: () => _buildGenrePlaceholder(),
+                error: (_, __) => _buildGenrePlaceholder(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              genre.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ 构建类型占位符
+  Widget _buildGenrePlaceholder() {
+    return Container(
+      color: CupertinoColors.systemGrey4,
+      child: Center(
+        child: Icon(
+          CupertinoIcons.tag,
+          color: CupertinoColors.systemGrey2,
+          size: 48,
+        ),
+      ),
+    );
+  }
+
+  // ✅ 构建继续观看列表（每行两个，支持电影和剧集）
+  Widget _buildResumeList(BuildContext context, WidgetRef ref,
+      List<ItemInfo> items, ScrollController scrollController,
+      {String? libraryType}) {
+    final headerHeight = 100.0 + 36.0;
+
+    return ListView.builder(
+      controller: scrollController,
+      padding: EdgeInsets.only(
+        top: headerHeight + 6,
+        left: 12,
+        right: 12,
+        bottom: 12,
+      ),
+      itemCount: (items.length / 2).ceil(),
+      itemBuilder: (context, rowIndex) {
+        final startIndex = rowIndex * 2;
+        final endIndex = (startIndex + 2).clamp(0, items.length);
+        final rowItems = items.sublist(startIndex, endIndex);
+
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: rowIndex == (items.length / 2).ceil() - 1 ? 0 : 16,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < 2; i++) ...[
+                if (i > 0) const SizedBox(width: 12),
+                Expanded(
+                  child: i < rowItems.length
+                      ? (libraryType == 'Movie'
+                          ? _buildResumeMovieCard(context, ref, rowItems[i])
+                          : _buildResumeEpisodeCard(context, ref, rowItems[i]))
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ✅ 构建继续观看电影卡片（类似首页样式）
+  Widget _buildResumeMovieCard(
+      BuildContext context, WidgetRef ref, ItemInfo item) {
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+
+    final progress =
+        (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
+    final normalizedProgress = (progress / 100).clamp(0.0, 1.0);
+    final positionTicks =
+        (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+    final totalTicks = item.runTimeTicks ?? 0;
+    final remainingTicks =
+        totalTicks > positionTicks ? totalTicks - positionTicks : 0;
+    final remainingDuration = totalTicks > 0
+        ? Duration(microseconds: remainingTicks ~/ 10)
+        : Duration.zero;
+
+    String formatRemaining(Duration duration) {
+      if (duration <= Duration.zero) return '0s';
+      if (duration.inHours >= 1) {
+        final minutes = duration.inMinutes.remainder(60);
+        return minutes > 0
+            ? '${duration.inHours}h ${minutes}m'
+            : '${duration.inHours}h';
+      }
+      if (duration.inMinutes >= 1) {
+        return '${duration.inMinutes}m';
+      }
+      return '${duration.inSeconds}s';
+    }
+
+    return CupertinoButton(
+      padding: EdgeInsets.zero,
+      onPressed: item.id != null && item.id!.isNotEmpty
+          ? () {
+              context.push('/item/${item.id}');
+            }
+          : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _buildResumeMoviePoster(context, ref, item),
+                  if (totalTicks > 0 && normalizedProgress > 0)
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 6),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [
+                              Colors.black.withOpacity(0.8),
+                              Colors.black.withOpacity(0.0),
+                            ],
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '剩余 ${formatRemaining(remainingDuration)}',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.85),
+                                fontSize: 11,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(999),
+                              child: TweenAnimationBuilder<double>(
+                                tween: Tween<double>(
+                                  begin: 0.0,
+                                  end: normalizedProgress,
+                                ),
+                                duration: const Duration(milliseconds: 600),
+                                curve: Curves.easeOut,
+                                builder: (context, animatedValue, child) {
+                                  return LinearProgressIndicator(
+                                    value: animatedValue.clamp(0.0, 1.0),
+                                    minHeight: 3,
+                                    backgroundColor:
+                                        Colors.white.withValues(alpha: 0.2),
+                                    valueColor: AlwaysStoppedAnimation(
+                                        const Color(0xFFFFB74D)
+                                            .withValues(alpha: 0.95)),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              item.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ 构建继续观看剧集卡片（类似首页样式）
+  Widget _buildResumeEpisodeCard(
+      BuildContext context, WidgetRef ref, ItemInfo item) {
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = brightness == Brightness.dark;
+
+    final progress =
+        (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
+    final normalizedProgress = (progress / 100).clamp(0.0, 1.0);
+    final positionTicks =
+        (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+    final totalTicks = item.runTimeTicks ?? 0;
+    final remainingTicks =
+        totalTicks > positionTicks ? totalTicks - positionTicks : 0;
+    final remainingDuration = totalTicks > 0
+        ? Duration(microseconds: remainingTicks ~/ 10)
+        : Duration.zero;
+
+    String formatRemaining(Duration duration) {
+      if (duration <= Duration.zero) return '0s';
+      if (duration.inHours >= 1) {
+        final minutes = duration.inMinutes.remainder(60);
+        return minutes > 0
+            ? '${duration.inHours}h ${minutes}m'
+            : '${duration.inHours}h';
+      }
+      if (duration.inMinutes >= 1) {
+        return '${duration.inMinutes}m';
+      }
+      return '${duration.inSeconds}s';
+    }
+
+    // 构建标题文本（与首页逻辑一致）
+    String titleText;
+    String? subtitleText;
+
+    try {
+      titleText = item.seriesName ?? item.name;
+      // 如果是剧集，添加季数信息（如果大于1季）
+      if (item.seriesName != null &&
+          item.parentIndexNumber != null &&
+          item.parentIndexNumber! > 1) {
+        titleText += ' 第${item.parentIndexNumber}季';
+      }
+
+      // 构建副标题文本（集数信息）
+      if (item.seriesName != null && item.indexNumber != null) {
+        final episodeName = item.name;
+        final episodeNum = item.indexNumber!;
+        // 检查集名是否和集数重复（例如："第6集")
+        if (episodeName.contains('$episodeNum') ||
+            episodeName.contains('${episodeNum}集')) {
+          subtitleText = '第${episodeNum}集';
+        } else {
+          subtitleText = '第${episodeNum}集 $episodeName';
+        }
+      }
+    } catch (e) {
+      // 解析失败，显示原始格式
+      titleText = item.seriesName ?? item.name;
+      if (item.seriesName != null) {
+        subtitleText =
+            'S${item.parentIndexNumber ?? 0}E${item.indexNumber ?? 0} ${item.name}';
+      }
+    }
+
+    final subtitle = subtitleText;
+
+    return CupertinoButton(
+      padding: EdgeInsets.zero,
+      onPressed: item.id != null && item.id!.isNotEmpty
+          ? () {
+              context.push('/item/${item.id}');
+            }
+          : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _buildResumeEpisodePoster(context, ref, item),
+                  if (totalTicks > 0 && normalizedProgress > 0)
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 6),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [
+                              Colors.black.withOpacity(0.8),
+                              Colors.black.withOpacity(0.0),
+                            ],
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '剩余 ${formatRemaining(remainingDuration)}',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.85),
+                                fontSize: 11,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(999),
+                              child: TweenAnimationBuilder<double>(
+                                tween: Tween<double>(
+                                  begin: 0.0,
+                                  end: normalizedProgress,
+                                ),
+                                duration: const Duration(milliseconds: 600),
+                                curve: Curves.easeOut,
+                                builder: (context, animatedValue, child) {
+                                  return LinearProgressIndicator(
+                                    value: animatedValue.clamp(0.0, 1.0),
+                                    minHeight: 3,
+                                    backgroundColor:
+                                        Colors.white.withValues(alpha: 0.2),
+                                    valueColor: AlwaysStoppedAnimation(
+                                        const Color(0xFFFFB74D)
+                                            .withValues(alpha: 0.95)),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              titleText,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          if (subtitle != null)
+            Center(
+              child: Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ 构建继续观看电影海报
+  Widget _buildResumeMoviePoster(
+      BuildContext context, WidgetRef ref, ItemInfo item) {
+    final apiAsync = ref.watch(embyApiProvider);
+
+    Widget placeholder() => Container(
+          color: CupertinoColors.systemGrey5,
+          child: const Center(
+            child: Icon(CupertinoIcons.film, size: 48),
+          ),
+        );
+
+    final itemId = item.id;
+    if (itemId == null || itemId.isEmpty) {
+      return placeholder();
+    }
+
+    return apiAsync.when(
+      data: (api) {
+        // ✅ 优先使用电影背景图，然后是主图
+        String? imageUrl;
+        final imageTags = item.imageTags ?? const <String, String>{};
+        final backdropTags = item.backdropImageTags ?? const <String>[];
+
+        // 1. 电影背景图
+        if (backdropTags.isNotEmpty) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Backdrop',
+            tag: backdropTags.first,
+            imageIndex: 0,
+          );
+        }
+        // 2. 电影主图
+        else if (imageTags['Primary'] != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Primary',
+            tag: imageTags['Primary']!,
+          );
+        }
+
+        if (imageUrl == null) {
+          return placeholder();
+        }
+
+        return EmbyFadeInImage(
+          imageUrl: imageUrl,
+          placeholder: placeholder(),
+          fit: BoxFit.cover,
+        );
+      },
+      loading: () => placeholder(),
+      error: (_, __) => placeholder(),
+    );
+  }
+
+  // ✅ 构建继续观看剧集海报
+  Widget _buildResumeEpisodePoster(
+      BuildContext context, WidgetRef ref, ItemInfo item) {
+    final apiAsync = ref.watch(embyApiProvider);
+
+    Widget placeholder() => Container(
+          color: CupertinoColors.systemGrey5,
+          child: const Center(
+            child: Icon(CupertinoIcons.tv, size: 48),
+          ),
+        );
+
+    final itemId = item.id;
+    if (itemId == null || itemId.isEmpty) {
+      return placeholder();
+    }
+
+    return apiAsync.when(
+      data: (api) {
+        // ✅ 优先使用剧集的缩略图，然后是背景图，最后是季/剧集的海报
+        String? imageUrl;
+        final imageTags = item.imageTags ?? const <String, String>{};
+        final backdropTags = item.backdropImageTags ?? const <String>[];
+
+        // 1. 剧集缩略图
+        if (imageTags['Thumb'] != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Thumb',
+            tag: imageTags['Thumb']!,
+          );
+        }
+        // 2. 剧集背景图
+        else if (backdropTags.isNotEmpty) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Backdrop',
+            tag: backdropTags.first,
+            imageIndex: 0,
+          );
+        }
+        // 3. 剧集主图
+        else if (imageTags['Primary'] != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Primary',
+            tag: imageTags['Primary']!,
+          );
+        }
+        // 4. 季缩略图
+        else if (item.parentThumbItemId != null &&
+            item.parentThumbImageTag != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: item.parentThumbItemId!,
+            type: 'Thumb',
+            tag: item.parentThumbImageTag!,
+          );
+        }
+        // 5. 季背景图
+        else if (item.parentBackdropItemId != null &&
+            (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+          imageUrl = api.buildImageUrl(
+            itemId: item.parentBackdropItemId!,
+            type: 'Backdrop',
+            tag: item.parentBackdropImageTags!.first,
+            imageIndex: 0,
+          );
+        }
+        // 6. 季主图
+        else if (item.seasonId != null && item.seasonPrimaryImageTag != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: item.seasonId!,
+            type: 'Primary',
+            tag: item.seasonPrimaryImageTag!,
+          );
+        }
+        // 7. 剧集主图
+        else if (item.seriesId != null && item.seriesPrimaryImageTag != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: item.seriesId!,
+            type: 'Primary',
+            tag: item.seriesPrimaryImageTag!,
+          );
+        }
+
+        if (imageUrl == null) {
+          return placeholder();
+        }
+
+        return EmbyFadeInImage(
+          imageUrl: imageUrl,
+          placeholder: placeholder(),
+          fit: BoxFit.cover,
+        );
+      },
+      loading: () => placeholder(),
+      error: (_, __) => placeholder(),
     );
   }
 
@@ -897,6 +1812,30 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             ? _pageScrollControllers[_selectedTab]!
             : null;
 
+    // ✅ 判断当前tab是否应该显示排序（只有影片/节目、合集、收藏显示排序）
+    final currentTab = _selectedTab < tabs.length ? tabs[_selectedTab] : null;
+    final shouldShowSort = currentTab != null &&
+        (currentTab == '影片' ||
+            currentTab == '节目' ||
+            currentTab == '合集' ||
+            currentTab == '收藏');
+
+    // ✅ 如果是"继续观看"tab，从相应的provider获取数量
+    // ✅ 如果是"类型"tab，从genresProvider获取类型数量
+    int actualItemCount = filteredCount;
+    if (currentTab == '继续观看') {
+      if (libraryType == 'Series') {
+        final episodesAsync = ref.watch(episodesProvider(widget.viewId));
+        actualItemCount = episodesAsync.valueOrNull?.length ?? 0;
+      } else if (libraryType == 'Movie') {
+        final moviesAsync = ref.watch(resumeMoviesProvider(widget.viewId));
+        actualItemCount = moviesAsync.valueOrNull?.length ?? 0;
+      }
+    } else if (currentTab == '类型') {
+      final genresAsync = ref.watch(genresProvider(widget.viewId));
+      actualItemCount = genresAsync.valueOrNull?.length ?? 0;
+    }
+
     return BlurNavigationBar(
       // ✅ 使用稳定的key，只包含viewId和selectedTab，不包含sortState，避免排序改变时重建
       key: ValueKey('nav_${widget.viewId}_$_selectedTab'),
@@ -949,13 +1888,15 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
           }
         });
       },
-      itemCount: filteredCount,
-      sortLabel: sortLabel,
-      sortAscending: sortState.ascending,
-      isSortMenuOpen: _isSortMenuOpen,
-      onSortTap: () {
-        _showSortMenu(context, ref, sortState);
-      },
+      itemCount: actualItemCount,
+      sortLabel: shouldShowSort ? sortLabel : null, // ✅ 只在指定tab显示排序
+      sortAscending: shouldShowSort ? sortState.ascending : null,
+      isSortMenuOpen: shouldShowSort ? _isSortMenuOpen : null,
+      onSortTap: shouldShowSort
+          ? () {
+              _showSortMenu(context, ref, sortState);
+            }
+          : null,
     );
   }
 

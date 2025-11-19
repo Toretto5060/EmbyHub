@@ -353,7 +353,8 @@ class EmbyApi {
       String? includeItemTypes,
       String? sortBy,
       String? sortOrder,
-      bool? groupItemsIntoCollections}) async {
+      bool? groupItemsIntoCollections,
+      String? genres}) async {
     final queryParams = {
       'ParentId': parentId,
       'StartIndex': startIndex,
@@ -380,6 +381,10 @@ class EmbyApi {
     // 添加合集合并参数
     if (groupItemsIntoCollections != null) {
       queryParams['GroupItemsIntoCollections'] = groupItemsIntoCollections;
+    }
+    // 添加类型筛选参数
+    if (genres != null && genres.isNotEmpty) {
+      queryParams['Genres'] = genres;
     }
 
     final res =
@@ -997,6 +1002,69 @@ class EmbyApi {
     return _dio.options.baseUrl + '/Users/$userId/Images/Primary';
   }
 
+  // ✅ 获取类型列表（返回完整信息，包括图片）
+  Future<List<GenreInfo>> getGenres({
+    required String userId,
+    String? parentId,
+    String? includeItemTypes,
+  }) async {
+    try {
+      final queryParams = <String, dynamic>{
+        'Fields':
+            'BasicSyncInfo,CanDelete,CanDownload,PrimaryImageAspectRatio,ImageTags',
+        'StartIndex': 0,
+        'SortBy': 'SortName',
+        'SortOrder': 'Ascending',
+        'EnableImageTypes': 'Primary,Backdrop,Thumb',
+        'ImageTypeLimit': 1,
+        'Recursive': true
+      };
+
+      if (parentId != null && parentId.isNotEmpty) {
+        queryParams['ParentId'] = parentId;
+      }
+      if (includeItemTypes != null && includeItemTypes.isNotEmpty) {
+        queryParams['IncludeItemTypes'] = includeItemTypes;
+      }
+
+      // ✅ 使用 /Genres 路径
+      final res = await _dio.get('/Genres', queryParameters: queryParams);
+
+      _apiLog('✅ [API] Get Genres response: ${res.data}');
+
+      // Genres API 返回的可能是一个数组，每个元素包含 Name 字段
+      // 或者可能是一个包含 Items 字段的对象
+      List<Map<String, dynamic>> items = [];
+      if (res.data is List) {
+        items = (res.data as List).cast<Map<String, dynamic>>();
+      } else if (res.data is Map<String, dynamic>) {
+        final data = res.data as Map<String, dynamic>;
+        if (data['Items'] != null) {
+          items = (data['Items'] as List).cast<Map<String, dynamic>>();
+        }
+      }
+
+      final genres = items.map((e) => GenreInfo.fromJson(e)).where((genre) {
+        // ✅ 基本过滤：必须有名称和ID
+        if (genre.name.isEmpty || genre.id.isEmpty) {
+          return false;
+        }
+        // ✅ 通过ImageTags判断是否有详情：如果ImageTags为空或null，则排除
+        if (genre.imageTags == null || genre.imageTags!.isEmpty) {
+          return false;
+        }
+        return true;
+      }).toList();
+
+      _apiLog('✅ [API] Get Genres parsed: ${genres.length} genres');
+      return genres;
+    } catch (e, stack) {
+      _apiLog('❌ [API] Get Genres failed: $e');
+      _apiLog('❌ [API] Stack trace: $stack');
+      return [];
+    }
+  }
+
   // ✅ 获取播放信息（PlaybackInfo），包含正确的字幕流信息
   Future<Map<String, dynamic>> getPlaybackInfo({
     required String itemId,
@@ -1190,6 +1258,29 @@ class ViewInfo {
       id: id,
       name: name,
       collectionType: collectionType,
+    );
+  }
+}
+
+// ✅ 类型信息类
+class GenreInfo {
+  final String id;
+  final String name;
+  final Map<String, String>? imageTags;
+
+  GenreInfo({
+    required this.id,
+    required this.name,
+    this.imageTags,
+  });
+
+  factory GenreInfo.fromJson(Map<String, dynamic> json) {
+    return GenreInfo(
+      id: json['Id'] as String? ?? '',
+      name: json['Name'] as String? ?? '',
+      imageTags: (json['ImageTags'] as Map<String, dynamic>?)?.map(
+        (key, value) => MapEntry(key, value?.toString() ?? ''),
+      ),
     );
   }
 }

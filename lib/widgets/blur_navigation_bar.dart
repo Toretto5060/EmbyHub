@@ -253,10 +253,11 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
         children: [
           // ✅ "x项" - 向左移动，更靠近标题
           if (widget.itemCount != null)
-            Transform.translate(
-              offset: const Offset(-20, 0), // ✅ 向左移动20像素，更靠近标题
+            SizedBox(
+              width: 50, // 给定宽度
               child: Text(
                 '${widget.itemCount}项',
+                textAlign: TextAlign.left, // 左对齐
                 style: TextStyle(
                   fontSize: 13,
                   color: currentColor.withOpacity(0.7),
@@ -316,6 +317,10 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
                 ),
               ),
             ),
+          // ✅ 当没有排序时，添加占位元素，防止"x项"跑到排序位置
+          if (widget.itemCount != null &&
+              (widget.sortLabel == null || widget.onSortTap == null))
+            const SizedBox(width: 129), // ✅ 预留排序区域的宽度
         ],
       ),
     );
