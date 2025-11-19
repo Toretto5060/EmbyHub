@@ -184,6 +184,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
   @override
   Widget build(BuildContext context) {
+    // ✅ 显式 watch themeModeProvider，确保主题改变时页面重建
+    ref.watch(themeModeProvider);
     final isDark = isDarkModeFromContext(context, ref);
     final backgroundColor =
         isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7);

@@ -7,12 +7,18 @@ import 'router.dart';
 import 'utils/status_bar_manager.dart';
 import 'providers/settings_provider.dart';
 
+// ✅ 使用 Provider 缓存 router，避免每次 build 时重新创建
+final routerProvider = Provider<GoRouter>((ref) {
+  return createRouter();
+});
+
 class EmbyApp extends ConsumerWidget {
   const EmbyApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final GoRouter router = createRouter();
+    // ✅ 从 Provider 获取 router，不会在每次 build 时重新创建
+    final GoRouter router = ref.watch(routerProvider);
     final themeMode = ref.watch(themeModeProvider);
     
     // ✅ 根据用户选择的主题模式确定 ThemeMode（MaterialApp 会自动处理主题切换，不会重建整个应用）
