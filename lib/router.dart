@@ -107,11 +107,9 @@ GoRouter createRouter() {
             path: '/series/:seriesId',
             pageBuilder: (context, state) {
               final seriesId = state.pathParameters['seriesId'] ?? '';
-              final seriesName = state.uri.queryParameters['name'] ?? '剧集详情';
               return buildCupertinoPage(
                 child: SeriesDetailPage(
                   seriesId: seriesId,
-                  seriesName: seriesName,
                 ),
                 state: state,
               );
