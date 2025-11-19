@@ -44,6 +44,28 @@ final similarItemsProvider =
   return items;
 });
 
+// ✅ 获取合集内的影片
+final collectionItemsProvider =
+    FutureProvider.family<List<ItemInfo>, String>((ref, collectionId) async {
+  ref.watch(libraryRefreshTickerProvider);
+  final auth = ref.read(authStateProvider).value;
+  if (auth == null || !auth.isLoggedIn) {
+    return const [];
+  }
+  final api = await ref.watch(embyApiProvider.future);
+  try {
+    final items = await api.getItemsByParent(
+      userId: auth.userId!,
+      parentId: collectionId,
+      includeItemTypes: 'Movie',
+      limit: 100,
+    );
+    return items;
+  } catch (e) {
+    return const [];
+  }
+});
+
 class ItemDetailPage extends ConsumerStatefulWidget {
   const ItemDetailPage({required this.itemId, super.key});
   final String itemId;
@@ -264,7 +286,6 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         // ✅ 更新字幕选择
         _hasManuallySelectedSubtitle = hasManualSubtitle;
         _selectedSubtitleStreamIndex = subtitleIndex;
-        final oldSubtitleValue = _subtitleIndexNotifier.value;
         _subtitleIndexNotifier.value = subtitleIndex;
 
         // ✅ 更新音频选择
@@ -1193,6 +1214,11 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
               ),
             ],
           ),
+        ],
+        // ✅ 如果是合集类型，显示合集内的影片
+        if (item.type == 'BoxSet' && item.id != null) ...[
+          const SizedBox(height: 24),
+          _buildCollectionMovies(context, item.id!, isDarkBackground),
         ],
       ],
     );
@@ -2301,6 +2327,296 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       return false;
     }
     return false;
+  }
+
+  /// ✅ 构建合集影片列表
+  Widget _buildCollectionMovies(
+      BuildContext context, String collectionId, bool isDark) {
+    final collectionItems = ref.watch(collectionItemsProvider(collectionId));
+
+    return collectionItems.when(
+      data: (items) {
+        if (items.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '影片',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 240,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.zero,
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  final bool isFirst = index == 0;
+                  final bool isLast = index == items.length - 1;
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      left: isFirst ? 0 : 12,
+                      right: isLast ? 0 : 0,
+                    ),
+                    child: _CollectionMovieCard(
+                      item: item,
+                      isDark: isDark,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+      loading: () => const SizedBox(
+        height: 240,
+        child: Center(child: CupertinoActivityIndicator()),
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+/// ✅ 合集影片卡片
+class _CollectionMovieCard extends ConsumerWidget {
+  const _CollectionMovieCard({
+    required this.item,
+    required this.isDark,
+  });
+
+  final ItemInfo item;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    const double cardWidth = 120.0;
+    const double aspectRatio = 2 / 3;
+    const double imageHeight = cardWidth / aspectRatio;
+
+    // 计算播放进度
+    final userData = item.userData ?? {};
+    final totalTicks = item.runTimeTicks ?? 0;
+    final playbackTicks =
+        (userData['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+    final played = userData['Played'] == true ||
+        (totalTicks > 0 && playbackTicks >= totalTicks);
+    final showProgress = !played && totalTicks > 0 && playbackTicks > 0;
+    final progress = totalTicks > 0 ? playbackTicks / totalTicks : 0.0;
+    final remainingTicks =
+        totalTicks > playbackTicks ? totalTicks - playbackTicks : 0;
+    final remainingDuration = Duration(microseconds: remainingTicks ~/ 10);
+
+    String formatRemaining(Duration d) {
+      if (d <= Duration.zero) {
+        return '0s';
+      }
+      if (d.inHours >= 1) {
+        final minutes = d.inMinutes.remainder(60);
+        return minutes > 0 ? '${d.inHours}h ${minutes}m' : '${d.inHours}h';
+      }
+      if (d.inMinutes >= 1) {
+        return '${d.inMinutes}m';
+      }
+      return '${d.inSeconds}s';
+    }
+
+    // 提取年份
+    String? yearText;
+    if (item.premiereDate != null && item.premiereDate!.isNotEmpty) {
+      final startYear = int.tryParse(item.premiereDate!.substring(0, 4));
+      if (startYear != null) {
+        yearText = '$startYear';
+      }
+    } else if (item.productionYear != null) {
+      yearText = '${item.productionYear}';
+    }
+
+    return SizedBox(
+      width: cardWidth,
+      child: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: item.id != null && item.id!.isNotEmpty
+            ? () {
+                context.push('/item/${item.id}');
+              }
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                height: imageHeight,
+                width: cardWidth,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    FutureBuilder<EmbyApi>(
+                      future: EmbyApi.create(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData || item.id == null) {
+                          return Container(
+                            color: CupertinoColors.systemGrey5,
+                            child: const Center(
+                              child: Icon(
+                                CupertinoIcons.film,
+                                size: 32,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          );
+                        }
+                        final api = snapshot.data!;
+                        final url = api.buildImageUrl(
+                          itemId: item.id!,
+                          type: 'Primary',
+                          maxWidth: 400,
+                        );
+                        if (url.isEmpty) {
+                          return Container(
+                            color: CupertinoColors.systemGrey5,
+                            child: const Center(
+                              child: Icon(
+                                CupertinoIcons.film,
+                                size: 32,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          );
+                        }
+                        return EmbyFadeInImage(
+                          imageUrl: url,
+                          fit: BoxFit.cover,
+                          placeholder: Container(
+                            color: CupertinoColors.systemGrey5,
+                            child: const Center(
+                              child: CupertinoActivityIndicator(),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    // 播放完成标记
+                    if (played)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.85),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            CupertinoIcons.check_mark,
+                            size: 14,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    // 播放进度
+                    if (showProgress)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.8),
+                                Colors.black.withValues(alpha: 0.0),
+                              ],
+                            ),
+                            borderRadius: const BorderRadius.only(
+                              bottomLeft: Radius.circular(8),
+                              bottomRight: Radius.circular(8),
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                '剩余 ${formatRemaining(remainingDuration)}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(
+                                    begin: 0.0,
+                                    end: progress.clamp(0.0, 1.0),
+                                  ),
+                                  duration: const Duration(milliseconds: 600),
+                                  curve: Curves.easeOut,
+                                  builder: (context, animatedValue, child) {
+                                    return LinearProgressIndicator(
+                                      value: animatedValue.clamp(0.0, 1.0),
+                                      minHeight: 3,
+                                      backgroundColor:
+                                          Colors.white.withValues(alpha: 0.2),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        const Color(0xFFFFB74D)
+                                            .withValues(alpha: 0.95),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              item.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                color: textColor,
+              ),
+            ),
+            if (yearText != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                yearText,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isDark ? Colors.grey : Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 

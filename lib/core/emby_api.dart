@@ -360,7 +360,7 @@ class EmbyApi {
       'Limit': limit,
       'Recursive': true,
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag,DateLastSaved,DateLastSavedForUser,DateModified,DateAdded,UserData',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag,DateLastSaved,DateLastSavedForUser,DateModified,DateAdded,UserData',
     };
 
     // 如果指定了类型，使用指定的；否则使用默认的
@@ -398,7 +398,7 @@ class EmbyApi {
       'Limit': limit,
       'IncludeItemTypes': 'Movie,Series,Video',
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres',
       'ImageTypeLimit': 1,
       'EnableImageTypes': 'Primary,Backdrop,Thumb',
     };
@@ -448,7 +448,7 @@ class EmbyApi {
         params: {
           'Limit': limit,
           'Fields':
-              'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres',
+              'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres',
         },
         tag: 'user+minimal',
       ),
@@ -585,7 +585,7 @@ class EmbyApi {
       final res = await _dio.get('/Shows/$seriesId/Seasons', queryParameters: {
         'UserId': userId,
         'Fields':
-            'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,UserData',
+            'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,UserData',
       });
       _apiLog('getSeasons response: ${res.data}');
 
@@ -719,7 +719,7 @@ class EmbyApi {
             'IncludeItemTypes': 'Series',
             'Recursive': true,
             'Fields':
-                'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,UserData',
+                'PrimaryImageAspectRatio,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,UserData',
           });
 
           final allSeriesList = (allSeriesRes.data['Items'] as List?)
@@ -887,7 +887,7 @@ class EmbyApi {
               await _dio.get('/Shows/$seasonId/Episodes', queryParameters: {
             'UserId': userId,
             'Fields':
-                'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+                'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds',
           });
           _apiLog('getEpisodes (Series mode) response: ${res.data}');
 
@@ -922,7 +922,7 @@ class EmbyApi {
         'UserId': userId,
         'SeasonId': seasonId,
         'Fields':
-            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,Status,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
       });
       _apiLog('getEpisodes response: ${res.data}');
 
@@ -956,7 +956,7 @@ class EmbyApi {
     final res =
         await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres,People,ExternalUrls,DateCreated',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres,People,ExternalUrls,DateCreated',
     });
     return ItemInfo.fromJson(res.data as Map<String, dynamic>);
   }
@@ -1075,7 +1075,7 @@ class EmbyApi {
     final res =
         await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds',
     });
     final itemJson = res.data as Map<String, dynamic>;
     final item = ItemInfo.fromJson(itemJson);

@@ -1108,32 +1108,29 @@ class _ItemTileState extends ConsumerState<_ItemTile>
     if (item.premiereDate != null && item.premiereDate!.isNotEmpty) {
       final startYear = int.tryParse(item.premiereDate!.substring(0, 4));
       if (startYear != null) {
-        // ✅ 对于Series类型，根据EndDate和季数判断
+        // ✅ 对于Series类型，根据Status和EndDate判断
         if (item.type == 'Series') {
-          if (item.endDate != null && item.endDate!.isNotEmpty) {
-            // ✅ 有EndDate，显示年份范围或单个年份
-            final endYear = int.tryParse(item.endDate!.substring(0, 4));
-            if (endYear != null && endYear != startYear) {
-              yearText = '$startYear-$endYear';
-            } else {
-              yearText = '$startYear';
-            }
-          } else {
-            // ✅ 没有EndDate，根据季数判断
-            // ChildCount > 1 表示有多季
-            final hasMultipleSeasons = (item.childCount ?? 0) > 1;
-            if (hasMultipleSeasons) {
-              // ✅ 多季的，显示开始年份-当前年份
-              final currentYear = DateTime.now().year;
-              if (currentYear != startYear) {
-                yearText = '$startYear-$currentYear';
+          final status = item.status;
+          if (status == 'Ended') {
+            // ✅ Status 为 Ended
+            if (item.endDate != null && item.endDate!.isNotEmpty) {
+              // ✅ 存在 EndDate，显示 xxxx-xxxx
+              final endYear = int.tryParse(item.endDate!.substring(0, 4));
+              if (endYear != null && endYear != startYear) {
+                yearText = '$startYear-$endYear';
               } else {
                 yearText = '$startYear';
               }
             } else {
-              // ✅ 只有一季的，只显示开始年份
+              // ✅ 不存在 EndDate，显示 xxxx
               yearText = '$startYear';
             }
+          } else if (status == 'Continuing') {
+            // ✅ Status 为 Continuing，显示 xxxx-现在
+            yearText = '$startYear-现在';
+          } else {
+            // ✅ 其他状态，显示开始年份
+            yearText = '$startYear';
           }
         } else {
           // ✅ 非Series类型，使用EndDate判断
@@ -1150,7 +1147,36 @@ class _ItemTileState extends ConsumerState<_ItemTile>
         }
       }
     } else if (item.productionYear != null) {
-      yearText = '${item.productionYear}';
+      // ✅ 如果没有 premiereDate，使用 productionYear
+      final startYear = item.productionYear;
+      if (item.type == 'Series') {
+        // ✅ 对于Series类型，根据Status和EndDate判断
+        final status = item.status;
+        if (status == 'Ended') {
+          // ✅ Status 为 Ended
+          if (item.endDate != null && item.endDate!.isNotEmpty) {
+            // ✅ 存在 EndDate，显示 xxxx-xxxx
+            final endYear = int.tryParse(item.endDate!.substring(0, 4));
+            if (endYear != null && endYear != startYear) {
+              yearText = '$startYear-$endYear';
+            } else {
+              yearText = '$startYear';
+            }
+          } else {
+            // ✅ 不存在 EndDate，显示 xxxx
+            yearText = '$startYear';
+          }
+        } else if (status == 'Continuing') {
+          // ✅ Status 为 Continuing，显示 xxxx-现在
+          yearText = '$startYear-现在';
+        } else {
+          // ✅ 其他状态，显示开始年份
+          yearText = '$startYear';
+        }
+      } else {
+        // ✅ 非Series类型，直接显示年份
+        yearText = '$startYear';
+      }
     }
 
     int clampTicks(int value, int max) {
