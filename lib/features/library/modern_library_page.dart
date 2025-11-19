@@ -336,6 +336,15 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                     if (viewList.isEmpty) {
                       return _buildEmptyState(context, isLoggedIn: true);
                     }
+                    // ✅ 过滤出非直播和音乐的媒体库
+                    final mediaViews = viewList
+                        .where((v) =>
+                            v.collectionType != 'livetv' &&
+                            v.collectionType != 'music')
+                        .toList();
+                    // ✅ 如果只有一个媒体库，不显示最新内容模块
+                    final shouldShowLatestSections = mediaViews.length > 1;
+
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -359,13 +368,11 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                           loading: () => const SizedBox.shrink(),
                           error: (e, st) => const SizedBox.shrink(),
                         ),
-                        // 显示各个媒体库的最新内容（每个section内部已有底部间距）
-                        ...viewList
-                            .where((v) =>
-                                v.collectionType != 'livetv' &&
-                                v.collectionType != 'music')
-                            .map((view) =>
-                                _buildLatestSection(context, ref, view)),
+                        // ✅ 只有当有多个媒体库时才显示各个媒体库的最新内容
+                        if (shouldShowLatestSections) ...[
+                          ...mediaViews.map((view) =>
+                              _buildLatestSection(context, ref, view)),
+                        ],
                         const SizedBox(height: 16),
                       ],
                     );
