@@ -422,17 +422,51 @@ final itemsProvider =
     sortBy = '$sortBy,${SortOption.name.value}';
   }
 
-  // 对于电视剧库，只获取 Series，不获取单集
-  // ✅ 对于Series和Movie类型，直接使用选择的排序字段
-  if (libraryType == 'Series') {
-    try {
-      return await api.getItemsByParent(
+  // ✅ 辅助函数：加载所有数据（如果总数超过 limit，循环加载）
+  Future<List<ItemInfo>> loadAllItems({
+    required String sortBy,
+    required bool ascending,
+    String? fallbackSortBy,
+  }) async {
+    const int pageSize = 100; // ✅ 每页加载 100 条
+    final allItems = <ItemInfo>[];
+    int startIndex = 0;
+    int? totalCount;
+
+    while (true) {
+      final result = await api.getItemsByParentWithTotal(
         userId: auth.userId!,
         parentId: viewId,
         includeItemTypes: 'Movie,Series,BoxSet,Video',
         sortBy: sortBy,
         sortOrder: ascending ? 'Ascending' : 'Descending',
+        groupItemsIntoCollections: libraryType == 'Movie' ? true : null,
+        startIndex: startIndex,
+        limit: pageSize,
       );
+
+      allItems.addAll(result.items);
+      totalCount = result.totalCount;
+
+      // ✅ 如果已加载所有数据，或者返回的数据少于 pageSize，说明已经加载完
+      if (totalCount != null && allItems.length >= totalCount) {
+        break;
+      }
+      if (result.items.length < pageSize) {
+        break;
+      }
+
+      startIndex += pageSize;
+    }
+
+    return allItems;
+  }
+
+  // 对于电视剧库，只获取 Series，不获取单集
+  // ✅ 对于Series和Movie类型，直接使用选择的排序字段
+  if (libraryType == 'Series') {
+    try {
+      return await loadAllItems(sortBy: sortBy, ascending: ascending);
     } catch (e) {
       // ✅ 如果排序失败，使用新列表中的第一个选项作为默认排序
       final fallbackOption = availableSortOptions.isNotEmpty
@@ -444,37 +478,25 @@ final itemsProvider =
           fallbackOption != SortOption.random) {
         fallbackSortBy = '$fallbackSortBy,${SortOption.name.value}';
       }
-      return await api.getItemsByParent(
-        userId: auth.userId!,
-        parentId: viewId,
-        includeItemTypes: 'Movie,Series,BoxSet,Video',
+      return await loadAllItems(
         sortBy: fallbackSortBy,
-        sortOrder: 'Descending',
+        ascending: false,
+        fallbackSortBy: fallbackSortBy,
       );
     }
   } else {
     // ✅ 对于Movie类型，直接使用选择的排序字段，并启用合集合并
     try {
-      return await api.getItemsByParent(
-        userId: auth.userId!,
-        parentId: viewId,
-        includeItemTypes: 'Movie,Series,BoxSet,Video',
-        sortBy: sortBy,
-        sortOrder: ascending ? 'Ascending' : 'Descending',
-        groupItemsIntoCollections: true, // 启动合集
-      );
+      return await loadAllItems(sortBy: sortBy, ascending: ascending);
     } catch (e) {
       // ✅ 如果排序失败，使用PremiereDate作为默认排序
       // ✅ 给 fallback 排序也添加 SortName
       String fallbackSortBy =
           '${SortOption.premiereDate.value},${SortOption.name.value}';
-      return await api.getItemsByParent(
-        userId: auth.userId!,
-        parentId: viewId,
-        includeItemTypes: 'Movie,Series,BoxSet,Video',
+      return await loadAllItems(
         sortBy: fallbackSortBy,
-        sortOrder: 'Descending',
-        groupItemsIntoCollections: true,
+        ascending: false,
+        fallbackSortBy: fallbackSortBy,
       );
     }
   }

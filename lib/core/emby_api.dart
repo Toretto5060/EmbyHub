@@ -397,6 +397,64 @@ class EmbyApi {
     return list.map((e) => ItemInfo.fromJson(e)).toList();
   }
 
+  // ✅ 返回分页结果（包含列表和总数）
+  Future<({List<ItemInfo> items, int? totalCount})> getItemsByParentWithTotal(
+      {required String userId,
+      required String parentId,
+      int startIndex = 0,
+      int limit = 60,
+      String? includeItemTypes,
+      String? sortBy,
+      String? sortOrder,
+      bool? groupItemsIntoCollections,
+      String? genres}) async {
+    final queryParams = {
+      'ParentId': parentId,
+      'StartIndex': startIndex,
+      'Limit': limit,
+      'Recursive': true,
+      'Fields':
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag,DateLastSaved,DateLastSavedForUser,DateModified,DateAdded,UserData',
+    };
+
+    // 如果指定了类型，使用指定的；否则使用默认的
+    if (includeItemTypes != null) {
+      queryParams['IncludeItemTypes'] = includeItemTypes;
+    } else {
+      queryParams['IncludeItemTypes'] = 'Movie,Series,BoxSet,Video';
+    }
+
+    // 添加排序参数
+    if (sortBy != null && sortBy.isNotEmpty) {
+      queryParams['SortBy'] = sortBy;
+    }
+    if (sortOrder != null && sortOrder.isNotEmpty) {
+      queryParams['SortOrder'] = sortOrder;
+    }
+    // 添加合集合并参数
+    if (groupItemsIntoCollections != null) {
+      queryParams['GroupItemsIntoCollections'] = groupItemsIntoCollections;
+    }
+    // 添加类型筛选参数
+    if (genres != null && genres.isNotEmpty) {
+      queryParams['Genres'] = genres;
+    }
+
+    final res =
+        await _dio.get('/Users/$userId/Items', queryParameters: queryParams);
+    final list = (res.data['Items'] as List).cast<Map<String, dynamic>>();
+    // ✅ 获取总数
+    final totalCount = (res.data['TotalRecordCount'] as num?)?.toInt();
+
+    // ✅ 处理Series合并逻辑
+    _processMergedSeries(list);
+
+    return (
+      items: list.map((e) => ItemInfo.fromJson(e)).toList(),
+      totalCount: totalCount,
+    );
+  }
+
   Future<List<ItemInfo>> getSimilarItems(String userId, String itemId,
       {int limit = 12}) async {
     final baseParams = {
