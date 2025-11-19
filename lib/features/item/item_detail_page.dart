@@ -1954,6 +1954,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   Future<void> _handleFavoriteToggle(ItemInfo item) async {
     if (item.id == null || item.id!.isEmpty) return;
 
+    // ✅ 如果正在更新，防止重复点击
+    if (_isUpdatingFavorite) return;
+
     final auth = ref.read(authStateProvider).value;
     if (auth == null || !auth.isLoggedIn) return;
 
@@ -1961,7 +1964,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         (item.userData?['IsFavorite'] as bool?) ??
         false;
 
-    // ✅ 标记正在更新，防止 whenData 覆盖
+    // ✅ 标记正在更新，防止 whenData 覆盖和重复点击
     _isUpdatingFavorite = true;
 
     try {
@@ -1990,21 +1993,27 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
             ref.read(libraryRefreshTickerProvider.notifier).state++;
           }
         });
+
+        // ✅ 延迟解除标记，确保在 provider 刷新完成后再允许 whenData 更新
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          _isUpdatingFavorite = false;
+        });
       }
     } catch (e) {
-      // ✅ 如果失败，不更新 UI，保持原状态
+      // ✅ 如果失败，立即解除标记
+      _isUpdatingFavorite = false;
       if (mounted) {
         // TODO: 可以添加错误提示
       }
-    } finally {
-      // ✅ 解除标记
-      _isUpdatingFavorite = false;
     }
   }
 
   /// 处理已观看切换
   Future<void> _handlePlayedToggle(ItemInfo item) async {
     if (item.id == null || item.id!.isEmpty) return;
+
+    // ✅ 如果正在更新，防止重复点击
+    if (_isUpdatingPlayed) return;
 
     final auth = ref.read(authStateProvider).value;
     if (auth == null || !auth.isLoggedIn) return;
@@ -2013,7 +2022,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         (item.userData?['Played'] as bool?) ??
         false;
 
-    // ✅ 标记正在更新，防止 whenData 覆盖
+    // ✅ 标记正在更新，防止 whenData 覆盖和重复点击
     _isUpdatingPlayed = true;
 
     try {
@@ -2055,15 +2064,19 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
             ref.read(libraryRefreshTickerProvider.notifier).state++;
           }
         });
+
+        // ✅ 延迟解除标记，确保在 provider 刷新完成后再允许 whenData 更新
+        // 这样可以避免 whenData 在刷新过程中拿到旧数据导致闪烁
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          _isUpdatingPlayed = false;
+        });
       }
     } catch (e) {
-      // ✅ 如果失败，不更新 UI，保持原状态
+      // ✅ 如果失败，立即解除标记
+      _isUpdatingPlayed = false;
       if (mounted) {
         // TODO: 可以添加错误提示
       }
-    } finally {
-      // ✅ 解除标记
-      _isUpdatingPlayed = false;
     }
   }
 
