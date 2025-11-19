@@ -103,6 +103,10 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   // ✅ 使用 ValueNotifier 来局部更新字幕选择显示
   late final ValueNotifier<int?> _subtitleIndexNotifier;
   bool _isLoadingStreamSelections = false; // ✅ 标记是否正在加载保存的选择
+  // ✅ 使用 ValueNotifier 来局部更新收藏和观看状态
+  ValueNotifier<bool>? _isFavoriteNotifier;
+  ValueNotifier<bool>? _isPlayedNotifier;
+  ValueNotifier<Map<String, dynamic>?>? _userDataNotifier;
   final GlobalKey _resumeMenuAnchorKey = GlobalKey();
   static const Color _resumeButtonColor = Color(0xFFFFB74D);
   static const Color _playButtonColor = Color(0xFF3F8CFF);
@@ -120,12 +124,17 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   Animation<double>? _routeAnimation;
   bool _isRouteSubscribed = false; // ✅ 路由订阅状态
   String? _lastItemDataHash; // ✅ 记录上次 item 数据的哈希，用于检测数据变化
+  ItemInfo? _cachedItemData; // ✅ 缓存item数据，避免重新加载时显示loading
 
   @override
   void initState() {
     super.initState();
     // ✅ 初始化字幕选择 ValueNotifier
     _subtitleIndexNotifier = ValueNotifier<int?>(null);
+    // ✅ 初始化收藏和观看状态 ValueNotifier
+    _isFavoriteNotifier = ValueNotifier<bool>(false);
+    _isPlayedNotifier = ValueNotifier<bool>(false);
+    _userDataNotifier = ValueNotifier<Map<String, dynamic>?>(null);
     final platformBrightness =
         WidgetsBinding.instance.platformDispatcher.platformBrightness;
     _statusBarStyle = StatusBarManager.currentStyle ??
@@ -237,6 +246,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     }
     // ✅ 释放 ValueNotifier
     _subtitleIndexNotifier.dispose();
+    _isFavoriteNotifier?.dispose();
+    _isPlayedNotifier?.dispose();
+    _userDataNotifier?.dispose();
     _statusBarController?.release();
     _statusBarController = null;
     _scrollController.removeListener(_handleScroll);
@@ -312,6 +324,10 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     _syncStatusBarWithNavigation(offset);
   }
 
+  // ✅ 防止在 API 调用期间被 whenData 覆盖状态
+  bool _isUpdatingFavorite = false;
+  bool _isUpdatingPlayed = false;
+
   @override
   Widget build(BuildContext context) {
     final item = ref.watch(itemProvider(widget.itemId));
@@ -319,6 +335,19 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     // ✅ 当 itemProvider 重新加载数据时（比如从播放页面返回时），顺便刷新字幕和音频选择
     // 检测数据变化：当数据有值且与上次不同时，刷新字幕和音频选择
     item.whenData((data) {
+      // ✅ 缓存数据，避免重新加载时显示loading
+      _cachedItemData = data;
+
+      // ✅ 同步更新 ValueNotifier（但在 API 调用期间不更新，避免覆盖用户操作）
+      if (!_isUpdatingFavorite) {
+        _isFavoriteNotifier?.value =
+            (data.userData?['IsFavorite'] as bool?) ?? false;
+      }
+      if (!_isUpdatingPlayed) {
+        _isPlayedNotifier?.value = (data.userData?['Played'] as bool?) ?? false;
+        _userDataNotifier?.value = data.userData;
+      }
+
       // ✅ 使用 userData 的播放进度作为数据变化的标识
       final playbackTicks =
           (data.userData?['PlaybackPositionTicks'] as num?)?.toInt();
@@ -340,193 +369,26 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
           _statusBarController?.update(_navSyncedStyle ?? _statusBarStyle);
           return CupertinoPageScaffold(
             backgroundColor: CupertinoColors.systemBackground,
-            child: item.when(
-              data: (data) {
-                final isPlayed = (data.userData?['Played'] as bool?) ?? false;
-                final isDark = MediaQuery.of(context).platformBrightness ==
-                    Brightness.dark;
-                final performers = data.performers ?? const <PerformerInfo>[];
-                final externalLinks = _composeExternalLinks(data);
-                final similarItems =
-                    ref.watch(similarItemsProvider(widget.itemId));
-
+            child: item.maybeWhen(
+              data: (data) => _buildContentArea(data),
+              loading: () {
+                // ✅ 如果有缓存数据，继续显示缓存数据，不显示loading（避免切换按钮时闪烁）
+                if (_cachedItemData != null) {
+                  return _buildContentArea(_cachedItemData!);
+                }
+                // ✅ 如果没有缓存数据，显示loading
                 return Stack(
                   children: [
-                    CustomScrollView(
-                      controller: _scrollController,
-                      slivers: [
-                        SliverToBoxAdapter(
-                          child: SizedBox(
-                            height: _heroBaseHeight +
-                                (_headerHeight - _headerBaseHeight),
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Positioned(
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  height: _backdropHeight,
-                                  child:
-                                      _buildBackdropBackground(context, data),
-                                ),
-                                Positioned(
-                                  left: 0,
-                                  right: 0,
-                                  top: _headerTopOffset,
-                                  child:
-                                      _buildHeaderCard(context, data, isDark),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        SliverToBoxAdapter(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (performers.isNotEmpty) ...[
-                                const SizedBox(height: 12),
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 20),
-                                  child: Text(
-                                    '演员',
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                SizedBox(
-                                  height: 190,
-                                  child: ListView.builder(
-                                    padding: EdgeInsets.zero,
-                                    scrollDirection: Axis.horizontal,
-                                    itemCount: performers.length,
-                                    itemBuilder: (context, index) {
-                                      final card = _PerformerCard(
-                                        performer: performers[index],
-                                        isDark: isDark,
-                                      );
-                                      final bool isFirst = index == 0;
-                                      final bool isLast =
-                                          index == performers.length - 1;
-                                      return Padding(
-                                        padding: EdgeInsets.only(
-                                          left: isFirst ? 20 : 12,
-                                          right: isLast ? 20 : 0,
-                                        ),
-                                        child: card,
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
-                              similarItems.when(
-                                data: (items) {
-                                  if (items.isEmpty) {
-                                    return const SizedBox.shrink();
-                                  }
-                                  // ✅ 检查是否所有影片都是16:9的
-                                  // 根据_SimilarCard的逻辑，hasHorizontalArtwork=false时是16:9
-                                  final allAre16x9 = items.every((item) =>
-                                      !_hasHorizontalArtworkForSimilar(item));
-                                  // ✅ 如果是16:9，高度为100（图片90 + 文字约34，取整），否则为190
-                                  final listHeight = allAre16x9 ? 130.0 : 190.0;
-                                  return Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const SizedBox(height: 24),
-                                      const Padding(
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal: 20),
-                                        child: Text(
-                                          '其他类似影片',
-                                          style: TextStyle(
-                                            fontSize: 20,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      SizedBox(
-                                        height: listHeight,
-                                        child: ListView.builder(
-                                          padding: EdgeInsets.zero,
-                                          scrollDirection: Axis.horizontal,
-                                          itemCount: items.length,
-                                          itemBuilder: (context, index) {
-                                            final card = _SimilarCard(
-                                              item: items[index],
-                                              isDark: isDark,
-                                            );
-                                            final bool isFirst = index == 0;
-                                            final bool isLast =
-                                                index == items.length - 1;
-                                            return Padding(
-                                              padding: EdgeInsets.only(
-                                                left: isFirst ? 20 : 12,
-                                                right: isLast ? 20 : 0,
-                                              ),
-                                              child: card,
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  );
-                                },
-                                loading: () => const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 24),
-                                  child: Center(
-                                    child: CupertinoActivityIndicator(),
-                                  ),
-                                ),
-                                error: (_, __) => const SizedBox.shrink(),
-                              ),
-                              if (externalLinks.isNotEmpty) ...[
-                                const SizedBox(height: 24),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 20),
-                                  child: _buildExternalLinks(
-                                      externalLinks, isDark),
-                                ),
-                              ],
-                              const SizedBox(height: 24),
-                              _buildDetailedMediaModules(
-                                data,
-                                isDark,
-                                horizontalPadding: 20,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SliverToBoxAdapter(child: SizedBox(height: 20)),
-                      ],
-                    ),
+                    const Center(child: CupertinoActivityIndicator()),
                     Positioned(
                       top: 0,
                       left: 0,
                       right: 0,
-                      child: _buildBlurNavigationBar(context, data, isPlayed),
+                      child: _buildBlurNavigationBar(context, null),
                     ),
                   ],
                 );
               },
-              loading: () => Stack(
-                children: [
-                  const Center(child: CupertinoActivityIndicator()),
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: _buildBlurNavigationBar(context, null, false),
-                  ),
-                ],
-              ),
               error: (e, _) => Stack(
                 children: [
                   Center(child: Text('加载失败: $e')),
@@ -534,10 +396,28 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                     top: 0,
                     left: 0,
                     right: 0,
-                    child: _buildBlurNavigationBar(context, null, false),
+                    child: _buildBlurNavigationBar(context, null),
                   ),
                 ],
               ),
+              orElse: () {
+                // ✅ 如果 item 还没有数据且没有缓存，显示loading
+                if (_cachedItemData == null) {
+                  return Stack(
+                    children: [
+                      const Center(child: CupertinoActivityIndicator()),
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: _buildBlurNavigationBar(context, null),
+                      ),
+                    ],
+                  );
+                }
+                // ✅ 有缓存数据，显示缓存数据
+                return _buildContentArea(_cachedItemData!);
+              },
             ),
           );
         },
@@ -545,10 +425,171 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     );
   }
 
+  /// ✅ 构建内容区域（避免在loading和orElse中重复代码）
+  Widget _buildContentArea(ItemInfo data) {
+    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
+    final performers = data.performers ?? const <PerformerInfo>[];
+    final externalLinks = _composeExternalLinks(data);
+    final similarItems = ref.watch(similarItemsProvider(widget.itemId));
+
+    return Stack(
+      children: [
+        CustomScrollView(
+          controller: _scrollController,
+          slivers: [
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: _heroBaseHeight + (_headerHeight - _headerBaseHeight),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: _backdropHeight,
+                      child: _buildBackdropBackground(context, data),
+                    ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: _headerTopOffset,
+                      child: _buildHeaderCard(context, data, isDark),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (performers.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 20),
+                      child: Text(
+                        '演员',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 190,
+                      child: ListView.builder(
+                        padding: EdgeInsets.zero,
+                        scrollDirection: Axis.horizontal,
+                        itemCount: performers.length,
+                        itemBuilder: (context, index) {
+                          final card = _PerformerCard(
+                            performer: performers[index],
+                            isDark: isDark,
+                          );
+                          final bool isFirst = index == 0;
+                          final bool isLast = index == performers.length - 1;
+                          return Padding(
+                            padding: EdgeInsets.only(
+                              left: isFirst ? 20 : 12,
+                              right: isLast ? 20 : 0,
+                            ),
+                            child: card,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                  similarItems.when(
+                    data: (items) {
+                      if (items.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      final allAre16x9 = items.every(
+                          (item) => !_hasHorizontalArtworkForSimilar(item));
+                      final listHeight = allAre16x9 ? 130.0 : 190.0;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 24),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 20),
+                            child: Text(
+                              '其他类似影片',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            height: listHeight,
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              scrollDirection: Axis.horizontal,
+                              itemCount: items.length,
+                              itemBuilder: (context, index) {
+                                final card = _SimilarCard(
+                                  item: items[index],
+                                  isDark: isDark,
+                                );
+                                final bool isFirst = index == 0;
+                                final bool isLast = index == items.length - 1;
+                                return Padding(
+                                  padding: EdgeInsets.only(
+                                    left: isFirst ? 20 : 12,
+                                    right: isLast ? 20 : 0,
+                                  ),
+                                  child: card,
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: CupertinoActivityIndicator(),
+                      ),
+                    ),
+                    error: (_, __) => const SizedBox.shrink(),
+                  ),
+                  if (externalLinks.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: _buildExternalLinks(externalLinks, isDark),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  _buildDetailedMediaModules(
+                    data,
+                    isDark,
+                    horizontalPadding: 20,
+                  ),
+                ],
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 20)),
+          ],
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: _buildBlurNavigationBar(context, data),
+        ),
+      ],
+    );
+  }
+
   Widget _buildBlurNavigationBar(
     BuildContext context,
     ItemInfo? data,
-    bool isPlayed,
   ) {
     final brightness = MediaQuery.of(context).platformBrightness;
     final SystemUiOverlayStyle baseStyle = _appliedStatusStyle;
@@ -561,7 +602,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         expandedColor, collapsedColor, _showCollapsedNav ? 1.0 : 0.0)!;
 
     final actions =
-        data != null ? _buildTopActions(isPlayed) : const <Widget>[];
+        data != null ? _buildTopActions(data, currentColor) : const <Widget>[];
 
     final Widget leadingContent = Row(
       mainAxisSize: MainAxisSize.min,
@@ -700,61 +741,59 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     );
   }
 
-  List<Widget> _buildTopActions(bool isPlayed) {
+  List<Widget> _buildTopActions(ItemInfo item, Color iconColor) {
+    // ✅ 使用 ValueListenableBuilder 来局部更新按钮状态
     return [
-      CupertinoButton(
-        padding: const EdgeInsets.all(8),
-        minSize: 0,
-        onPressed: null,
-        child: const Opacity(
-          opacity: 0.72,
-          child: Icon(
-            CupertinoIcons.tv,
-            size: 22,
-          ),
-        ),
-      ),
-      if (isPlayed)
-        CupertinoButton(
-          padding: const EdgeInsets.all(8),
-          minSize: 0,
-          onPressed: null,
-          child: Container(
-            width: 24,
-            height: 24,
-            decoration: const BoxDecoration(
-              color: CupertinoColors.activeGreen,
-              shape: BoxShape.circle,
+      // ✅ 已观看/未观看图标（常驻显示，根据状态改变）
+      ValueListenableBuilder<bool>(
+        valueListenable: _isPlayedNotifier!,
+        builder: (context, isPlayed, _) {
+          return CupertinoButton(
+            padding: const EdgeInsets.all(8),
+            minSize: 0,
+            onPressed: item.id != null && item.id!.isNotEmpty
+                ? () => _handlePlayedToggle(item)
+                : null,
+            child: Icon(
+              isPlayed
+                  ? Icons.check_circle_rounded
+                  : Icons.play_circle_outline_rounded,
+              color: iconColor,
+              size: 22,
             ),
-            child: const Icon(
-              CupertinoIcons.check_mark,
-              color: Colors.white,
-              size: 14,
-            ),
-          ),
-        ),
-      CupertinoButton(
-        padding: const EdgeInsets.all(8),
-        minSize: 0,
-        onPressed: null,
-        child: const Opacity(
-          opacity: 0.72,
-          child: Icon(
-            CupertinoIcons.heart,
-            size: 22,
-          ),
-        ),
+          );
+        },
       ),
+      // ✅ 收藏图标（常驻显示，根据状态改变）
+      ValueListenableBuilder<bool>(
+        valueListenable: _isFavoriteNotifier!,
+        builder: (context, isFavorite, _) {
+          return CupertinoButton(
+            padding: const EdgeInsets.all(8),
+            minSize: 0,
+            onPressed: item.id != null && item.id!.isNotEmpty
+                ? () => _handleFavoriteToggle(item)
+                : null,
+            child: Icon(
+              isFavorite
+                  ? Icons.favorite_rounded
+                  : Icons.favorite_border_rounded,
+              color: isFavorite ? Colors.red : iconColor,
+              size: 22,
+            ),
+          );
+        },
+      ),
+      // ✅ 下载/已下载图标（替换原来的三个点，始终显示）
+      // TODO: 根据实际下载状态显示 Icons.download_done_rounded 或 Icons.download_rounded
       CupertinoButton(
         padding: const EdgeInsets.all(8),
         minSize: 0,
         onPressed: null,
-        child: const Opacity(
-          opacity: 0.72,
-          child: Icon(
-            CupertinoIcons.ellipsis,
-            size: 22,
-          ),
+        child: Icon(
+          Icons.download_rounded, // 暂时只显示下载图标，后续根据 isDownloaded 状态切换
+          color: iconColor,
+          size: 22,
         ),
       ),
     ];
@@ -1078,149 +1117,213 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   Widget _buildPlaySection(
       BuildContext context, ItemInfo item, bool isDarkBackground) {
     final int runtimeTicks = item.runTimeTicks ?? 0;
-    final playedTicks =
-        (item.userData?['PlaybackPositionTicks'] as num?)?.toInt();
     final bool hasRuntime = runtimeTicks > 0;
-    final bool canResume = hasRuntime &&
-        playedTicks != null &&
-        playedTicks > 0 &&
-        playedTicks < runtimeTicks;
-
-    Duration? totalDuration;
-    Duration? playedDuration;
-    Duration? remainingDuration;
-    double? progress;
-    if (hasRuntime) {
-      totalDuration = Duration(microseconds: (runtimeTicks / 10).round());
-      if (playedTicks != null) {
-        playedDuration = Duration(microseconds: (playedTicks / 10).round());
-        remainingDuration = totalDuration - playedDuration;
-        progress = playedTicks / runtimeTicks;
-      }
-    }
-
-    final Color buttonColor = canResume ? _resumeButtonColor : _playButtonColor;
-    final Color textColor = Colors.white;
-    final String buttonLabel = canResume ? '恢复播放' : '播放';
 
     final ValueNotifier<bool> menuOpenNotifier = ValueNotifier(false);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+    // ✅ 使用 ValueListenableBuilder 来局部更新播放进度
+    return ValueListenableBuilder<Map<String, dynamic>?>(
+      valueListenable: _userDataNotifier!,
+      builder: (context, userData, _) {
+        final played = (userData?['Played'] as bool?) ?? false;
+        final playedTicks =
+            (userData?['PlaybackPositionTicks'] as num?)?.toInt();
+        // ✅ 如果已标记为已观看，不显示恢复播放按钮
+        final bool canResume = !played &&
+            hasRuntime &&
+            playedTicks != null &&
+            playedTicks > 0 &&
+            playedTicks < runtimeTicks;
+
+        Duration? totalDuration;
+        Duration? playedDuration;
+        Duration? remainingDuration;
+        double? progress;
+        if (hasRuntime) {
+          totalDuration = Duration(microseconds: (runtimeTicks / 10).round());
+          if (playedTicks != null) {
+            playedDuration = Duration(microseconds: (playedTicks / 10).round());
+            remainingDuration = totalDuration - playedDuration;
+            progress = playedTicks / runtimeTicks;
+          }
+        }
+
+        final Color buttonColor =
+            canResume ? _resumeButtonColor : _playButtonColor;
+        final Color textColor = Colors.white;
+        final String buttonLabel = canResume ? '恢复播放' : '播放';
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: CupertinoButton(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                color: buttonColor,
-                borderRadius: BorderRadius.circular(14),
-                onPressed: item.id != null && item.id!.isNotEmpty
-                    ? () => _handlePlay(
-                          context,
-                          item.id!,
-                          fromBeginning: !canResume,
-                          resumePositionTicks: canResume ? playedTicks : null,
-                        )
-                    : null,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(CupertinoIcons.play_fill, color: textColor),
-                    const SizedBox(width: 8),
-                    Text(
-                      buttonLabel,
-                      style: TextStyle(fontSize: 16, color: textColor),
+            Row(
+              children: [
+                Expanded(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                    decoration: BoxDecoration(
+                      color: buttonColor,
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                  ],
-                ),
-              ),
-            ),
-            if (canResume) ...[
-              const SizedBox(width: 12),
-              ValueListenableBuilder<bool>(
-                valueListenable: menuOpenNotifier,
-                builder: (context, isOpen, _) {
-                  return Builder(
-                    builder: (anchorContext) => GestureDetector(
-                      key: _resumeMenuAnchorKey,
-                      onTap: () async {
-                        menuOpenNotifier.value = true;
-                        await _showResumeMenu(anchorContext, item);
-                        menuOpenNotifier.value = false;
-                      },
-                      child: Container(
-                        height: 44,
-                        width: 44,
-                        decoration: BoxDecoration(
-                          color: buttonColor,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        alignment: Alignment.center,
-                        child: AnimatedRotation(
-                          turns: isOpen ? 0.5 : 0.0,
-                          duration: const Duration(milliseconds: 200),
-                          child: Icon(
-                            CupertinoIcons.chevron_down,
-                            color: textColor,
-                            size: 18,
-                          ),
+                    child: CupertinoButton(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(14),
+                      onPressed: item.id != null && item.id!.isNotEmpty
+                          ? () => _handlePlay(
+                                context,
+                                item.id!,
+                                fromBeginning: !canResume,
+                                resumePositionTicks:
+                                    canResume ? playedTicks : null,
+                              )
+                          : null,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: child,
+                          );
+                        },
+                        child: Row(
+                          key: ValueKey(buttonLabel),
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(CupertinoIcons.play_fill, color: textColor),
+                            const SizedBox(width: 8),
+                            Text(
+                              buttonLabel,
+                              style: TextStyle(fontSize: 16, color: textColor),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                  );
-                },
-              ),
-            ],
-          ],
-        ),
-        if (canResume && progress != null && remainingDuration != null) ...[
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  clipBehavior: Clip.hardEdge,
-                  borderRadius: BorderRadius.circular(4),
-                  child: TweenAnimationBuilder<double>(
-                    tween: Tween<double>(
-                      begin: 0.0,
-                      end: progress.clamp(0.0, 1.0),
-                    ),
-                    duration: const Duration(milliseconds: 600),
-                    curve: Curves.easeOut,
-                    builder: (context, animatedValue, child) {
-                      return LinearProgressIndicator(
-                        value: animatedValue.clamp(0.0, 1.0),
-                        minHeight: 6,
-                        backgroundColor:
-                            (isDarkBackground ? Colors.white : Colors.black)
-                                .withValues(alpha: 0.18),
-                        valueColor: AlwaysStoppedAnimation(
-                          _resumeButtonColor.withValues(alpha: 0.95),
-                        ),
-                      );
-                    },
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                _formatDuration(remainingDuration),
-                style: TextStyle(
-                  color: isDarkBackground ? Colors.white70 : Colors.black54,
-                  fontSize: 13,
+                // ✅ 使用 AnimatedSwitcher 替代 AnimatedSize，避免闪烁
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  child: canResume
+                      ? Row(
+                          key: const ValueKey('resume-menu'),
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(width: 12),
+                            ValueListenableBuilder<bool>(
+                              valueListenable: menuOpenNotifier,
+                              builder: (context, isOpen, _) {
+                                return Builder(
+                                  builder: (anchorContext) => GestureDetector(
+                                    key: _resumeMenuAnchorKey,
+                                    onTap: () async {
+                                      menuOpenNotifier.value = true;
+                                      await _showResumeMenu(
+                                          anchorContext, item);
+                                      menuOpenNotifier.value = false;
+                                    },
+                                    child: AnimatedContainer(
+                                      duration:
+                                          const Duration(milliseconds: 200),
+                                      curve: Curves.easeInOut,
+                                      height: 44,
+                                      width: 44,
+                                      decoration: BoxDecoration(
+                                        color: buttonColor,
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: AnimatedRotation(
+                                        turns: isOpen ? 0.5 : 0.0,
+                                        duration:
+                                            const Duration(milliseconds: 200),
+                                        child: Icon(
+                                          CupertinoIcons.chevron_down,
+                                          color: textColor,
+                                          size: 18,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        )
+                      : const SizedBox.shrink(key: ValueKey('no-resume-menu')),
                 ),
-              ),
+              ],
+            ),
+            // ✅ 使用 AnimatedSwitcher 替代 AnimatedSize，避免闪烁
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              child: canResume && progress != null && remainingDuration != null
+                  ? Column(
+                      key: const ValueKey('progress'),
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ClipRRect(
+                                clipBehavior: Clip.hardEdge,
+                                borderRadius: BorderRadius.circular(4),
+                                child: TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(
+                                    begin: 0.0,
+                                    end: progress.clamp(0.0, 1.0),
+                                  ),
+                                  duration: const Duration(milliseconds: 600),
+                                  curve: Curves.easeOut,
+                                  builder: (context, animatedValue, child) {
+                                    return LinearProgressIndicator(
+                                      value: animatedValue.clamp(0.0, 1.0),
+                                      minHeight: 6,
+                                      backgroundColor: (isDarkBackground
+                                              ? Colors.white
+                                              : Colors.black)
+                                          .withValues(alpha: 0.18),
+                                      valueColor: AlwaysStoppedAnimation(
+                                        _resumeButtonColor.withValues(
+                                            alpha: 0.95),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              _formatDuration(remainingDuration),
+                              style: TextStyle(
+                                color: isDarkBackground
+                                    ? Colors.white70
+                                    : Colors.black54,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    )
+                  : const SizedBox.shrink(key: ValueKey('no-progress')),
+            ),
+            // ✅ 如果是合集类型，显示合集内的影片
+            if (item.type == 'BoxSet' && item.id != null) ...[
+              const SizedBox(height: 24),
+              _buildCollectionMovies(context, item.id!, isDarkBackground),
             ],
-          ),
-        ],
-        // ✅ 如果是合集类型，显示合集内的影片
-        if (item.type == 'BoxSet' && item.id != null) ...[
-          const SizedBox(height: 24),
-          _buildCollectionMovies(context, item.id!, isDarkBackground),
-        ],
-      ],
+          ],
+        );
+      },
     );
   }
 
@@ -1845,6 +1948,123 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       queryParameters: params.isEmpty ? null : params,
     ).toString();
     context.push(route);
+  }
+
+  /// 处理收藏切换
+  Future<void> _handleFavoriteToggle(ItemInfo item) async {
+    if (item.id == null || item.id!.isEmpty) return;
+
+    final auth = ref.read(authStateProvider).value;
+    if (auth == null || !auth.isLoggedIn) return;
+
+    final currentFavorite = _isFavoriteNotifier?.value ??
+        (item.userData?['IsFavorite'] as bool?) ??
+        false;
+
+    // ✅ 标记正在更新，防止 whenData 覆盖
+    _isUpdatingFavorite = true;
+
+    try {
+      final api = await ref.read(embyApiProvider.future);
+      // ✅ 先调用 API，等待成功后再更新 UI
+      if (currentFavorite) {
+        await api.removeFavoriteItem(auth.userId!, item.id!);
+      } else {
+        await api.addFavoriteItem(auth.userId!, item.id!);
+      }
+
+      // ✅ API 成功后才更新 UI
+      if (mounted) {
+        final newFavorite = !currentFavorite;
+        _isFavoriteNotifier?.value = newFavorite;
+
+        // ✅ 更新 userData
+        final currentUserData = Map<String, dynamic>.from(
+            _userDataNotifier?.value ?? item.userData ?? {});
+        currentUserData['IsFavorite'] = newFavorite;
+        _userDataNotifier?.value = currentUserData;
+
+        // ✅ 延迟触发全局刷新信号，刷新首页的继续观看和其他模块数据
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            ref.read(libraryRefreshTickerProvider.notifier).state++;
+          }
+        });
+      }
+    } catch (e) {
+      // ✅ 如果失败，不更新 UI，保持原状态
+      if (mounted) {
+        // TODO: 可以添加错误提示
+      }
+    } finally {
+      // ✅ 解除标记
+      _isUpdatingFavorite = false;
+    }
+  }
+
+  /// 处理已观看切换
+  Future<void> _handlePlayedToggle(ItemInfo item) async {
+    if (item.id == null || item.id!.isEmpty) return;
+
+    final auth = ref.read(authStateProvider).value;
+    if (auth == null || !auth.isLoggedIn) return;
+
+    final currentPlayed = _isPlayedNotifier?.value ??
+        (item.userData?['Played'] as bool?) ??
+        false;
+
+    // ✅ 标记正在更新，防止 whenData 覆盖
+    _isUpdatingPlayed = true;
+
+    try {
+      final api = await ref.read(embyApiProvider.future);
+      // ✅ 先调用 API，等待成功后再更新 UI
+      if (currentPlayed) {
+        await api.unmarkAsPlayed(auth.userId!, item.id!);
+      } else {
+        await api.markAsPlayed(auth.userId!, item.id!);
+      }
+
+      // ✅ API 成功后才更新 UI
+      if (mounted) {
+        final newPlayed = !currentPlayed;
+        _isPlayedNotifier?.value = newPlayed;
+
+        // ✅ 更新 userData（如果标记为已观看，清除播放进度；如果取消已观看，恢复原始播放进度）
+        final currentUserData = Map<String, dynamic>.from(
+            _userDataNotifier?.value ?? item.userData ?? {});
+        currentUserData['Played'] = newPlayed;
+        if (newPlayed) {
+          // ✅ 标记为已观看时，清除播放进度
+          currentUserData['PlaybackPositionTicks'] = 0;
+        } else {
+          // ✅ 取消已观看时，恢复原始播放进度（如果有的话）
+          final originalTicks = item.userData?['PlaybackPositionTicks'];
+          if (originalTicks != null) {
+            currentUserData['PlaybackPositionTicks'] = originalTicks;
+          } else if (currentUserData['PlaybackPositionTicks'] == 0) {
+            // ✅ 如果没有原始播放进度，清除 0 值（因为可能是从已观看状态切换过来的）
+            currentUserData.remove('PlaybackPositionTicks');
+          }
+        }
+        _userDataNotifier?.value = currentUserData;
+
+        // ✅ 延迟触发全局刷新信号，刷新首页的继续观看和其他模块数据
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            ref.read(libraryRefreshTickerProvider.notifier).state++;
+          }
+        });
+      }
+    } catch (e) {
+      // ✅ 如果失败，不更新 UI，保持原状态
+      if (mounted) {
+        // TODO: 可以添加错误提示
+      }
+    } finally {
+      // ✅ 解除标记
+      _isUpdatingPlayed = false;
+    }
   }
 
   String _formatDuration(Duration duration) {

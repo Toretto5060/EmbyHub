@@ -1230,6 +1230,50 @@ class EmbyApi {
       _apiLog('updateUserItemData error: $e');
     }
   }
+
+  /// 添加收藏
+  Future<void> addFavoriteItem(String userId, String itemId) async {
+    final path = '/Users/$userId/FavoriteItems/$itemId';
+    try {
+      await _dio.post(path);
+    } catch (e) {
+      _apiLog('addFavoriteItem error: $e');
+      rethrow;
+    }
+  }
+
+  /// 取消收藏
+  Future<void> removeFavoriteItem(String userId, String itemId) async {
+    final path = '/Users/$userId/FavoriteItems/$itemId/Delete';
+    try {
+      await _dio.post(path);
+    } catch (e) {
+      _apiLog('removeFavoriteItem error: $e');
+      rethrow;
+    }
+  }
+
+  /// 标记为已观看
+  Future<void> markAsPlayed(String userId, String itemId) async {
+    final path = '/Users/$userId/PlayedItems/$itemId';
+    try {
+      await _dio.post(path);
+    } catch (e) {
+      _apiLog('markAsPlayed error: $e');
+      rethrow;
+    }
+  }
+
+  /// 取消已观看标记
+  Future<void> unmarkAsPlayed(String userId, String itemId) async {
+    final path = '/Users/$userId/PlayedItems/$itemId/Delete';
+    try {
+      await _dio.post(path);
+    } catch (e) {
+      _apiLog('unmarkAsPlayed error: $e');
+      rethrow;
+    }
+  }
 }
 
 class LoginResult {

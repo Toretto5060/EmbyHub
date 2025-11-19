@@ -622,6 +622,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _updateMediaNotification();
       });
 
+      // ✅ 立即读取一次当前播放状态，确保初始状态正确
+      // 避免在 stream 回调之前显示错误的按钮状态
+      if (mounted) {
+        final currentPlaying = _player.state.playing;
+        _playerLog('🎬 [Player] Initial playing state: $currentPlaying');
+        setState(() => _isPlaying = currentPlaying);
+      }
+
       // ✅ 监听缓冲进度（用于显示进度条上的缓冲位置）
       _player.stream.buffer.listen((buffer) {
         if (mounted && buffer > Duration.zero) {
@@ -1686,6 +1694,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   onToggleOrientation: _toggleOrientation,
                   onPlayPause: () async {
                     final playing = _player.state.playing;
+                    // ✅ 只调用播放器方法，状态由 stream 监听更新
                     if (playing) {
                       await _player.pause();
                     } else {

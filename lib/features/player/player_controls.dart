@@ -814,6 +814,12 @@ class _PlayPauseButton extends StatelessWidget {
         state.isBuffering ||
         (state.ready && state.position == Duration.zero);
 
+    // ✅ 判断应该显示播放还是暂停图标
+    // 只根据 isPlaying 状态判断，不要添加额外的条件
+    // 如果 isPlaying == true，说明正在播放，应该显示暂停图标
+    // 如果 isPlaying == false，说明未播放或已暂停，应该显示播放图标
+    final bool showPauseIcon = state.isPlaying;
+
     return Center(
       child: AnimatedBuilder(
         animation: state.controlsAnimation,
@@ -858,10 +864,10 @@ class _PlayPauseButton extends StatelessWidget {
                             );
                           },
                           child: Icon(
-                            state.isPlaying
+                            showPauseIcon
                                 ? Icons.pause_circle_rounded
                                 : Icons.play_circle_rounded,
-                            key: ValueKey<bool>(state.isPlaying),
+                            key: ValueKey<bool>(showPauseIcon),
                             color: Colors.white,
                             size: 80,
                             shadows: const [
