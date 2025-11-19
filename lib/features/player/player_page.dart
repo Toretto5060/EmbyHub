@@ -16,6 +16,7 @@ import '../../core/emby_api.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../utils/status_bar_manager.dart';
+import '../../utils/theme_utils.dart';
 import 'custom_subtitle_overlay.dart';
 import 'player_controls.dart';
 
@@ -2098,7 +2099,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       barrierColor: Colors.transparent,
       builder: (dialogCtx) {
         scheduleScroll();
-        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final isDark = isDarkModeFromContext(context, ref);
         final gradientColors = isDark
             ? [
                 Colors.grey.shade900.withValues(alpha: 0.7),
@@ -2288,7 +2289,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       barrierColor: Colors.transparent,
       builder: (dialogCtx) {
         scheduleScroll();
-        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final isDark = isDarkModeFromContext(context, ref);
         final gradientColors = isDark
             ? [
                 Colors.grey.shade900.withValues(alpha: 0.7),

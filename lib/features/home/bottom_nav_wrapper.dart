@@ -1,10 +1,12 @@
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../utils/platform_utils.dart';
 import '../../utils/status_bar_manager.dart';
+import '../../utils/theme_utils.dart';
 
 // InheritedWidget 用于向下传递当前选中的标签索引
 class BottomNavProvider extends InheritedWidget {
@@ -26,20 +28,20 @@ class BottomNavProvider extends InheritedWidget {
   }
 }
 
-class BottomNavWrapper extends StatefulWidget {
+class BottomNavWrapper extends ConsumerStatefulWidget {
   const BottomNavWrapper({required this.child, super.key});
 
   final Widget child;
 
   @override
-  State<BottomNavWrapper> createState() => _BottomNavWrapperState();
+  ConsumerState<BottomNavWrapper> createState() => _BottomNavWrapperState();
 
   static _BottomNavWrapperState? of(BuildContext context) {
     return context.findAncestorStateOfType<_BottomNavWrapperState>();
   }
 }
 
-class _BottomNavWrapperState extends State<BottomNavWrapper> {
+class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
   int _index = 0;
 
   int get currentIndex => _index;
@@ -55,8 +57,7 @@ class _BottomNavWrapperState extends State<BottomNavWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
     final navBarHeight = 65.0;
     final bottomNavHeight =
         navBarHeight + MediaQuery.of(context).padding.bottom;

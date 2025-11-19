@@ -8,6 +8,7 @@ import '../../core/emby_api.dart';
 import '../../providers/account_history_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../utils/status_bar_manager.dart';
+import '../../utils/theme_utils.dart';
 
 class ModernConnectPage extends ConsumerStatefulWidget {
   const ModernConnectPage({super.key, this.startAtLogin = false});
@@ -24,7 +25,7 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
 
-  String _protocol = 'http';
+  String _protocol = 'https';
   final TextEditingController _host = TextEditingController();
   final TextEditingController _port = TextEditingController();
   final TextEditingController _user = TextEditingController();
@@ -475,31 +476,40 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
                 keyboardType: TextInputType.number,
               ),
               const SizedBox(height: 32),
-              FilledButton(
-                onPressed: _loading ? null : _testConnection,
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  backgroundColor: Colors.deepPurple,
-                  disabledBackgroundColor: Colors.grey.shade300,
-                  elevation: 4,
-                ),
-                child: _loading
-                    ? const SizedBox(
-                        height: 24,
-                        width: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text(
-                        '连接服务器',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w600),
+              Builder(
+                builder: (context) {
+                  final isDark = isDarkModeFromContext(context, ref);
+                  return FilledButton(
+                    onPressed: _loading ? null : _testConnection,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
+                      backgroundColor: Colors.deepPurple,
+                      disabledBackgroundColor: Colors.grey.shade300,
+                      elevation: 4,
+                      foregroundColor: isDark ? Colors.white : null,
+                    ),
+                    child: _loading
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            '连接服务器',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : null,
+                            ),
+                          ),
+                  );
+                },
               ),
             ],
           ),
@@ -625,61 +635,77 @@ class _ModernConnectPageState extends ConsumerState<ModernConnectPage>
               ),
               const SizedBox(height: 16),
               // ✅ 记住我选项
-              Row(
-                children: [
-                  Checkbox(
-                    value: _rememberMe,
-                    onChanged: (value) {
-                      setState(() {
-                        _rememberMe = value ?? true;
-                      });
-                    },
-                    activeColor: Colors.deepPurple,
-                  ),
-                  const Text(
-                    '记住我',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Tooltip(
-                    message: '勾选后，账号信息将被保存，下次可快速切换',
-                    child: Icon(
-                      Icons.info_outline,
-                      size: 16,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                ],
+              Builder(
+                builder: (context) {
+                  final brightness = MediaQuery.of(context).platformBrightness;
+                  final isDark = brightness == Brightness.dark;
+                  return Row(
+                    children: [
+                      Checkbox(
+                        value: _rememberMe,
+                        onChanged: (value) {
+                          setState(() {
+                            _rememberMe = value ?? true;
+                          });
+                        },
+                        activeColor: Colors.deepPurple,
+                        checkColor: isDark ? Colors.white : Colors.white,
+                      ),
+                      Text(
+                        '记住我',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Tooltip(
+                        message: '勾选后，账号信息将被保存，下次可快速切换',
+                        child: Icon(
+                          Icons.info_outline,
+                          size: 16,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _loading ? null : _login,
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  backgroundColor: Colors.deepPurple,
-                  disabledBackgroundColor: Colors.grey.shade300,
-                  elevation: 4,
-                ),
-                child: _loading
-                    ? const SizedBox(
-                        height: 24,
-                        width: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text(
-                        '登录',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w600),
+              Builder(
+                builder: (context) {
+                  final isDark = isDarkModeFromContext(context, ref);
+                  return FilledButton(
+                    onPressed: _loading ? null : _login,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
+                      backgroundColor: Colors.deepPurple,
+                      disabledBackgroundColor: Colors.grey.shade300,
+                      elevation: 4,
+                      foregroundColor: isDark ? Colors.white : null,
+                    ),
+                    child: _loading
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            '登录',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : null,
+                            ),
+                          ),
+                  );
+                },
               ),
             ],
           ),

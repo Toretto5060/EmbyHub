@@ -8,6 +8,7 @@ import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
+import '../../utils/theme_utils.dart';
 
 // Provider 获取剧集的季列表
 final seasonsProvider =
@@ -56,8 +57,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage> {
   Widget build(BuildContext context) {
     final seriesAsync = ref.watch(seriesProvider(widget.seriesId));
     final seasonsAsync = ref.watch(seasonsProvider(widget.seriesId));
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     return CupertinoPageScaffold(
       backgroundColor: CupertinoColors.systemBackground,
@@ -316,8 +316,7 @@ class _SeasonTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     return CupertinoButton(
       padding: EdgeInsets.zero,

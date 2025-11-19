@@ -12,6 +12,7 @@ import '../../utils/app_route_observer.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../providers/library_provider.dart';
+import '../../utils/theme_utils.dart';
 import 'library_items_page.dart'; // 复用排序相关的代码
 
 // ✅ 获取指定类型的内容
@@ -251,8 +252,7 @@ class _GenreItemsPageState extends ConsumerState<GenreItemsPage>
     final libraryType = itemsList != null ? _getLibraryType(itemsList) : null;
     final sortOptions = SortOption.getSortOptionsForType(libraryType);
 
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
     final baseColor =
         isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7);
     final textColor = isDark ? Colors.white : Colors.black87;
@@ -637,8 +637,7 @@ class _ItemTileState extends ConsumerState<_ItemTile>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     // 提取年份信息
     String? yearText;

@@ -13,6 +13,7 @@ import '../../utils/app_route_observer.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../providers/library_provider.dart';
+import '../../utils/theme_utils.dart';
 
 // 排序选项
 enum SortOption {
@@ -1140,8 +1141,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   // ✅ 构建继续观看电影卡片（类似首页样式）
   Widget _buildResumeMovieCard(
       BuildContext context, WidgetRef ref, ItemInfo item) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     final progress =
         (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
@@ -1269,8 +1269,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   // ✅ 构建继续观看剧集卡片（类似首页样式）
   Widget _buildResumeEpisodeCard(
       BuildContext context, WidgetRef ref, ItemInfo item) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     final progress =
         (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
@@ -1615,8 +1614,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     final libraryType = itemsList != null ? _getLibraryType(itemsList) : null;
     final sortOptions = SortOption.getSortOptionsForType(libraryType);
 
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
     final baseColor =
         isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7);
     final textColor = isDark ? Colors.white : Colors.black87;
@@ -2098,8 +2096,7 @@ class _ItemTileState extends ConsumerState<_ItemTile>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     // 提取年份信息
     String? yearText;

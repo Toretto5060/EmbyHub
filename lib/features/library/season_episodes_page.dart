@@ -7,6 +7,7 @@ import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
+import '../../utils/theme_utils.dart';
 
 // Provider 获取某一季的集列表
 final episodesProvider = FutureProvider.autoDispose
@@ -54,8 +55,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage> {
     final episodes = ref.watch(
       episodesProvider((widget.seriesId, widget.seasonId)),
     );
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     return CupertinoPageScaffold(
       backgroundColor: CupertinoColors.systemBackground,
@@ -194,8 +194,7 @@ class _EpisodeTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     String episodeNumber = '';
     if (episode.indexNumber != null) {

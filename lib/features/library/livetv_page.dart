@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/blur_navigation_bar.dart';
+import '../../utils/theme_utils.dart';
 
 final liveTvChannelsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
@@ -46,8 +47,7 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage> {
   @override
   Widget build(BuildContext context) {
     final channels = ref.watch(liveTvChannelsProvider(widget.viewId));
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     return CupertinoPageScaffold(
       backgroundColor: CupertinoColors.systemBackground,
@@ -118,8 +118,7 @@ class _ChannelTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     return CupertinoButton(
       padding: EdgeInsets.zero,

@@ -1,9 +1,11 @@
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../utils/theme_utils.dart';
 
 /// 首页专用的顶部导航栏 - 带动态毛玻璃效果
-class HomeNavigationBar extends StatelessWidget
+class HomeNavigationBar extends ConsumerWidget
     implements ObstructingPreferredSizeWidget {
   const HomeNavigationBar({
     this.leading,
@@ -27,10 +29,10 @@ class HomeNavigationBar extends StatelessWidget
   bool shouldFullyObstruct(BuildContext context) => false;
 
   @override
-  Widget build(BuildContext context) {
-    final brightness = MediaQuery.of(context).platformBrightness;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDark = isDarkModeFromContext(context, ref);
     final statusBarHeight = MediaQuery.of(context).padding.top;
-    final baseColor = brightness == Brightness.dark
+    final baseColor = isDark
         ? const Color(0xFF1C1C1E)
         : const Color(0xFFF2F2F7);
 
@@ -43,8 +45,7 @@ class HomeNavigationBar extends StatelessWidget
         final bool blur = forceBlur ?? (scrollOffset > 10);
         final double sigma = blur ? 30 : 0;
         final double backgroundOpacity = blur ? 0.7 : 1.0;
-        final Color currentColor =
-            brightness == Brightness.dark ? Colors.white : Colors.black87;
+        final Color currentColor = isDark ? Colors.white : Colors.black87;
 
         return ClipRect(
           child: BackdropFilter(

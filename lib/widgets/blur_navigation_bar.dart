@@ -1,10 +1,12 @@
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../utils/theme_utils.dart';
 
 /// 带动态毛玻璃效果的导航栏 - 根据滚动位置显示/隐藏模糊效果
-class BlurNavigationBar extends StatefulWidget
+class BlurNavigationBar extends ConsumerStatefulWidget
     implements ObstructingPreferredSizeWidget {
   const BlurNavigationBar({
     this.leading,
@@ -66,10 +68,10 @@ class BlurNavigationBar extends StatefulWidget
   bool shouldFullyObstruct(BuildContext context) => false;
 
   @override
-  State<BlurNavigationBar> createState() => _BlurNavigationBarState();
+  ConsumerState<BlurNavigationBar> createState() => _BlurNavigationBarState();
 }
 
-class _BlurNavigationBarState extends State<BlurNavigationBar> {
+class _BlurNavigationBarState extends ConsumerState<BlurNavigationBar> {
   static const double _epsilon = 0.001;
   ScrollController? _attachedController;
   double _progress = 0.0;
@@ -78,11 +80,8 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
   @override
   void initState() {
     super.initState();
-    _systemColor =
-        WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-                Brightness.dark
-            ? Colors.white
-            : Colors.black87;
+    // ✅ 初始颜色会在 didChangeDependencies 中更新
+    _systemColor = Colors.black87;
     _attachController(widget.scrollController);
     _updateProgress();
   }
@@ -90,10 +89,9 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // 响应系统主题变化
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final newSystemColor =
-        brightness == Brightness.dark ? Colors.white : Colors.black87;
+    // ✅ 响应主题变化（使用用户选择的主题）
+    final isDark = isDarkModeFromContext(context, ref);
+    final newSystemColor = isDark ? Colors.white : Colors.black87;
     if (newSystemColor != _systemColor) {
       setState(() {
         _systemColor = newSystemColor;
@@ -169,8 +167,8 @@ class _BlurNavigationBarState extends State<BlurNavigationBar> {
   @override
   Widget build(BuildContext context) {
     final statusBarHeight = MediaQuery.of(context).padding.top;
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final baseColor = brightness == Brightness.dark
+    final isDark = isDarkModeFromContext(context, ref);
+    final baseColor = isDark
         ? const Color(0xFF1C1C1E)
         : const Color(0xFFF2F2F7);
     final Color expandedColor = widget.expandedForegroundColor ?? _systemColor;

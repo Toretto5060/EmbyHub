@@ -20,6 +20,7 @@ import '../../widgets/fade_in_image.dart';
 import '../../utils/status_bar_manager.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../utils/app_route_observer.dart';
+import '../../utils/theme_utils.dart';
 
 final itemProvider =
     FutureProvider.family<ItemInfo, String>((ref, itemId) async {
@@ -376,10 +377,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                 if (_cachedItemData != null) {
                   return _buildContentArea(_cachedItemData!);
                 }
-                // ✅ 如果没有缓存数据，显示loading
+                // ✅ 如果没有缓存数据，只显示导航栏，不显示loading
                 return Stack(
                   children: [
-                    const Center(child: CupertinoActivityIndicator()),
                     Positioned(
                       top: 0,
                       left: 0,
@@ -401,11 +401,10 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                 ],
               ),
               orElse: () {
-                // ✅ 如果 item 还没有数据且没有缓存，显示loading
+                // ✅ 如果 item 还没有数据且没有缓存，只显示导航栏，不显示loading
                 if (_cachedItemData == null) {
                   return Stack(
                     children: [
-                      const Center(child: CupertinoActivityIndicator()),
                       Positioned(
                         top: 0,
                         left: 0,
@@ -427,7 +426,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
 
   /// ✅ 构建内容区域（避免在loading和orElse中重复代码）
   Widget _buildContentArea(ItemInfo data) {
-    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
     final performers = data.performers ?? const <PerformerInfo>[];
     final externalLinks = _composeExternalLinks(data);
     final similarItems = ref.watch(similarItemsProvider(widget.itemId));
@@ -591,7 +590,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     BuildContext context,
     ItemInfo? data,
   ) {
-    final brightness = MediaQuery.of(context).platformBrightness;
+    final brightness = getCurrentBrightnessFromContext(context, ref);
     final SystemUiOverlayStyle baseStyle = _appliedStatusStyle;
     final SystemUiOverlayStyle targetStyle =
         _navSyncedStyle ?? _appliedStatusStyle;
@@ -668,8 +667,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   }
 
   Widget _buildBackdropBackground(BuildContext context, ItemInfo item) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
     final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
 
     return Stack(
@@ -1410,7 +1408,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
 
   void _syncStatusBarWithNavigation(double offset) {
     if (!mounted) return;
-    final brightness = MediaQuery.of(context).platformBrightness;
+    final brightness = getCurrentBrightnessFromContext(context, ref);
     final SystemUiOverlayStyle expandedStyle = _statusBarStyle;
     final SystemUiOverlayStyle collapsedStyle =
         _defaultStyleForBrightness(brightness);

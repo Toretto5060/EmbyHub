@@ -8,8 +8,10 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import '../utils/theme_utils.dart';
 
 const bool _kImageCacheLogging = false;
 
@@ -461,14 +463,14 @@ class EmbyFadeInImage extends StatelessWidget {
 */
 
 /// 骨架屏占位符（闪烁动画）
-class _ShimmerPlaceholder extends StatefulWidget {
+class _ShimmerPlaceholder extends ConsumerStatefulWidget {
   const _ShimmerPlaceholder();
 
   @override
-  State<_ShimmerPlaceholder> createState() => _ShimmerPlaceholderState();
+  ConsumerState<_ShimmerPlaceholder> createState() => _ShimmerPlaceholderState();
 }
 
-class _ShimmerPlaceholderState extends State<_ShimmerPlaceholder>
+class _ShimmerPlaceholderState extends ConsumerState<_ShimmerPlaceholder>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
 
@@ -489,8 +491,7 @@ class _ShimmerPlaceholderState extends State<_ShimmerPlaceholder>
 
   @override
   Widget build(BuildContext context) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     return AnimatedBuilder(
       animation: _controller,

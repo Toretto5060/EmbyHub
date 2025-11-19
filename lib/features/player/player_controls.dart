@@ -3,7 +3,9 @@ import 'dart:ui';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import '../../utils/theme_utils.dart';
 
 /// ✅ 播放器控制状态数据类
 class PlayerControlsState {
@@ -138,7 +140,7 @@ class PlayerControlsState {
 
 /// ✅ 播放器 UI 控制层
 /// 负责所有 UI 控制相关的组件和逻辑
-class PlayerControls extends StatelessWidget {
+class PlayerControls extends ConsumerWidget {
   const PlayerControls({
     required this.state,
     super.key,
@@ -147,7 +149,7 @@ class PlayerControls extends StatelessWidget {
   final PlayerControlsState state;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Stack(
       children: [
         // ✅ 空白区域点击检测层（最底层，当控制层显示时，用于隐藏控制层）
@@ -261,14 +263,14 @@ class PlayerControls extends StatelessWidget {
 }
 
 /// ✅ 顶部控制栏
-class _TopControlsBar extends StatelessWidget {
+class _TopControlsBar extends ConsumerWidget {
   const _TopControlsBar({required this.state, required this.context});
 
   final PlayerControlsState state;
   final BuildContext context;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return AnimatedBuilder(
       animation: state.controlsAnimation,
       builder: (context, child) {
@@ -470,7 +472,7 @@ class _TopControlsBar extends StatelessWidget {
 }
 
 /// ✅ 拖动进度条时的时间预览
-class _DraggingTimePreview extends StatelessWidget {
+class _DraggingTimePreview extends ConsumerWidget {
   const _DraggingTimePreview({
     required this.state,
     this.isLongPressing = false,
@@ -480,7 +482,7 @@ class _DraggingTimePreview extends StatelessWidget {
   final bool isLongPressing; // ✅ 是否是长按快进/快退
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // ✅ 获取要显示的位置
     // 长按快进/快退时，位置会实时更新，直接使用当前位置
     // 拖动进度条时，使用拖动位置
@@ -509,7 +511,7 @@ class _DraggingTimePreview extends StatelessWidget {
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: Theme.of(context).brightness == Brightness.dark
+                      colors: isDarkModeFromContext(context, ref)
                           ? [
                               Colors.grey.shade900.withValues(alpha: 0.6),
                               Colors.grey.shade800.withValues(alpha: 0.4),
@@ -541,14 +543,14 @@ class _DraggingTimePreview extends StatelessWidget {
 }
 
 /// ✅ 视频裁切模式提示
-class _VideoFitHint extends StatelessWidget {
+class _VideoFitHint extends ConsumerWidget {
   const _VideoFitHint({required this.state, required this.context});
 
   final PlayerControlsState state;
   final BuildContext context;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Positioned(
       top: 90, // 在顶部按钮下方，紧贴按钮组
       right: 85, // 对齐裁剪按钮位置
@@ -562,7 +564,7 @@ class _VideoFitHint extends StatelessWidget {
             CustomPaint(
               size: const Size(12, 6),
               painter: _TooltipArrowPainter(
-                color: Theme.of(context).brightness == Brightness.dark
+                color: isDarkModeFromContext(context, ref)
                     ? Colors.grey.shade900.withValues(alpha: 0.6)
                     : Colors.white.withValues(alpha: 0.2),
               ),
@@ -581,7 +583,7 @@ class _VideoFitHint extends StatelessWidget {
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: Theme.of(context).brightness == Brightness.dark
+                      colors: isDarkModeFromContext(context, ref)
                           ? [
                               Colors.grey.shade900.withValues(alpha: 0.6),
                               Colors.grey.shade800.withValues(alpha: 0.4),
@@ -612,13 +614,13 @@ class _VideoFitHint extends StatelessWidget {
 }
 
 /// ✅ 锁定按钮（中间左侧）
-class _LockButton extends StatelessWidget {
+class _LockButton extends ConsumerWidget {
   const _LockButton({required this.state});
 
   final PlayerControlsState state;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Positioned(
       left: 48, // ✅ 往右移动，从 24 改为 48
       top: 0,
@@ -638,7 +640,7 @@ class _LockButton extends StatelessWidget {
                       gradient: LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: Theme.of(context).brightness == Brightness.dark
+                        colors: isDarkModeFromContext(context, ref)
                             ? [
                                 Colors.grey.shade900.withValues(alpha: 0.6),
                                 Colors.grey.shade800.withValues(alpha: 0.4),
@@ -1378,7 +1380,7 @@ class _SpeedList extends StatelessWidget {
 }
 
 /// ✅ 底部控制栏组件
-class _Controls extends StatefulWidget {
+class _Controls extends ConsumerStatefulWidget {
   const _Controls({
     required this.position,
     required this.duration,
@@ -1413,10 +1415,10 @@ class _Controls extends StatefulWidget {
   final ValueChanged<Duration> onDragEnd;
 
   @override
-  State<_Controls> createState() => _ControlsState();
+  ConsumerState<_Controls> createState() => _ControlsState();
 }
 
-class _ControlsState extends State<_Controls>
+class _ControlsState extends ConsumerState<_Controls>
     with SingleTickerProviderStateMixin {
   late AnimationController _thumbAnimationController;
   late Animation<double> _thumbAnimation;
@@ -1466,7 +1468,7 @@ class _ControlsState extends State<_Controls>
     final sliderValue =
         rawValue.isNaN ? 0.0 : rawValue.clamp(0.0, 1.0).toDouble();
 
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final isDarkMode = isDarkModeFromContext(context, ref);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),

@@ -8,6 +8,7 @@ import '../../providers/account_history_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/fade_in_image.dart';
+import '../../utils/theme_utils.dart';
 import '../home/bottom_nav_wrapper.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -35,40 +36,140 @@ class SettingsPage extends ConsumerWidget {
                   context,
                   title: '账户',
                   children: [
-                    _buildActionTile(
-                      context,
-                      icon: Icons.person_rounded,
-                      title: '当前用户',
-                      subtitle: authData.userName ?? '未登录',
-                      color: Colors.blue,
-                      actionLabel: '切换',
-                      onTap: () =>
-                          _showAccountSwitcher(context, ref, serverData),
-                      leadingWidget: authData.userId != null
-                          ? _UserAvatarRounded(
-                              key: ValueKey(
-                                  authData.userId), // ✅ 使用 userId 作为 key 强制重建
-                              userId: authData.userId,
-                              username: authData.userName ?? 'U',
-                              color: Colors.blue,
-                            )
-                          : null,
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.purple.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(Icons.dns_rounded, color: Colors.purple, size: 24),
+                            ),
+                            title: const Text(
+                              '服务器地址',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            subtitle: Text(
+                              _maskServerUrl(
+                                  '${serverData.protocol}://${serverData.host}:${serverData.port}'),
+                              style: const TextStyle(fontSize: 13),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: OutlinedButton(
+                              onPressed: () => _showServerSwitcher(context, ref),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.purple,
+                                side: BorderSide(color: Colors.purple.withOpacity(0.5)),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              ),
+                              child: const Text('切换'),
+                            ),
+                          ),
+                          ListTile(
+                            leading: authData.userId != null
+                                ? _UserAvatarRounded(
+                                    key: ValueKey(
+                                        authData.userId), // ✅ 使用 userId 作为 key 强制重建
+                                    userId: authData.userId,
+                                    username: authData.userName ?? 'U',
+                                    color: Colors.blue,
+                                  )
+                                : Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(Icons.person_rounded, color: Colors.blue, size: 24),
+                                  ),
+                            title: const Text(
+                              '当前用户',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            subtitle: Text(
+                              authData.userName ?? '未登录',
+                              style: const TextStyle(fontSize: 13),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: OutlinedButton(
+                              onPressed: () =>
+                                  _showAccountSwitcher(context, ref, serverData),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.blue,
+                                side: BorderSide(color: Colors.blue.withOpacity(0.5)),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              ),
+                              child: const Text('切换'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
                 _buildSection(
                   context,
-                  title: '服务器',
+                  title: '主题',
                   children: [
-                    _buildActionTile(
-                      context,
-                      icon: Icons.dns_rounded,
-                      title: '服务器地址',
-                      subtitle: _maskServerUrl(
-                          '${serverData.protocol}://${serverData.host}:${serverData.port}'),
-                      color: Colors.purple,
-                      actionLabel: '切换',
-                      onTap: () => _showServerSwitcher(context, ref),
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Consumer(
+                        builder: (context, ref, child) {
+                          final currentThemeMode = ref.watch(themeModeProvider);
+                          return Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                _buildThemeButton(
+                                  context,
+                                  ref,
+                                  AppThemeMode.dark,
+                                  '深色',
+                                  Icons.dark_mode_rounded,
+                                  currentThemeMode == AppThemeMode.dark,
+                                ),
+                                _buildThemeButton(
+                                  context,
+                                  ref,
+                                  AppThemeMode.light,
+                                  '浅色',
+                                  Icons.light_mode_rounded,
+                                  currentThemeMode == AppThemeMode.light,
+                                ),
+                                _buildThemeButton(
+                                  context,
+                                  ref,
+                                  AppThemeMode.system,
+                                  '跟随系统',
+                                  Icons.brightness_auto_rounded,
+                                  currentThemeMode == AppThemeMode.system,
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),
@@ -468,10 +569,8 @@ class SettingsPage extends ConsumerWidget {
           // 等待状态更新完成
           await Future.delayed(const Duration(milliseconds: 300));
 
-          // 验证 authStateProvider 的状态
-          final authState = ref.read(authStateProvider).value;
-
-          return {'success': true, 'username': account.username}; // ✅ 返回成功
+          // ✅ 验证完成，返回成功
+          return {'success': true, 'username': account.username};
         } catch (e) {
           // Token 失效，继续执行下面的密码登录逻辑
         }
@@ -511,15 +610,13 @@ class SettingsPage extends ConsumerWidget {
         // 等待状态更新完成
         await Future.delayed(const Duration(milliseconds: 300));
 
-        // 验证 authStateProvider 的状态
-        final authState = ref.read(authStateProvider).value;
-
-        return {'success': true, 'username': loginResult.userName}; // ✅ 返回成功
+        // ✅ 验证完成，返回成功
+        return {'success': true, 'username': loginResult.userName};
       }
 
       // ✅ context not mounted
       return {'success': false, 'username': account.username};
-    } catch (e, stackTrace) {
+    } catch (e) {
       // ✅ 显示居中错误提示
       if (context.mounted) {
         showDialog(
@@ -921,53 +1018,57 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  Widget _buildActionTile(
-    BuildContext context, {
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Color color,
-    required String actionLabel,
-    required VoidCallback onTap,
-    Widget? leadingWidget, // ✅ 可选的自定义 leading widget
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: Theme.of(context)
-            .colorScheme
-            .surfaceContainerHighest
-            .withOpacity(0.3),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: ListTile(
-        leading: leadingWidget ??
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color, size: 24),
-            ),
-        title: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          subtitle,
-          style: const TextStyle(fontSize: 13),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: OutlinedButton(
-          onPressed: onTap,
+  // ✅ 构建主题选择按钮
+  Widget _buildThemeButton(
+    BuildContext context,
+    WidgetRef ref,
+    AppThemeMode mode,
+    String label,
+    IconData icon,
+    bool isSelected,
+  ) {
+    final isDark = isDarkModeFromContext(context, ref);
+    final selectedColor = Theme.of(context).colorScheme.primary;
+
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: OutlinedButton(
+          onPressed: () {
+            ref.read(themeModeProvider.notifier).setThemeMode(mode);
+          },
           style: OutlinedButton.styleFrom(
-            foregroundColor: color,
-            side: BorderSide(color: color.withOpacity(0.5)),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            backgroundColor: isSelected
+                ? selectedColor.withOpacity(0.1)
+                : Colors.transparent,
+            foregroundColor: isSelected ? selectedColor : null,
+            side: BorderSide(
+              color: isSelected
+                  ? selectedColor
+                  : (isDark
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.black.withOpacity(0.2)),
+              width: isSelected ? 2 : 1,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
-          child: Text(actionLabel),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

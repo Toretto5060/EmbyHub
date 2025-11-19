@@ -74,3 +74,47 @@ class AuthController extends StateNotifier<AsyncValue<AuthState>> {
         AsyncValue.data(AuthState(userId: null, userName: null, token: null));
   }
 }
+
+// ✅ 主题模式枚举
+enum AppThemeMode {
+  dark('dark', '深色'),
+  light('light', '浅色'),
+  system('system', '跟随系统');
+
+  const AppThemeMode(this.value, this.label);
+  final String value;
+  final String label;
+}
+
+// ✅ 主题模式 Provider
+final themeModeProvider =
+    StateNotifierProvider<ThemeModeController, AppThemeMode>((ref) {
+  return ThemeModeController()..load();
+});
+
+class ThemeModeController extends StateNotifier<AppThemeMode> {
+  ThemeModeController() : super(AppThemeMode.dark); // ✅ 默认深色
+
+  Future<void> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final value = prefs.getString('theme_mode') ?? 'dark';
+      state = AppThemeMode.values.firstWhere(
+        (mode) => mode.value == value,
+        orElse: () => AppThemeMode.dark,
+      );
+    } catch (e) {
+      state = AppThemeMode.dark;
+    }
+  }
+
+  Future<void> setThemeMode(AppThemeMode mode) async {
+    state = mode;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('theme_mode', mode.value);
+    } catch (e) {
+      // 保存失败不影响状态更新
+    }
+  }
+}

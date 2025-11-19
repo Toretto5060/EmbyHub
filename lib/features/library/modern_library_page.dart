@@ -14,6 +14,7 @@ import '../../providers/emby_api_provider.dart';
 import '../../widgets/home_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/app_route_observer.dart';
+import '../../utils/theme_utils.dart';
 
 const bool _kModernLibraryLogging = false;
 void _homeLog(String message) {
@@ -183,8 +184,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
   @override
   Widget build(BuildContext context) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
     final backgroundColor =
         isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7);
 
@@ -448,8 +448,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   }
 
   Widget _buildSectionHeader(BuildContext context, String title) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     // 根据标题选择合适的 icon
     IconData? icon;
@@ -507,8 +506,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   }
 
   Widget _buildLibraryCard(BuildContext context, ViewInfo view) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     return GestureDetector(
       onTap: view.id != null && view.id!.isNotEmpty
@@ -649,8 +647,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   }
 
   Widget _buildLatestCard(BuildContext context, WidgetRef ref, ItemInfo item) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     final hasBackdrop = _latestHasHorizontalArtwork(item);
     final aspectRatio = hasBackdrop ? 2 / 3 : 16 / 9;
@@ -922,8 +919,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   }
 
   Widget _buildResumeCard(BuildContext context, WidgetRef ref, ItemInfo item) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
+    final isDark = isDarkModeFromContext(context, ref);
 
     final progress =
         (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
