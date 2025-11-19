@@ -786,7 +786,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
             const SizedBox(height: 18),
             _buildPlaySection(context, item, isDark),
             if ((item.overview ?? '').isNotEmpty) ...[
-              const SizedBox(height: 22),
+              const SizedBox(height: 18),
               GestureDetector(
                 onTap: () => _showOverviewDialog(item),
                 child: Text(
@@ -2352,7 +2352,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
             ),
             const SizedBox(height: 12),
             SizedBox(
-              height: 240,
+              height: 218,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 padding: EdgeInsets.zero,
@@ -2378,7 +2378,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         );
       },
       loading: () => const SizedBox(
-        height: 240,
+        height: 218,
         child: Center(child: CupertinoActivityIndicator()),
       ),
       error: (_, __) => const SizedBox.shrink(),

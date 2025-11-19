@@ -370,6 +370,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   late final PageController _pageController; // ✅ PageView控制器
   final Map<int, ScrollController> _pageScrollControllers =
       {}; // ✅ 每个页面的ScrollController
+  bool _isPageAnimating = false; // ✅ 标记PageView是否正在动画
   bool _isSortMenuOpen = false; // ✅ 排序菜单是否打开
   List<ItemInfo>? _cachedItemsList; // ✅ 缓存itemsList，避免重新加载时闪烁
 
@@ -590,12 +591,12 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     final pageScrollController = _pageScrollControllers[pageIndex]!;
 
     // ✅ 计算header高度
-    // BlurNavigationBar的preferredSize是 100.0 + 36(tab) + 36(信息栏) = 172
-    // 其中100包含了statusBar(44)和基础导航栏(44)，所以实际header高度是172
+    // BlurNavigationBar的preferredSize是 100.0 + 36(tab) = 136
+    // 其中100包含了statusBar(44)和基础导航栏(44)，所以实际header高度是136
     // 由于navigationBar是ObstructingPreferredSizeWidget，内容会自动在下方
     // 但是我们需要在padding中加上header的实际高度，让内容正确显示在header下方
     final headerHeight =
-        100.0 + 36.0 + 36.0; // ✅ BlurNavigationBar的preferredSize（tab高度改为36）
+        100.0 + 36.0; // ✅ BlurNavigationBar的preferredSize（移除了信息行）
 
     return RefreshIndicator(
       displacement: 20,
@@ -691,183 +692,193 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
     // 计算菜单位置（右上角）
     final statusBarHeight = MediaQuery.of(context).padding.top;
-    final menuTop = statusBarHeight + 44 + 36 + 8; // 导航栏 + tab + 信息栏 + 间距
+    // ✅ 调整菜单位置，更靠近排序按钮（导航栏44 + tab约40，减去一些间距）
+    final menuTop = statusBarHeight + 44 + 40 - 2; // 导航栏 + tab - 2（更贴近）
 
     showDialog(
       context: context,
       barrierColor: Colors.transparent,
-      builder: (dialogContext) => Stack(
-        children: [
-          // 半透明背景
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: () {
-                Navigator.pop(dialogContext);
-                // ✅ 关闭菜单时更新状态
-                setState(() {
-                  _isSortMenuOpen = false;
-                });
-              },
-              child: Container(
-                color: Colors.black.withOpacity(0.3),
+      useSafeArea: false, // ✅ 不使用安全区域，让遮罩覆盖状态栏
+      builder: (dialogContext) => MediaQuery.removePadding(
+        context: dialogContext,
+        removeTop: true, // ✅ 移除顶部padding，让遮罩从屏幕顶部开始
+        child: Stack(
+          children: [
+            // 半透明背景 - 覆盖整个屏幕包括状态栏
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.pop(dialogContext);
+                  // ✅ 关闭菜单时更新状态
+                  setState(() {
+                    _isSortMenuOpen = false;
+                  });
+                },
+                child: Container(
+                  color: Colors.black.withOpacity(0.3),
+                ),
               ),
             ),
-          ),
-          // 下拉菜单
-          Positioned(
-            top: menuTop,
-            right: 16,
-            child: Material(
-              color: Colors.transparent,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    width: 180,
-                    constraints: const BoxConstraints(
-                      maxHeight: 400,
-                    ),
-                    decoration: BoxDecoration(
-                      color: baseColor.withOpacity(0.85),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isDark
-                            ? Colors.white.withOpacity(0.1)
-                            : Colors.black.withOpacity(0.1),
-                        width: 0.5,
+            // 下拉菜单
+            Positioned(
+              top: menuTop,
+              right: 16,
+              child: Material(
+                color: Colors.transparent,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                    child: Container(
+                      width: 180,
+                      constraints: const BoxConstraints(
+                        maxHeight: 400,
                       ),
-                    ),
-                    child: Builder(
-                      builder: (context) {
-                        // ✅ 创建ScrollController，用于滚动到选中项
-                        final scrollController = ScrollController();
-                        // ✅ 计算每个选项的高度（包括divider）
-                        const itemHeight =
-                            48.0; // Container padding(12*2) + 文本高度约24
-                        const dividerHeight = 1.0;
+                      decoration: BoxDecoration(
+                        color: baseColor.withOpacity(0.85),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withOpacity(0.1)
+                              : Colors.black.withOpacity(0.1),
+                          width: 0.5,
+                        ),
+                      ),
+                      child: Builder(
+                        builder: (context) {
+                          // ✅ 创建ScrollController，用于滚动到选中项
+                          final scrollController = ScrollController();
+                          // ✅ 计算每个选项的高度（包括divider）
+                          const itemHeight =
+                              48.0; // Container padding(12*2) + 文本高度约24
+                          const dividerHeight = 1.0;
 
-                        // ✅ 找到当前选中项的索引
-                        final selectedIndex = sortOptions.indexWhere(
-                          (option) => option == sortState.sortBy,
-                        );
+                          // ✅ 找到当前选中项的索引
+                          final selectedIndex = sortOptions.indexWhere(
+                            (option) => option == sortState.sortBy,
+                          );
 
-                        // ✅ 在显示后滚动到选中项
-                        if (selectedIndex >= 0) {
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (scrollController.hasClients) {
-                              final targetOffset =
-                                  selectedIndex * (itemHeight + dividerHeight);
-                              final maxScroll =
-                                  scrollController.position.maxScrollExtent;
-                              final viewportHeight =
-                                  scrollController.position.viewportDimension;
-                              // ✅ 滚动到选中项，让它在视口中间
-                              final scrollOffset = (targetOffset -
-                                      viewportHeight / 2 +
-                                      itemHeight / 2)
-                                  .clamp(0.0, maxScroll);
-                              scrollController.animateTo(
-                                scrollOffset,
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeOut,
-                              );
-                            }
-                          });
-                        }
+                          // ✅ 在显示后滚动到选中项
+                          if (selectedIndex >= 0) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (scrollController.hasClients) {
+                                final targetOffset = selectedIndex *
+                                    (itemHeight + dividerHeight);
+                                final maxScroll =
+                                    scrollController.position.maxScrollExtent;
+                                final viewportHeight =
+                                    scrollController.position.viewportDimension;
+                                // ✅ 滚动到选中项，让它在视口中间
+                                final scrollOffset = (targetOffset -
+                                        viewportHeight / 2 +
+                                        itemHeight / 2)
+                                    .clamp(0.0, maxScroll);
+                                scrollController.animateTo(
+                                  scrollOffset,
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeOut,
+                                );
+                              }
+                            });
+                          }
 
-                        return SingleChildScrollView(
-                          controller: scrollController,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              for (int i = 0; i < sortOptions.length; i++) ...[
-                                if (i > 0)
-                                  Divider(
-                                    height: 1,
-                                    thickness: 0.5,
-                                    color: isDark
-                                        ? Colors.white.withOpacity(0.1)
-                                        : Colors.black.withOpacity(0.1),
-                                  ),
-                                InkWell(
-                                  onTap: () {
-                                    Navigator.pop(dialogContext);
-                                    // ✅ 关闭菜单时更新状态
-                                    setState(() {
-                                      _isSortMenuOpen = false;
-                                    });
-                                    final notifier = ref.read(
-                                        sortStateProvider(widget.viewId)
-                                            .notifier);
-                                    final currentState = ref
-                                        .read(sortStateProvider(widget.viewId));
-                                    if (currentState.sortBy == sortOptions[i]) {
-                                      // 相同选项，切换正序/倒序
-                                      notifier.updateState(
-                                        currentState.copyWith(
-                                            ascending: !currentState.ascending),
-                                      );
-                                    } else {
-                                      // 不同选项，切换到新选项（默认倒序）
-                                      notifier.updateState(
-                                        SortState(
-                                          sortBy: sortOptions[i],
-                                          ascending: false,
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 12,
+                          return SingleChildScrollView(
+                            controller: scrollController,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (int i = 0;
+                                    i < sortOptions.length;
+                                    i++) ...[
+                                  if (i > 0)
+                                    Divider(
+                                      height: 1,
+                                      thickness: 0.5,
+                                      color: isDark
+                                          ? Colors.white.withOpacity(0.1)
+                                          : Colors.black.withOpacity(0.1),
                                     ),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            sortOptions[i].label,
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              color: sortState.sortBy ==
-                                                      sortOptions[i]
-                                                  ? selectedColor
-                                                  : textColor,
-                                              fontWeight: sortState.sortBy ==
-                                                      sortOptions[i]
-                                                  ? FontWeight.w600
-                                                  : FontWeight.w400,
+                                  InkWell(
+                                    onTap: () {
+                                      Navigator.pop(dialogContext);
+                                      // ✅ 关闭菜单时更新状态
+                                      setState(() {
+                                        _isSortMenuOpen = false;
+                                      });
+                                      final notifier = ref.read(
+                                          sortStateProvider(widget.viewId)
+                                              .notifier);
+                                      final currentState = ref.read(
+                                          sortStateProvider(widget.viewId));
+                                      if (currentState.sortBy ==
+                                          sortOptions[i]) {
+                                        // 相同选项，切换正序/倒序
+                                        notifier.updateState(
+                                          currentState.copyWith(
+                                              ascending:
+                                                  !currentState.ascending),
+                                        );
+                                      } else {
+                                        // 不同选项，切换到新选项（默认倒序）
+                                        notifier.updateState(
+                                          SortState(
+                                            sortBy: sortOptions[i],
+                                            ascending: false,
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 12,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              sortOptions[i].label,
+                                              style: TextStyle(
+                                                fontSize: 15,
+                                                color: sortState.sortBy ==
+                                                        sortOptions[i]
+                                                    ? selectedColor
+                                                    : textColor,
+                                                fontWeight: sortState.sortBy ==
+                                                        sortOptions[i]
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w400,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        if (sortState.sortBy ==
-                                            sortOptions[i]) ...[
-                                          const SizedBox(width: 8),
-                                          Icon(
-                                            sortState.ascending
-                                                ? CupertinoIcons.arrow_up
-                                                : CupertinoIcons.arrow_down,
-                                            size: 14,
-                                            color: selectedColor,
-                                          ),
+                                          if (sortState.sortBy ==
+                                              sortOptions[i]) ...[
+                                            const SizedBox(width: 8),
+                                            Icon(
+                                              sortState.ascending
+                                                  ? CupertinoIcons.arrow_up
+                                                  : CupertinoIcons.arrow_down,
+                                              size: 14,
+                                              color: selectedColor,
+                                            ),
+                                          ],
                                         ],
-                                      ],
+                                      ),
                                     ),
                                   ),
-                                ),
+                                ],
                               ],
-                            ],
-                          ),
-                        );
-                      },
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -904,17 +915,31 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
           }
         }
 
+        // ✅ 立即更新_selectedTab，让tab阴影立即跳到目标位置
         setState(() {
           _selectedTab = index;
+          _isPageAnimating = true; // ✅ 标记开始动画
         });
 
         // ✅ 同步PageView
         if (_pageController.hasClients) {
-          _pageController.animateToPage(
+          _pageController
+              .animateToPage(
             index,
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeInOut,
-          );
+          )
+              .then((_) {
+            // ✅ 动画完成后，重置标志
+            if (mounted) {
+              setState(() {
+                _isPageAnimating = false;
+              });
+            }
+          });
+        } else {
+          // ✅ 如果PageController还没有准备好，立即重置标志
+          _isPageAnimating = false;
         }
 
         // ✅ 确保新tab的ScrollController已创建并触发重建
@@ -967,6 +992,11 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
         child: PageView.builder(
           controller: _pageController,
           onPageChanged: (index) {
+            // ✅ 如果正在动画（程序触发的切换），不更新_selectedTab，避免tab阴影跳来跳去
+            if (_isPageAnimating) {
+              return;
+            }
+
             // ✅ 切换页面时，将之前页面的滚动位置归零
             if (_pageScrollControllers.containsKey(_selectedTab)) {
               final previousController = _pageScrollControllers[_selectedTab]!;
@@ -1014,6 +1044,11 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
           child: PageView.builder(
             controller: _pageController,
             onPageChanged: (index) {
+              // ✅ 如果正在动画（程序触发的切换），不更新_selectedTab，避免tab阴影跳来跳去
+              if (_isPageAnimating) {
+                return;
+              }
+
               if (_pageScrollControllers.containsKey(_selectedTab)) {
                 final previousController =
                     _pageScrollControllers[_selectedTab]!;
