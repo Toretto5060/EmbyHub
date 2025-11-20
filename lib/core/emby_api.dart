@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:dio/dio.dart' as dio;
 import 'package:shared_preferences/shared_preferences.dart' as sp;
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 const bool _kEmbyApiLogging = false;
 void _apiLog(String message) {
@@ -12,9 +14,6 @@ class EmbyApi {
   EmbyApi(this._dio);
 
   final dio.Dio _dio;
-
-  static const String _clientName = 'FlutterEmbyClient';
-  static const String _clientVersion = '1.0.0';
 
   static Future<EmbyApi> create() async {
     final prefs = await sp.SharedPreferences.getInstance();
@@ -33,8 +32,9 @@ class EmbyApi {
         .add(dio.InterceptorsWrapper(onRequest: (options, handler) async {
       final token = prefs.getString('emby_token');
       final deviceId = await _ensureDeviceId(prefs);
+      final deviceModel = await _getDeviceModel();
       final auth =
-          'MediaBrowser Client="$_clientName", Device="${Platform.operatingSystem}", DeviceId="$deviceId", Version="$_clientVersion"';
+          'MediaBrowser Client="$_clientName", Device="$deviceModel", DeviceId="$deviceId", Version="$_clientVersion"';
       options.headers['X-Emby-Authorization'] = auth;
       if (token != null && token.isNotEmpty) {
         options.headers['X-Emby-Token'] = token;
@@ -108,6 +108,28 @@ class EmbyApi {
       await prefs.setString('device_id', id);
     }
     return id;
+  }
+
+  // ✅ 获取设备型号（如 "xiaomi17 pro max"）
+  static Future<String> _getDeviceModel() async {
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        final androidInfo = await deviceInfo.androidInfo;
+        // 组合品牌和型号，如 "xiaomi17 pro max"
+        final brand = androidInfo.brand.toLowerCase();
+        final model = androidInfo.model;
+        return '$brand$model';
+      } else if (Platform.isIOS) {
+        final iosInfo = await deviceInfo.iosInfo;
+        return iosInfo.model;
+      } else {
+        return Platform.operatingSystem;
+      }
+    } catch (e) {
+      // 如果获取失败，回退到操作系统名称
+      return Platform.operatingSystem;
+    }
   }
 
   Future<Map<String, dynamic>> systemInfo() async {
