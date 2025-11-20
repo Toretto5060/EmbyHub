@@ -25,7 +25,7 @@ import '../../utils/theme_utils.dart';
 // ✅ 获取剧集详情
 final seriesProvider =
     FutureProvider.family<ItemInfo, String>((ref, seriesId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     throw Exception('未登录');
@@ -91,7 +91,7 @@ final seasonWatchStatsProvider = FutureProvider.family<
 // ✅ 获取剧集的继续观看集数
 final nextUpEpisodeProvider =
     FutureProvider.family<ItemInfo?, String>((ref, seriesId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     return null;
@@ -148,7 +148,7 @@ class SeriesDetailPage extends ConsumerStatefulWidget {
 }
 
 class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
-    with RouteAware {
+    with RouteAware, WidgetsBindingObserver {
   final _scrollController = ScrollController();
   static const SystemUiOverlayStyle _lightStatusBar = SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -190,10 +190,12 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
   bool _isRouteSubscribed = false; // ✅ 路由订阅状态
   ItemInfo? _cachedItemData; // ✅ 缓存item数据，避免重新加载时显示loading
   ItemInfo? _cachedNextUpEpisode; // ✅ 缓存下一集数据，避免刷新时闪烁
+  String? _lastItemDataHash; // ✅ 记录上次 item 数据的哈希，用于检测数据变化
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // ✅ 初始化收藏和观看状态 ValueNotifier
     _isFavoriteNotifier = ValueNotifier<bool>(false);
     _isPlayedNotifier = ValueNotifier<bool>(false);
@@ -211,32 +213,22 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     _appliedStatusStyle = _statusBarStyle;
   }
 
-  bool _wasRouteCurrent = false;
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final newRoute = ModalRoute.of(context);
-    final isRouteCurrent = newRoute?.isCurrent ?? false;
-
-    // ✅ 检测路由是否重新变为当前路由（从其他页面返回）
-    if (!_wasRouteCurrent && isRouteCurrent && _isRouteSubscribed) {
-      // 路由重新变为当前路由，说明从其他页面返回了
-      _scheduleRefresh();
-    }
-    _wasRouteCurrent = isRouteCurrent;
-
     if (newRoute != _modalRoute) {
       _removeRouteListener();
       _modalRoute = newRoute;
       _routeAnimation = newRoute?.animation;
       _routeAnimation?.addStatusListener(_handleRouteAnimationStatus);
     }
-    // ✅ 订阅路由观察者，用于检测页面返回
+    // ✅ 订阅路由观察者
     if (!_isRouteSubscribed && _modalRoute != null) {
       appRouteObserver.subscribe(this, _modalRoute!);
       _isRouteSubscribed = true;
-      _wasRouteCurrent = _modalRoute!.isCurrent;
+      // ✅ 首次进入页面时刷新数据
+      _scheduleRefresh();
     }
   }
 
@@ -252,6 +244,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // ✅ 取消订阅路由观察者
     if (_isRouteSubscribed) {
       appRouteObserver.unsubscribe(this);
@@ -269,13 +262,25 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // ✅ 当应用从后台切回前台时，刷新数据
+    if (state == AppLifecycleState.resumed) {
+      _scheduleRefresh();
+    }
+  }
+
+  @override
+  void didPush() {
+    super.didPush();
+    _scheduleRefresh();
+  }
+
   // ✅ 当从其他页面返回时，刷新数据
   @override
   void didPopNext() {
     super.didPopNext();
-    // 添加调试日志
-    debugPrint('🔄 [SeriesDetailPage] didPopNext 被调用，刷新数据');
-    _scheduleRefresh();
   }
 
   void _scheduleRefresh() {
@@ -290,6 +295,20 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
       ref.refresh(nextUpEpisodeProvider(widget.seriesId));
       // ignore: unused_result
       ref.refresh(similarItemsProvider(widget.seriesId));
+
+      // ✅ 刷新所有季的状态标记（海报右上角的播放状态/剩余剧集）
+      final seasonsAsync = ref.read(seasonsProvider(widget.seriesId));
+      seasonsAsync.whenData((seasonsList) {
+        if (mounted) {
+          for (final season in seasonsList) {
+            if (season.id != null && season.id!.isNotEmpty) {
+              // ignore: unused_result
+              ref.refresh(
+                  seasonWatchStatsProvider((widget.seriesId, season.id!)));
+            }
+          }
+        }
+      });
     });
   }
 
@@ -309,9 +328,38 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
   bool _isUpdatingFavorite = false;
   bool _isUpdatingPlayed = false;
 
+  DateTime? _lastRefreshTime;
+  bool _hasTriggeredReturnRefresh = false;
+
   @override
   Widget build(BuildContext context) {
     final series = ref.watch(seriesProvider(widget.seriesId));
+
+    // ✅ 在 build 方法中检测路由是否重新变为当前（从其他页面返回）
+    final route = ModalRoute.of(context);
+    final isRouteCurrent = route?.isCurrent ?? false;
+
+    // ✅ 检测是否从其他页面返回（路由变为当前，且距离上次刷新超过1秒）
+    if (isRouteCurrent && _isRouteSubscribed) {
+      final now = DateTime.now();
+      if (_lastRefreshTime == null ||
+          now.difference(_lastRefreshTime!) > const Duration(seconds: 1)) {
+        // ✅ 检查是否真的从其他页面返回（通过检查路由动画状态）
+        if (!_hasTriggeredReturnRefresh) {
+          _hasTriggeredReturnRefresh = true;
+          _lastRefreshTime = now;
+          // ✅ 延迟刷新，确保屏幕旋转完成
+          Future.delayed(const Duration(milliseconds: 800), () {
+            if (!mounted) return;
+            _scheduleRefresh();
+            // ✅ 重置标记，允许下次检测
+            Future.delayed(const Duration(seconds: 2), () {
+              _hasTriggeredReturnRefresh = false;
+            });
+          });
+        }
+      }
+    }
 
     // ✅ 当 seriesProvider 重新加载数据时（比如从播放页面返回时）
     series.whenData((data) {
@@ -327,6 +375,19 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
         _isPlayedNotifier?.value = (data.userData?['Played'] as bool?) ?? false;
         _userDataNotifier?.value = data.userData;
       }
+
+      // ✅ 使用 userData 的播放进度作为数据变化的标识
+      final playbackTicks =
+          (data.userData?['PlaybackPositionTicks'] as num?)?.toInt();
+      final currentHash = '${data.id}_${playbackTicks ?? 0}';
+
+      // ✅ 如果数据发生变化（不是首次加载），触发刷新
+      if (_lastItemDataHash != null && _lastItemDataHash != currentHash) {
+        // ✅ 数据已变化，provider 会自动更新，这里只需要更新哈希值
+      }
+
+      // ✅ 更新哈希值
+      _lastItemDataHash = currentHash;
     });
 
     return StatusBarStyleScope(
