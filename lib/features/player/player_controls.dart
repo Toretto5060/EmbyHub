@@ -1614,38 +1614,48 @@ class _ControlsState extends ConsumerState<_Controls>
                   ),
                 ),
                 const SizedBox(width: 12),
-                if (widget.subtitleStreams.isNotEmpty)
-                  Builder(
-                    builder: (btnContext) {
-                      _subtitleAnchorContext = btnContext;
-                      return CupertinoButton(
-                        padding: const EdgeInsets.all(8),
-                        minSize: 0,
-                        onPressed: () => widget.onSubtitleTap(btnContext),
-                        child: const Icon(
-                          Icons.subtitles_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      );
-                    },
-                  ),
-                if (widget.audioStreams.isNotEmpty)
-                  Builder(
-                    builder: (btnContext) {
-                      return CupertinoButton(
-                        padding: const EdgeInsets.all(8),
-                        minSize: 0,
-                        onPressed: () => widget
-                            .onAudioTap(_subtitleAnchorContext ?? btnContext),
-                        child: const Icon(
-                          Icons.audiotrack_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      );
-                    },
-                  ),
+                // ✅ 字幕图标：始终显示，无字幕时灰掉且不可点击
+                Builder(
+                  builder: (btnContext) {
+                    _subtitleAnchorContext = btnContext;
+                    final hasSubtitles = widget.subtitleStreams.isNotEmpty;
+                    return CupertinoButton(
+                      padding: const EdgeInsets.all(8),
+                      minSize: 0,
+                      onPressed: hasSubtitles
+                          ? () => widget.onSubtitleTap(btnContext)
+                          : null, // ✅ 无字幕时点击无响应
+                      child: Icon(
+                        Icons.subtitles_rounded,
+                        color: hasSubtitles
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.3), // ✅ 无字幕时灰掉
+                        size: 24,
+                      ),
+                    );
+                  },
+                ),
+                // ✅ 音频图标：始终显示，无音频时灰掉且不可点击
+                Builder(
+                  builder: (btnContext) {
+                    final hasAudio = widget.audioStreams.isNotEmpty;
+                    return CupertinoButton(
+                      padding: const EdgeInsets.all(8),
+                      minSize: 0,
+                      onPressed: hasAudio
+                          ? () => widget
+                              .onAudioTap(_subtitleAnchorContext ?? btnContext)
+                          : null, // ✅ 无音频时点击无响应
+                      child: Icon(
+                        Icons.audiotrack_rounded,
+                        color: hasAudio
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.3), // ✅ 无音频时灰掉
+                        size: 24,
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ),

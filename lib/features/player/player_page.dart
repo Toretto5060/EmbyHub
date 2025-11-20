@@ -70,6 +70,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isLandscape = true; // ✅ 默认横屏
   bool _isBuffering = true;
   bool _isPlaying = false; // ✅ 添加播放状态
+  bool _isHlsStream = false; // ✅ 是否为 HLS (m3u8) 流
   Duration _bufferPosition = Duration.zero; // ✅ 实时缓冲进度
   double? _expectedBitrateKbps;
   double? _currentSpeedKbps;
@@ -171,7 +172,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       configuration: PlayerConfiguration(
           title: 'Emby Player',
           logLevel: MPVLogLevel.error,
-          bufferSize: 256 * 1024 * 1024 // 256MB 缓冲区（降低以减少缓冲区压力）
+          bufferSize: 2 * 1024  * 1024 * 1024 // 2g 缓冲区（降低以减少缓冲区压力）
           ),
     );
 
@@ -414,7 +415,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final media = await api.buildHlsUrl(widget.itemId); // ✅ 添加 await
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
       _playerLog('🎬 [Player] Video Title: $_videoTitle');
-
+      
       // ✅ 保存 PlaySessionId，用于调用 /Sessions/Playing
       _playSessionId = media.playSessionId;
       if (mounted) {
@@ -471,6 +472,43 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       // ✅ 打开媒体（设置标题以支持系统媒体通知）
       _playerLog('🎬 [Player] Opening media with title: $_videoTitle');
+      
+      // ✅ 检测是否为 HLS 流
+      final isHlsStream = media.uri.contains('.m3u8') || media.uri.contains('hls');
+      if (mounted) {
+        setState(() {
+          _isHlsStream = isHlsStream;
+        });
+      }
+      _playerLog('🎬 [Player] Is HLS stream: $isHlsStream');
+      _playerLog('🎬 [Player] Media URI: ${media.uri}');
+      _playerLog('🎬 [Player] Video resolution: ${media.width}x${media.height}');
+      _playerLog('🎬 [Player] Video bitrate: ${media.bitrate} bps');
+      
+      // ✅ 根据视频分辨率和格式动态调整缓存配置
+      // 检测4K视频：分辨率 >= 3840x2160
+      final is4KVideo = media.width != null && media.width! >= 3840;
+      // 检测HEVC：通过URL或高码率推断（4K视频通常使用HEVC编码）
+      // HLS URL可能不包含codec信息，所以通过分辨率和码率推断
+      final isHEVC = media.uri.contains('hevc') || 
+                     media.uri.contains('h265') || 
+                     (is4KVideo && media.bitrate != null && media.bitrate! > 20000000); // 4K + 高码率 (>20Mbps) 通常为HEVC
+      // 需要额外缓存：4K视频或HEVC编码
+      final needExtraCache = is4KVideo || isHEVC;
+      
+      _playerLog('🎬 [Player] Is 4K video: $is4KVideo, Is HEVC: $isHEVC, Need extra cache: $needExtraCache');
+      
+      // ✅ 根据视频分辨率和格式动态计算缓存配置
+      final demuxerMaxBytes = needExtraCache ? '50G' : (isHlsStream ? '20G' : '5G');
+      final demuxerMaxBackBytes = needExtraCache ? '5G' : (isHlsStream ? '2G' : '300M');
+      final cacheSecs = needExtraCache ? '28800' : (isHlsStream ? '14400' : '3600'); // 8小时 for 4K
+      final readaheadSecs = needExtraCache ? '21600' : (isHlsStream ? '10800' : '1800'); // 6小时 for 4K
+      final streamBufferSize = needExtraCache ? '1G' : (isHlsStream ? '512M' : '64M');
+      final hlsSegmentThreads = needExtraCache ? '64' : '32';
+      final cachePause = needExtraCache ? '180' : '120';
+      
+      _playerLog('🎬 [Player] Cache config: demuxer-max-bytes=$demuxerMaxBytes, cache-secs=$cacheSecs, stream-buffer-size=$streamBufferSize, hls-segment-threads=$hlsSegmentThreads');
+      
       await _player.open(
         Media(
           media.uri,
@@ -479,13 +517,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             // ===== 大容量缓冲配置 =====
             // demuxer-max-bytes: 向前缓存上限
             // 说明：从当前位置向后可以缓存多少压缩视频数据
-            // 作用：5GB可缓存约3-4小时的1080p视频，充分利用快速网络
-            'demuxer-max-bytes': '5G',
+            // 作用：对于4K HEVC视频，需要更大的缓存空间
+            // ✅ 对于 4K HEVC 视频，大幅增加缓存上限
+            'demuxer-max-bytes': demuxerMaxBytes,
 
             // demuxer-max-back-bytes: 向后缓存上限
             // 说明：当前位置之前保留多少已播放的数据
             // 作用：倒退时直接从缓存读取，不重新下载
-            'demuxer-max-back-bytes': '3G',
+            // ✅ 对于 HLS 流，增加向后缓存，确保快进时使用缓存
+            'demuxer-max-back-bytes': demuxerMaxBackBytes,
 
             // cache: 启用缓存
             'cache': 'yes',
@@ -493,25 +533,48 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             // cache-secs: 目标缓存时长
             // 说明：尝试缓存多长时间的视频（秒）
             // 作用：与空间限制配合，达到任一限制停止缓存
-            'cache-secs': '3600',
+            // ✅ 对于 HLS 流，大幅增加缓存时长，确保有足够的缓存用于快进
+            // 4K视频码率更高，需要更长的缓存时间
+            'cache-secs': cacheSecs,
 
             // demuxer-readahead-secs: 积极预读
             // 说明：提前读取未来多少秒的数据
             // 作用：播放器会持续下载，填满缓冲区
-            'demuxer-readahead-secs': '1800',
+            // ✅ 对于 HLS 流，大幅增加预读时长，更快填充缓冲区
+            // 4K视频需要更多预读时间
+            'demuxer-readahead-secs': readaheadSecs,
 
             // stream-buffer-size: 网络流缓冲区
             // 说明：从网络读取数据的临时缓冲
             // 作用：更大的缓冲 = 更快的下载速度
-            'stream-buffer-size': '64M',
+            // 4K视频需要更大的网络缓冲区
+            'stream-buffer-size': streamBufferSize,
 
             // demuxer-seekable-cache: 可搜索缓存
             // 说明：缓存支持随机访问
             // 作用：在已缓存区域seek不会丢失数据
+            // ✅ 对于 HLS 流，这是关键配置，确保缓存可用于 seek
             'demuxer-seekable-cache': 'yes',
 
             // force-seekable: 强制可搜索
             'force-seekable': 'yes',
+            
+            // ===== HLS 特定配置 =====
+            // ✅ HLS 播放列表重载配置
+            if (isHlsStream) 'hls-playlist-reload-attempts': '10',
+            if (isHlsStream) 'hls-segment-attempts': '5',
+            if (isHlsStream) 'hls-segment-threads': hlsSegmentThreads, // ✅ 4K需要更多并行下载线程
+            if (isHlsStream) 'hls-segment-timeout': '30',
+            if (isHlsStream) 'hls-playlist-reload-time': '10',
+            if (isHlsStream) 'hls-connect-timeout': '10',
+            
+            // ✅ HLS 预加载和缓存配置
+            if (isHlsStream) 'hls-preload': 'yes', // ✅ 提前下载片段
+            if (isHlsStream) 'hr-seek': 'yes', // ✅ 高精度 seek，使用缓存
+            
+            // ✅ 缓存暂停配置：确保缓存足够才开始播放
+            // 4K视频需要更长的缓存时间，所以增加等待时间
+            if (isHlsStream) 'cache-pause': cachePause, // ✅ 4K: 等待缓存至少180秒（3分钟）再播放
 
             //==========================
             //【核心：解码与渲染优化】
@@ -659,10 +722,54 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       // ✅ 监听缓冲进度（用于显示进度条上的缓冲位置）
       _player.stream.buffer.listen((buffer) {
-        if (mounted && buffer > Duration.zero) {
-          setState(() {
-            _bufferPosition = buffer; // 直接使用实时缓冲位置
-          });
+        if (mounted) {
+          _playerLog('🎬 [Player] Buffer stream updated: $buffer (position: $_position, duration: $_duration)');
+          
+          if (buffer > Duration.zero) {
+            // ✅ 对于 HLS 流，buffer 可能返回的是已下载的时长，而不是缓冲位置
+            // 检查 buffer 是否大于当前播放位置，如果大于，说明有缓冲
+            if (_isHlsStream) {
+              // ✅ HLS 流：buffer 可能是从开始到当前已缓冲的总时长
+              // 我们需要计算实际的缓冲位置：当前播放位置 + (buffer - position)
+              if (buffer > _position) {
+                setState(() {
+                  _bufferPosition = buffer; // ✅ 直接使用 buffer，它应该是缓冲位置
+                });
+                // ✅ 计算进度条宽度（用于调试）
+                final totalSeconds = _duration.inSeconds.clamp(1, 1 << 30);
+                final bufferValue = _bufferPosition.inSeconds / totalSeconds;
+                final playedValue = _position.inSeconds / totalSeconds;
+                final bufferSliderValue = bufferValue.isNaN ? 0.0 : bufferValue.clamp(0.0, 1.0).toDouble();
+                final playedSliderValue = playedValue.isNaN ? 0.0 : playedValue.clamp(0.0, 1.0).toDouble();
+                // 假设 Slider 实际可用宽度约为 480px（减去 padding 24*2 = 48）
+                const estimatedTrackWidth = 480.0;
+                final bufferBarWidth = estimatedTrackWidth * bufferSliderValue;
+                final playedBarWidth = estimatedTrackWidth * playedSliderValue;
+                _playerLog('🎬 [Player] HLS: Buffer position set to: $_bufferPosition (diff: ${(_bufferPosition - _position).inSeconds}s)');
+                _playerLog('🎬 [Player] UI Widths: Buffer bar: ${bufferBarWidth.toStringAsFixed(1)}px, Played bar: ${playedBarWidth.toStringAsFixed(1)}px, Difference: ${(bufferBarWidth - playedBarWidth).toStringAsFixed(1)}px');
+              } else {
+                // ✅ 如果 buffer 小于或等于 position，说明缓冲不足
+                // 将缓冲位置设置为播放位置，但至少保持 5 秒的缓冲显示
+                setState(() {
+                  _bufferPosition = _position + const Duration(seconds: 5);
+                });
+                _playerLog('🎬 [Player] HLS: Buffer insufficient, estimated buffer: $_bufferPosition');
+              }
+            } else {
+              // ✅ 非 HLS 流：直接使用 buffer
+              setState(() {
+                _bufferPosition = buffer;
+              });
+              _playerLog('🎬 [Player] Buffer position set to: $_bufferPosition');
+            }
+          } else if (_isHlsStream && _position > Duration.zero) {
+            // ✅ HLS 流且 buffer 为 0：如果正在播放，说明有一定缓冲
+            // 估算缓冲位置为当前位置 + 10 秒
+            setState(() {
+              _bufferPosition = _position + const Duration(seconds: 10);
+            });
+            _playerLog('🎬 [Player] HLS: Buffer is 0 but playing, estimated buffer: $_bufferPosition');
+          }
         }
       });
 
