@@ -141,6 +141,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
   bool _hasTriggeredReturnRefresh = false;
   bool _isUpdatingPlayed = false;
   ValueNotifier<bool>? _isPlayedNotifier;
+  String? _lastSeasonDataHash; // ✅ 记录上次 season 数据的哈希，用于检测数据变化
 
   @override
   void initState() {
@@ -223,8 +224,10 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
   }
 
   void _scheduleRefresh() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // ✅ 使用 microtask 立即刷新，而不是等待下一帧
+    Future.microtask(() {
       if (!mounted) return;
+      // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
       // ignore: unused_result
       ref.refresh(seasonProvider((widget.seriesId, widget.seasonId)));
       // ignore: unused_result
@@ -327,12 +330,30 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
       }
     }
 
-    // ✅ 缓存季数据
+    // ✅ 当 seasonProvider 重新加载数据时（比如从播放页面返回时）
     season.whenData((data) {
+      // ✅ 缓存数据，避免重新加载时显示loading
       _cachedSeasonData = data;
+
+      // ✅ 同步更新 ValueNotifier（但在 API 调用期间不更新，避免覆盖用户操作）
       if (!_isUpdatingPlayed) {
         _isPlayedNotifier?.value = (data.userData?['Played'] as bool?) ?? false;
       }
+
+      // ✅ 使用 userData 的播放进度和观看状态作为数据变化的标识
+      final playbackTicks =
+          (data.userData?['PlaybackPositionTicks'] as num?)?.toInt();
+      final played = (data.userData?['Played'] as bool?) ?? false;
+      final currentHash = '${data.id}_${playbackTicks ?? 0}_$played';
+
+      // ✅ 如果数据发生变化（不是首次加载），立即刷新（不使用 postFrameCallback，减少延迟）
+      if (_lastSeasonDataHash != null && _lastSeasonDataHash != currentHash) {
+        // ✅ 直接调用，不使用 postFrameCallback，减少延迟
+        _scheduleRefresh();
+      }
+
+      // ✅ 更新哈希值
+      _lastSeasonDataHash = currentHash;
     });
 
     return StatusBarStyleScope(
