@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -210,10 +211,21 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     _appliedStatusStyle = _statusBarStyle;
   }
 
+  bool _wasRouteCurrent = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final newRoute = ModalRoute.of(context);
+    final isRouteCurrent = newRoute?.isCurrent ?? false;
+
+    // ✅ 检测路由是否重新变为当前路由（从其他页面返回）
+    if (!_wasRouteCurrent && isRouteCurrent && _isRouteSubscribed) {
+      // 路由重新变为当前路由，说明从其他页面返回了
+      _scheduleRefresh();
+    }
+    _wasRouteCurrent = isRouteCurrent;
+
     if (newRoute != _modalRoute) {
       _removeRouteListener();
       _modalRoute = newRoute;
@@ -224,6 +236,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     if (!_isRouteSubscribed && _modalRoute != null) {
       appRouteObserver.subscribe(this, _modalRoute!);
       _isRouteSubscribed = true;
+      _wasRouteCurrent = _modalRoute!.isCurrent;
     }
   }
 
@@ -256,10 +269,28 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     super.dispose();
   }
 
-  // ✅ 当从其他页面返回时，seriesProvider 会自动重新加载
+  // ✅ 当从其他页面返回时，刷新数据
   @override
   void didPopNext() {
     super.didPopNext();
+    // 添加调试日志
+    debugPrint('🔄 [SeriesDetailPage] didPopNext 被调用，刷新数据');
+    _scheduleRefresh();
+  }
+
+  void _scheduleRefresh() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
+      // ignore: unused_result
+      ref.refresh(seriesProvider(widget.seriesId));
+      // ignore: unused_result
+      ref.refresh(seasonsProvider(widget.seriesId));
+      // ignore: unused_result
+      ref.refresh(nextUpEpisodeProvider(widget.seriesId));
+      // ignore: unused_result
+      ref.refresh(similarItemsProvider(widget.seriesId));
+    });
   }
 
   void _handleScroll() {

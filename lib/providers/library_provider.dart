@@ -20,7 +20,7 @@ final currentUserIdProvider = Provider<String?>((ref) {
 
 // ✅ 公共 Provider：继续观看
 final resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final userId = ref.watch(currentUserIdProvider);
   if (userId == null) {
     _libraryLog('resumeProvider: No userId');
@@ -39,20 +39,20 @@ final resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
   final api = await EmbyApi.create();
   final items = await api.getResumeItems(userId);
   _libraryLog('resumeProvider: Got ${items.length} resume items');
-  
+
   // ✅ 去重处理：对于同一电视剧（seriesId相同），只保留最近播放的那一集
   final Map<String, ItemInfo> seriesMap = {}; // seriesId -> 最近播放的集
   final List<ItemInfo> movies = []; // 电影（没有seriesId）
-  
+
   for (final item in items) {
     final seriesId = item.seriesId;
-    
+
     // 如果是电影（没有seriesId），直接添加
     if (seriesId == null || seriesId.isEmpty) {
       movies.add(item);
       continue;
     }
-    
+
     // 如果是电视剧的集，检查是否已有该电视剧的记录
     if (!seriesMap.containsKey(seriesId)) {
       // 第一次遇到这个电视剧，直接添加
@@ -62,21 +62,21 @@ final resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
       final existingItem = seriesMap[seriesId]!;
       final existingDate = existingItem.userData?['LastPlayedDate'] as String?;
       final currentDate = item.userData?['LastPlayedDate'] as String?;
-      
+
       // 如果当前集的播放日期更近，则替换
-      if (currentDate != null && 
+      if (currentDate != null &&
           (existingDate == null || currentDate.compareTo(existingDate) > 0)) {
         seriesMap[seriesId] = item;
       }
     }
   }
-  
+
   // ✅ 合并结果：先显示电视剧（按播放日期排序），再显示电影
   final deduplicatedItems = [
     ...seriesMap.values,
     ...movies,
   ];
-  
+
   // ✅ 按播放日期排序（最近的在前）
   deduplicatedItems.sort((a, b) {
     final aDate = a.userData?['LastPlayedDate'] as String?;
@@ -86,14 +86,15 @@ final resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
     if (bDate == null) return -1;
     return bDate.compareTo(aDate); // 降序：最近的在前
   });
-  
-  _libraryLog('resumeProvider: Deduplicated to ${deduplicatedItems.length} items');
+
+  _libraryLog(
+      'resumeProvider: Deduplicated to ${deduplicatedItems.length} items');
   return deduplicatedItems;
 });
 
 // ✅ 公共 Provider：媒体库列表
 final viewsProvider = FutureProvider.autoDispose<List<ViewInfo>>((ref) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final userId = ref.watch(currentUserIdProvider);
   if (userId == null) {
     _libraryLog('viewsProvider: No userId');
@@ -118,7 +119,7 @@ final viewsProvider = FutureProvider.autoDispose<List<ViewInfo>>((ref) async {
 // ✅ 公共 Provider：每个媒体库的最新内容
 final latestByViewProvider = FutureProvider.autoDispose
     .family<List<ItemInfo>, String>((ref, viewId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final userId = ref.watch(currentUserIdProvider);
 
   if (userId == null) {

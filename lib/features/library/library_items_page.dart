@@ -1,4 +1,5 @@
 // 电影/电视剧 列表页面
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -12,7 +13,6 @@ import '../../providers/emby_api_provider.dart';
 import '../../utils/app_route_observer.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
-import '../../providers/library_provider.dart';
 import '../../utils/theme_utils.dart';
 
 // 排序选项
@@ -234,7 +234,7 @@ class FilterStateNotifier extends StateNotifier<FilterState> {
 // ✅ 获取类型列表
 final genresProvider =
     FutureProvider.family<List<GenreInfo>, String>((ref, viewId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
   if (auth == null || !auth.isLoggedIn) return <GenreInfo>[];
@@ -275,7 +275,7 @@ final genresProvider =
 // ✅ 获取有播放进度的剧集（Episode），按播放日期排序
 final episodesProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
@@ -320,7 +320,7 @@ final episodesProvider =
 // ✅ 获取有播放进度的电影（Movie），包括合集内的影片，按播放日期排序
 final resumeMoviesProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
@@ -365,7 +365,7 @@ final resumeMoviesProvider =
 
 final itemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final sortState = ref.watch(sortStateProvider(viewId));
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
@@ -518,7 +518,7 @@ class LibraryItemsPage extends ConsumerStatefulWidget {
 }
 
 class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
-    with RouteAware {
+    with RouteAware, WidgetsBindingObserver {
   final _scrollController =
       ScrollController(); // ✅ 用于loading/error状态的BlurNavigationBar
   bool _isRouteSubscribed = false;
@@ -533,6 +533,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pageController = PageController(initialPage: 0);
   }
 
@@ -593,13 +594,26 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     return rows;
   }
 
+  bool _wasRouteCurrent = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
+    final isRouteCurrent = route?.isCurrent ?? false;
+
+    // ✅ 检测路由是否重新变为当前路由（从其他页面返回）
+    if (!_wasRouteCurrent && isRouteCurrent && _isRouteSubscribed) {
+      // 路由重新变为当前路由，说明从其他页面返回了
+      debugPrint('🔄 [LibraryItemsPage] 路由重新变为当前路由，刷新数据');
+      _scheduleRefresh();
+    }
+    _wasRouteCurrent = isRouteCurrent;
+
     if (!_isRouteSubscribed && route != null) {
       appRouteObserver.subscribe(this, route);
       _isRouteSubscribed = true;
+      _wasRouteCurrent = route.isCurrent;
       _scheduleRefresh();
     }
   }
@@ -607,8 +621,25 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   void _scheduleRefresh() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref.invalidate(itemsProvider(widget.viewId));
+      // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
+      // ignore: unused_result
+      ref.refresh(itemsProvider(widget.viewId));
+      // ignore: unused_result
+      ref.refresh(genresProvider(widget.viewId));
+      // ignore: unused_result
+      ref.refresh(episodesProvider(widget.viewId));
+      // ignore: unused_result
+      ref.refresh(resumeMoviesProvider(widget.viewId));
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // ✅ 当应用从后台切回前台时，刷新数据
+    if (state == AppLifecycleState.resumed) {
+      _scheduleRefresh();
+    }
   }
 
   @override
@@ -618,11 +649,13 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
   @override
   void didPopNext() {
+    debugPrint('🔄 [LibraryItemsPage] didPopNext 被调用，刷新数据');
     _scheduleRefresh();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (_isRouteSubscribed) {
       appRouteObserver.unsubscribe(this);
       _isRouteSubscribed = false;
@@ -931,6 +964,8 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
                               width: cardWidth,
                               child: i < row.length
                                   ? _ItemTile(
+                                      key: ValueKey(
+                                          'item_tile_${row[i].item.id}'),
                                       item: row[i].item,
                                       hasHorizontalArtwork:
                                           row[i].hasHorizontalArtwork,
@@ -1126,8 +1161,12 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
                 Expanded(
                   child: i < rowItems.length
                       ? (libraryType == 'Movie'
-                          ? _buildResumeMovieCard(context, ref, rowItems[i])
-                          : _buildResumeEpisodeCard(context, ref, rowItems[i]))
+                          ? _buildResumeMovieCard(context, ref, rowItems[i],
+                              key: ValueKey(
+                                  'resume_movie_card_${rowItems[i].id}'))
+                          : _buildResumeEpisodeCard(context, ref, rowItems[i],
+                              key: ValueKey(
+                                  'resume_episode_card_${rowItems[i].id}')))
                       : const SizedBox.shrink(),
                 ),
               ],
@@ -1140,7 +1179,8 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
   // ✅ 构建继续观看电影卡片（类似首页样式）
   Widget _buildResumeMovieCard(
-      BuildContext context, WidgetRef ref, ItemInfo item) {
+      BuildContext context, WidgetRef ref, ItemInfo item,
+      {Key? key}) {
     final isDark = isDarkModeFromContext(context, ref);
 
     final progress =
@@ -1170,6 +1210,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     }
 
     return CupertinoButton(
+      key: key,
       padding: EdgeInsets.zero,
       onPressed: item.id != null && item.id!.isNotEmpty
           ? () {
@@ -1268,7 +1309,8 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
   // ✅ 构建继续观看剧集卡片（类似首页样式）
   Widget _buildResumeEpisodeCard(
-      BuildContext context, WidgetRef ref, ItemInfo item) {
+      BuildContext context, WidgetRef ref, ItemInfo item,
+      {Key? key}) {
     final isDark = isDarkModeFromContext(context, ref);
 
     final progress =
@@ -1334,6 +1376,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     final subtitle = subtitleText;
 
     return CupertinoButton(
+      key: key,
       padding: EdgeInsets.zero,
       onPressed: item.id != null && item.id!.isNotEmpty
           ? () {
@@ -1490,7 +1533,9 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
           return placeholder();
         }
 
+        // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
         return EmbyFadeInImage(
+          key: ValueKey('resume_movie_poster_${item.id}_$imageUrl'),
           imageUrl: imageUrl,
           placeholder: placeholder(),
           fit: BoxFit.cover,
@@ -2074,6 +2119,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
 class _ItemTile extends ConsumerStatefulWidget {
   const _ItemTile({
+    super.key,
     required this.item,
     required this.hasHorizontalArtwork,
     required this.cardWidth,
@@ -2627,8 +2673,10 @@ class _Poster extends ConsumerWidget {
         if (url.isEmpty) {
           return _PosterSkeleton(itemType: itemType);
         }
+        // ✅ 使用稳定的 key（基于 itemId + URL），只有图片 URL 变化时才重新加载
         return SizedBox.expand(
           child: EmbyFadeInImage(
+            key: ValueKey('item_tile_poster_${itemId}_$url'),
             imageUrl: url,
             fit: BoxFit.cover,
             placeholder: _PosterSkeleton(itemType: itemType),

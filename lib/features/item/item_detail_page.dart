@@ -15,7 +15,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/emby_api.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/emby_api_provider.dart';
-import '../../providers/library_provider.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/status_bar_manager.dart';
 import '../../widgets/blur_navigation_bar.dart';
@@ -24,7 +23,7 @@ import '../../utils/theme_utils.dart';
 
 final itemProvider =
     FutureProvider.family<ItemInfo, String>((ref, itemId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     throw Exception('未登录');
@@ -35,7 +34,7 @@ final itemProvider =
 
 final similarItemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, itemId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     return const [];
@@ -48,7 +47,7 @@ final similarItemsProvider =
 // ✅ 获取合集内的影片
 final collectionItemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, collectionId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     return const [];
@@ -76,7 +75,7 @@ class ItemDetailPage extends ConsumerStatefulWidget {
 }
 
 class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
-    with RouteAware {
+    with RouteAware, WidgetsBindingObserver {
   final _scrollController = ScrollController();
   static const SystemUiOverlayStyle _lightStatusBar = SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -130,6 +129,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // ✅ 初始化字幕选择 ValueNotifier
     _subtitleIndexNotifier = ValueNotifier<int?>(null);
     // ✅ 初始化收藏和观看状态 ValueNotifier
@@ -221,7 +221,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       _routeAnimation = newRoute?.animation;
       _routeAnimation?.addStatusListener(_handleRouteAnimationStatus);
     }
-    // ✅ 订阅路由观察者，用于检测页面返回
+    // ✅ 订阅路由观察者
     if (!_isRouteSubscribed && _modalRoute != null) {
       appRouteObserver.subscribe(this, _modalRoute!);
       _isRouteSubscribed = true;
@@ -240,6 +240,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // ✅ 取消订阅路由观察者
     if (_isRouteSubscribed) {
       appRouteObserver.unsubscribe(this);
@@ -258,7 +259,42 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     super.dispose();
   }
 
-  // ✅ 当从其他页面返回时，itemProvider 会自动重新加载，触发字幕选择刷新
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // ✅ 当应用从后台切回前台时，刷新数据
+    if (state == AppLifecycleState.resumed) {
+      _scheduleRefresh();
+    }
+  }
+
+  void _scheduleRefresh() {
+    // ✅ 使用 microtask 立即刷新，而不是等待下一帧
+    Future.microtask(() {
+      if (!mounted) return;
+      // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载
+      // ignore: unused_result
+      ref.refresh(itemProvider(widget.itemId));
+      // ignore: unused_result
+      ref.refresh(similarItemsProvider(widget.itemId));
+      // ✅ 如果 item 是合集类型（BoxSet），也刷新 collectionItemsProvider
+      final itemAsync = ref.read(itemProvider(widget.itemId));
+      itemAsync.whenData((item) {
+        if (item.type == 'BoxSet' && item.id != null && item.id!.isNotEmpty) {
+          // ignore: unused_result
+          ref.refresh(collectionItemsProvider(item.id!));
+        }
+      });
+    });
+  }
+
+  @override
+  void didPush() {
+    super.didPush();
+    _scheduleRefresh();
+  }
+
+  // ✅ 当从其他页面返回时，刷新数据
   @override
   void didPopNext() {
     super.didPopNext();
@@ -309,7 +345,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         setState(() {
           // setState 会触发整个 _buildMediaInfo 重建，从而更新音频显示
         });
-      } else {}
+      }
     } catch (e) {}
   }
 
@@ -329,9 +365,39 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   bool _isUpdatingFavorite = false;
   bool _isUpdatingPlayed = false;
 
+  DateTime? _lastRefreshTime;
+  bool _hasTriggeredReturnRefresh = false;
+
   @override
   Widget build(BuildContext context) {
     final item = ref.watch(itemProvider(widget.itemId));
+
+    // ✅ 在 build 方法中检测路由是否重新变为当前（从其他页面返回）
+    final route = ModalRoute.of(context);
+    final isRouteCurrent = route?.isCurrent ?? false;
+
+    // ✅ 检测是否从其他页面返回（路由变为当前，且距离上次刷新超过1秒）
+    if (isRouteCurrent && _isRouteSubscribed) {
+      final now = DateTime.now();
+      if (_lastRefreshTime == null ||
+          now.difference(_lastRefreshTime!) > const Duration(seconds: 1)) {
+        // ✅ 检查是否真的从其他页面返回（通过检查路由动画状态）
+        if (!_hasTriggeredReturnRefresh) {
+          _hasTriggeredReturnRefresh = true;
+          _lastRefreshTime = now;
+          // ✅ 延迟刷新，确保屏幕旋转完成
+          Future.delayed(const Duration(milliseconds: 800), () {
+            if (!mounted) return;
+            _refreshStreamSelections();
+            _scheduleRefresh();
+            // ✅ 重置标记，允许下次检测
+            Future.delayed(const Duration(seconds: 2), () {
+              _hasTriggeredReturnRefresh = false;
+            });
+          });
+        }
+      }
+    }
 
     // ✅ 当 itemProvider 重新加载数据时（比如从播放页面返回时），顺便刷新字幕和音频选择
     // 检测数据变化：当数据有值且与上次不同时，刷新字幕和音频选择
@@ -359,6 +425,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         // ✅ 直接调用，不使用 postFrameCallback，减少延迟
         _refreshStreamSelections();
       }
+
+      // ✅ 更新哈希值
+      _lastItemDataHash = currentHash;
       _lastItemDataHash = currentHash;
     });
 
@@ -484,6 +553,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                         itemCount: performers.length,
                         itemBuilder: (context, index) {
                           final card = _PerformerCard(
+                            key: ValueKey(
+                                'performer_card_${performers[index].id}'),
                             performer: performers[index],
                             isDark: isDark,
                           );
@@ -531,6 +602,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                               itemCount: items.length,
                               itemBuilder: (context, index) {
                                 final card = _SimilarCard(
+                                  key: ValueKey(
+                                      'similar_card_${items[index].id}'),
                                   item: items[index],
                                   isDark: isDark,
                                 );
@@ -707,7 +780,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                 return Container(color: CupertinoColors.systemGrey5);
               }
 
+              // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
               return EmbyFadeInImage(
+                key: ValueKey('backdrop_${item.id}_$backdropUrl'),
                 imageUrl: backdropUrl,
                 fit: BoxFit.cover,
                 onImageReady: (image) =>
@@ -1985,12 +2060,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         currentUserData['IsFavorite'] = newFavorite;
         _userDataNotifier?.value = currentUserData;
 
-        // ✅ 延迟触发全局刷新信号，刷新首页的继续观看和其他模块数据
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) {
-            ref.read(libraryRefreshTickerProvider.notifier).state++;
-          }
-        });
+        // ✅ 移除 libraryRefreshTickerProvider 的使用，全局刷新在页面生命周期时进行
 
         // ✅ 延迟解除标记，确保在 provider 刷新完成后再允许 whenData 更新
         Future.delayed(const Duration(milliseconds: 1000), () {
@@ -2056,12 +2126,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         }
         _userDataNotifier?.value = currentUserData;
 
-        // ✅ 延迟触发全局刷新信号，刷新首页的继续观看和其他模块数据
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) {
-            ref.read(libraryRefreshTickerProvider.notifier).state++;
-          }
-        });
+        // ✅ 移除 libraryRefreshTickerProvider 的使用，全局刷新在页面生命周期时进行
 
         // ✅ 延迟解除标记，确保在 provider 刷新完成后再允许 whenData 更新
         // 这样可以避免 whenData 在刷新过程中拿到旧数据导致闪烁
@@ -2852,7 +2917,8 @@ class _CollectionMovieCard extends ConsumerWidget {
 }
 
 class _PerformerCard extends StatelessWidget {
-  const _PerformerCard({required this.performer, required this.isDark});
+  const _PerformerCard(
+      {super.key, required this.performer, required this.isDark});
 
   final PerformerInfo performer;
   final bool isDark;
@@ -2928,7 +2994,9 @@ class _PerformerCard extends StatelessWidget {
           maxWidth: 300,
           tag: performer.primaryImageTag,
         );
+        // ✅ 使用稳定的 key（基于 performer.id + URL），只有图片 URL 变化时才重新加载
         return EmbyFadeInImage(
+          key: ValueKey('performer_image_${performer.id}_$url'),
           imageUrl: url,
           fit: BoxFit.cover,
         );
@@ -3034,7 +3102,7 @@ class _PerformerCard extends StatelessWidget {
 }
 
 class _SimilarCard extends StatelessWidget {
-  const _SimilarCard({required this.item, required this.isDark});
+  const _SimilarCard({super.key, required this.item, required this.isDark});
 
   final ItemInfo item;
   final bool isDark;
@@ -3142,7 +3210,9 @@ class _SimilarCard extends StatelessWidget {
           );
         }
 
+        // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
         return EmbyFadeInImage(
+          key: ValueKey('similar_image_${item.id}_$url'),
           imageUrl: url,
           fit: BoxFit.cover,
         );

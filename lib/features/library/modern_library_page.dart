@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,7 +31,7 @@ class ModernLibraryPage extends ConsumerStatefulWidget {
 }
 
 class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
-    with RouteAware {
+    with RouteAware, WidgetsBindingObserver {
   final _scrollController = ScrollController();
   bool _isRefreshing = false; // ✅ 独立的刷新状态
   bool _isRouteSubscribed = false;
@@ -143,12 +145,41 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   }
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  bool _wasRouteCurrent = false;
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
+    final isRouteCurrent = route?.isCurrent ?? false;
+
+    // ✅ 检测路由是否重新变为当前路由（从其他页面返回）
+    if (!_wasRouteCurrent && isRouteCurrent && _isRouteSubscribed) {
+      // 路由重新变为当前路由，说明从其他页面返回了
+      _homeLog('🔄 路由重新变为当前路由，刷新首页数据');
+      _scheduleHomeRefresh();
+    }
+    _wasRouteCurrent = isRouteCurrent;
+
     if (!_isRouteSubscribed && route != null) {
       appRouteObserver.subscribe(this, route);
       _isRouteSubscribed = true;
+      _wasRouteCurrent = route.isCurrent;
+      _scheduleHomeRefresh();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // ✅ 当应用从后台切回前台时，刷新数据
+    if (state == AppLifecycleState.resumed) {
+      _homeLog('🔄 应用从后台切回前台，刷新首页数据');
       _scheduleHomeRefresh();
     }
   }
@@ -156,9 +187,24 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   void _scheduleHomeRefresh() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref.invalidate(viewsProvider);
-      ref.invalidate(resumeProvider);
-      ref.invalidate(latestByViewProvider);
+      // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
+      // ignore: unused_result
+      ref.refresh(viewsProvider);
+      // ignore: unused_result
+      ref.refresh(resumeProvider);
+
+      // ✅ 刷新所有媒体库的最新内容（需要先获取 viewList）
+      final currentViewList = ref.read(viewsProvider).value;
+      if (currentViewList != null) {
+        for (final view in currentViewList) {
+          if (view.collectionType != 'livetv' &&
+              view.collectionType != 'music' &&
+              view.id != null) {
+            // ignore: unused_result
+            ref.refresh(latestByViewProvider(view.id!));
+          }
+        }
+      }
     });
   }
 
@@ -169,11 +215,13 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
   @override
   void didPopNext() {
+    _homeLog('🔄 [ModernLibraryPage] didPopNext 被调用，刷新数据');
     _scheduleHomeRefresh();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (_isRouteSubscribed) {
       appRouteObserver.unsubscribe(this);
       _isRouteSubscribed = false;
@@ -642,13 +690,20 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         itemCount: items.length,
         itemBuilder: (context, index) {
           final item = items[index];
-          return _buildLatestCard(context, ref, item);
+          // ✅ 使用 item.id 作为 key，确保卡片稳定性
+          return _buildLatestCard(
+            context,
+            ref,
+            item,
+            key: ValueKey('latest_card_${item.id}'),
+          );
         },
       ),
     );
   }
 
-  Widget _buildLatestCard(BuildContext context, WidgetRef ref, ItemInfo item) {
+  Widget _buildLatestCard(BuildContext context, WidgetRef ref, ItemInfo item,
+      {Key? key}) {
     final isDark = isDarkModeFromContext(context, ref);
 
     final hasBackdrop = _latestHasHorizontalArtwork(item);
@@ -743,6 +798,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     }
 
     return Container(
+      key: key,
       width: cardWidth,
       margin: const EdgeInsets.only(left: 6, right: 6),
       child: CupertinoButton(
@@ -784,9 +840,12 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                                 (item.userData!['UnplayedItemCount'] as num?)
                                     ?.toInt();
                             if (unplayedCount != null && unplayedCount > 0) {
+                              // ✅ 使用稳定的 key（基于 item.id + unplayedCount），只有数量变化时才更新
                               return Positioned(
                                 top: 4,
                                 right: 4,
+                                key: ValueKey(
+                                    'unplayed_count_${item.id}_$unplayedCount'),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 6, vertical: 2),
@@ -810,7 +869,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                         ),
                       // 电影播放进度条和剩余时间
                       if (showProgress)
+                        // ✅ 使用稳定的 key（基于 item.id + progress），只有进度变化时才更新
                         Positioned(
+                          key:
+                              ValueKey('progress_overlay_${item.id}_$progress'),
                           left: 0,
                           right: 0,
                           bottom: 0,
@@ -845,6 +907,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                                 const SizedBox(height: 4),
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(999),
+                                  // ✅ 使用 progress 作为 key，只有进度变化时才重新动画
+                                  key: ValueKey(
+                                      'progress_bar_${item.id}_$progress'),
                                   child: TweenAnimationBuilder<double>(
                                     tween: Tween<double>(
                                       begin: 0.0,
@@ -914,13 +979,20 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         itemCount: items.length,
         itemBuilder: (context, index) {
           final item = items[index];
-          return _buildResumeCard(context, ref, item);
+          // ✅ 使用 item.id 作为 key，确保卡片稳定性
+          return _buildResumeCard(
+            context,
+            ref,
+            item,
+            key: ValueKey('resume_card_${item.id}'),
+          );
         },
       ),
     );
   }
 
-  Widget _buildResumeCard(BuildContext context, WidgetRef ref, ItemInfo item) {
+  Widget _buildResumeCard(BuildContext context, WidgetRef ref, ItemInfo item,
+      {Key? key}) {
     final isDark = isDarkModeFromContext(context, ref);
 
     final progress =
@@ -986,6 +1058,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     final subtitle = subtitleText;
 
     return Container(
+      key: key,
       width: 180,
       margin: const EdgeInsets.only(left: 6, right: 6),
       child: CupertinoButton(
@@ -1121,6 +1194,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                               const SizedBox(height: 4),
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(999),
+                                // ✅ 使用 progress 作为 key，只有进度变化时才重新动画
+                                key: ValueKey(
+                                    'progress_${item.id}_$normalizedProgress'),
                                 child: TweenAnimationBuilder<double>(
                                   tween: Tween<double>(
                                     begin: 0.0,
@@ -1339,7 +1415,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
           return placeholder();
         }
 
+        // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
         return EmbyFadeInImage(
+          key: ValueKey('resume_poster_${item.id}_$url'),
           imageUrl: url,
           fit: BoxFit.cover,
           placeholder: placeholder(),
@@ -1383,7 +1461,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
           );
         }
 
+        // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
         return EmbyFadeInImage(
+          key: ValueKey('latest_poster_${item.id}_$url'),
           imageUrl: url,
           fit: BoxFit.cover,
         );

@@ -1,4 +1,5 @@
 // 分类 列表页面
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -133,13 +134,26 @@ class _GenreItemsPageState extends ConsumerState<GenreItemsPage>
   bool _isSortMenuOpen = false;
   List<ItemInfo>? _cachedItemsList;
 
+  bool _wasRouteCurrent = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
+    final isRouteCurrent = route?.isCurrent ?? false;
+
+    // ✅ 检测路由是否重新变为当前路由（从其他页面返回）
+    if (!_wasRouteCurrent && isRouteCurrent && _isRouteSubscribed) {
+      // 路由重新变为当前路由，说明从其他页面返回了
+      debugPrint('🔄 [GenreItemsPage] 路由重新变为当前路由，刷新数据');
+      _scheduleRefresh();
+    }
+    _wasRouteCurrent = isRouteCurrent;
+
     if (!_isRouteSubscribed && route != null) {
       appRouteObserver.subscribe(this, route);
       _isRouteSubscribed = true;
+      _wasRouteCurrent = route.isCurrent;
       _scheduleRefresh();
     }
   }
@@ -147,7 +161,9 @@ class _GenreItemsPageState extends ConsumerState<GenreItemsPage>
   void _scheduleRefresh() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref.invalidate(genreItemsProvider(GenreItemsParams(
+      // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
+      // ignore: unused_result
+      ref.refresh(genreItemsProvider(GenreItemsParams(
         viewId: widget.viewId,
         genreName: widget.genreName,
       )));
@@ -161,6 +177,7 @@ class _GenreItemsPageState extends ConsumerState<GenreItemsPage>
 
   @override
   void didPopNext() {
+    debugPrint('🔄 [GenreItemsPage] didPopNext 被调用，刷新数据');
     _scheduleRefresh();
   }
 

@@ -44,7 +44,7 @@ class PlayerPage extends ConsumerStatefulWidget {
 }
 
 class _PlayerPageState extends ConsumerState<PlayerPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final Player _player;
   late final VideoController _controller;
   bool _ready = false;
@@ -79,7 +79,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   DateTime _lastProgressSync = DateTime.fromMillisecondsSinceEpoch(0);
   Duration _lastReportedPosition = Duration.zero;
   bool _completedReported = false;
-  late final StateController<int> _refreshTicker;
+  // ✅ 移除 _refreshTicker，改为在页面生命周期时手动刷新
   Timer? _speedTimer;
 
   // ✅ 控制栏显示/隐藏（初始隐藏，点击屏幕显示）
@@ -209,7 +209,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     // ✅ 初始隐藏状态栏（因为控制栏默认隐藏）
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-    _refreshTicker = ref.read(libraryRefreshTickerProvider.notifier);
+    // ✅ 添加应用生命周期监听
+    WidgetsBinding.instance.addObserver(this);
 
     // ✅ 定时更新缓冲时的速度显示，添加波动模拟真实网络速度
     // 注意：Flutter/media_kit 不提供实时网络速度 API，
@@ -756,10 +757,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
     );
-    final ticker = _refreshTicker;
-    Future.microtask(() {
-      ticker.state = ticker.state + 1;
+
+    // ✅ 移除 libraryRefreshTickerProvider 的使用，全局刷新在页面生命周期时进行
+    // 播放页面退出时，刷新首页的继续观看列表
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.invalidate(resumeProvider);
+      }
     });
+
+    // ✅ 移除应用生命周期监听
+    WidgetsBinding.instance.removeObserver(this);
 
     super.dispose();
   }
