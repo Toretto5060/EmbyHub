@@ -1132,6 +1132,9 @@ class EmbyApi {
       final res =
           await _dio.get('/Items/$itemId/PlaybackInfo', queryParameters: {
         'UserId': userId,
+        'StartTimeTicks': '0', // ✅ 添加开始时间参数
+        'IsPlayback': 'true', // ✅ 标记为播放请求
+        'AutoOpenLiveStream': 'true', // ✅ 自动打开直播流
       });
       return res.data as Map<String, dynamic>;
     } catch (e) {
@@ -1204,8 +1207,6 @@ class EmbyApi {
           'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds',
     });
     final itemJson = res.data as Map<String, dynamic>;
-    final item = ItemInfo.fromJson(itemJson);
-    _apiLog('🎬 [API] Item: ${item.name}, Type: ${item.type}');
 
     // ✅ 从 MediaSources 获取第一个可用的 MediaSourceId
     String mediaSourceId = itemId; // 默认使用 itemId
@@ -1225,35 +1226,45 @@ class EmbyApi {
         if (runTimeTicks != null && runTimeTicks > 0) {
           mediaDuration = Duration(microseconds: (runTimeTicks / 10).round());
         }
-        _apiLog('🎬 [API] MediaSourceId: $mediaSourceId');
       }
     }
 
-    // ✅ 尝试使用最简单的直接下载 URL（最兼容的方式）
-    final uri =
-        _dio.options.baseUrl + '/Items/$itemId/Download' + '?api_key=$token';
-
-    _apiLog('🎬 [API] Trying direct download URL first: $uri');
-
-    // 如果直接下载失败，再尝试 HLS
-    // final playSessionId = DateTime.now().millisecondsSinceEpoch.toString();
-    // final hlsUri = _dio.options.baseUrl +
-    //     '/Videos/$itemId/master.m3u8' +
-    //     '?MediaSourceId=$mediaSourceId' +
-    //     '&PlaySessionId=$playSessionId' +
-    //     '&api_key=$token';
-
-    final headers = <String, String>{
-      'X-Emby-Token': token,
-    };
-
-    _apiLog('🎬 [API] HLS Master URL: $uri');
-    if (token.isNotEmpty) {
-      _apiLog(
-          '🎬 [API] Token: ${token.substring(0, token.length > 10 ? 10 : token.length)}...');
-    } else {
-      _apiLog('⚠️ [API] Token is empty!');
+    // ✅ 只使用 HLS master 流（支持自适应码率）
+    String? uri;
+    String? playSessionId;
+    try {
+      // ✅ 获取 PlaybackInfo 以获取 PlaySessionId
+      final playbackInfo = await getPlaybackInfo(
+        itemId: itemId,
+        userId: userId,
+      );
+      // ✅ 从 PlaybackInfo 获取 PlaySessionId
+      playSessionId = playbackInfo['PlaySessionId'] as String?;
+      if (playSessionId == null || playSessionId.isEmpty) {
+        playSessionId = DateTime.now().millisecondsSinceEpoch.toString();
+      }
+    } catch (e) {
+      _apiLog('⚠️ [API] Failed to get PlaybackInfo: $e');
+      playSessionId = DateTime.now().millisecondsSinceEpoch.toString();
     }
+
+    // ✅ 使用 HLS master 流（支持自适应码率）
+    uri = _dio.options.baseUrl +
+        '/Videos/$itemId/master.m3u8' +
+        '?MediaSourceId=$mediaSourceId' +
+        '&PlaySessionId=$playSessionId' +
+        '&api_key=$token';
+
+    // ✅ 根据 Emby 要求：
+    // - 使用 DirectStreamUrl 或 HLS 时，token 必须作为 api_key 参数在 URL 里
+    // - 播放本地文件时，token 必须在 Header 里用 X-Emby-Token
+    // 对于 HLS 流，即使 token 在 URL 中，也可能需要在 Header 中添加（某些 Emby 版本要求）
+    final headers = <String, String>{
+      // ✅ 对于 HLS 流，同时添加 Header 中的 token（某些 Emby 版本可能需要）
+      if (uri.contains('.m3u8')) 'X-Emby-Token': token,
+      // ✅ 如果 URL 中没有 token，则在 Header 中添加（本地文件场景）
+      if (!uri.contains('api_key=')) 'X-Emby-Token': token,
+    };
     return MediaSourceUrl(
       uri: uri,
       headers: headers,
@@ -1261,7 +1272,105 @@ class EmbyApi {
       width: mediaWidth,
       height: mediaHeight,
       duration: mediaDuration,
+      playSessionId: playSessionId, // ✅ 返回 PlaySessionId，用于调用 /Sessions/Playing
     );
+  }
+
+  // ✅ 通知 Emby 服务器开始播放（必须调用此 API 才能记录播放历史）
+  Future<void> reportPlaybackStart({
+    required String itemId,
+    required String userId,
+    required String playSessionId,
+    String? mediaSourceId,
+    int? positionTicks,
+  }) async {
+    try {
+      final payload = <String, dynamic>{
+        'ItemId': itemId,
+        'PlaySessionId': playSessionId,
+        'Command': 'Play',
+        'PositionTicks': positionTicks ?? 0,
+      };
+      if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+        payload['MediaSourceId'] = mediaSourceId;
+      }
+
+      await _dio.post('/Sessions/Playing', data: payload);
+    } catch (e) {
+      _apiLog('⚠️ [API] Failed to report playback start: $e');
+      // ✅ 不抛出异常，避免影响播放
+    }
+  }
+
+  // ✅ 通知 Emby 服务器播放进度更新
+  Future<void> reportPlaybackProgress({
+    required String itemId,
+    required String userId,
+    required String playSessionId,
+    String? mediaSourceId,
+    required int positionTicks,
+    bool isPaused = false,
+  }) async {
+    try {
+      final payload = <String, dynamic>{
+        'ItemId': itemId,
+        'PlaySessionId': playSessionId,
+        'PositionTicks': positionTicks,
+        'IsPaused': isPaused,
+      };
+      if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+        payload['MediaSourceId'] = mediaSourceId;
+      }
+
+      await _dio.post('/Sessions/Playing/Progress', data: payload);
+    } catch (e) {
+      _apiLog('⚠️ [API] Failed to report playback progress: $e');
+      // ✅ 不抛出异常，避免影响播放
+    }
+  }
+
+  // ✅ 通知 Emby 服务器停止播放
+  Future<void> reportPlaybackStopped({
+    required String itemId,
+    required String userId,
+    required String playSessionId,
+    String? mediaSourceId,
+    int? positionTicks,
+  }) async {
+    try {
+      final payload = <String, dynamic>{
+        'ItemId': itemId,
+        'PlaySessionId': playSessionId,
+        'Command': 'Stop',
+      };
+      if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+        payload['MediaSourceId'] = mediaSourceId;
+      }
+      if (positionTicks != null && positionTicks > 0) {
+        payload['PositionTicks'] = positionTicks;
+      }
+
+      // ✅ 使用 POST 方法调用 /Sessions/Playing/Stopped（停止播放的专用端点）
+      await _dio.post('/Sessions/Playing/Stopped', data: payload);
+    } catch (e) {
+      // ✅ 如果 /Sessions/Playing/Stopped 失败，尝试使用 /Sessions/Playing
+      try {
+        final payload = <String, dynamic>{
+          'ItemId': itemId,
+          'PlaySessionId': playSessionId,
+          'Command': 'Stop',
+        };
+        if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+          payload['MediaSourceId'] = mediaSourceId;
+        }
+        if (positionTicks != null && positionTicks > 0) {
+          payload['PositionTicks'] = positionTicks;
+        }
+        await _dio.post('/Sessions/Playing', data: payload);
+      } catch (e2) {
+        _apiLog('⚠️ [API] Failed to report playback stopped: $e2');
+      }
+    }
   }
 
   Future<void> updateUserItemData(
@@ -1539,6 +1648,7 @@ class MediaSourceUrl {
     this.width,
     this.height,
     this.duration,
+    this.playSessionId,
   });
   final String uri;
   final Map<String, String> headers;
@@ -1546,6 +1656,7 @@ class MediaSourceUrl {
   final int? width;
   final int? height;
   final Duration? duration;
+  final String? playSessionId; // ✅ PlaySessionId，用于调用 /Sessions/Playing
 }
 
 class ExternalUrlInfo {

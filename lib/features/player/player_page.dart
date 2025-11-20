@@ -149,6 +149,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   // ✅ MediaSourceId（用于构建字幕URL）
   String? _mediaSourceId;
+  String? _playSessionId; // ✅ PlaySessionId，用于调用 /Sessions/Playing
 
   Duration? get _initialSeekPosition {
     final ticks = widget.initialPositionTicks;
@@ -413,6 +414,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final media = await api.buildHlsUrl(widget.itemId); // ✅ 添加 await
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
       _playerLog('🎬 [Player] Video Title: $_videoTitle');
+
+      // ✅ 保存 PlaySessionId，用于调用 /Sessions/Playing
+      _playSessionId = media.playSessionId;
       if (mounted) {
         setState(() {
           _expectedBitrateKbps =
@@ -605,7 +609,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       });
 
       // ✅ 监听播放状态
-      _playingSub = _player.stream.playing.listen((isPlaying) {
+      _playingSub = _player.stream.playing.listen((isPlaying) async {
         _playerLog('🎬 [Player] Playing: $isPlaying');
         if (mounted) {
           setState(() => _isPlaying = isPlaying);
@@ -615,6 +619,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _cancelHideControlsTimer(); // 暂停时不自动隐藏控制栏
         } else {
           _startHideControlsTimer(); // 播放时自动隐藏控制栏
+
+          // ✅ 通知 Emby 服务器开始播放（必须在播放开始时调用，才能记录播放历史）
+          if (_api != null &&
+              _userId != null &&
+              _playSessionId != null &&
+              _mediaSourceId != null) {
+            try {
+              await _api!.reportPlaybackStart(
+                itemId: widget.itemId,
+                userId: _userId!,
+                playSessionId: _playSessionId!,
+                mediaSourceId: _mediaSourceId,
+                positionTicks: _initialSeekPosition != null
+                    ? (_initialSeekPosition!.inMicroseconds * 10).toInt()
+                    : 0,
+              );
+              _playerLog('✅ [Player] Reported playback start to Emby server');
+            } catch (e) {
+              _playerLog('⚠️ [Player] Failed to report playback start: $e');
+            }
+          }
         }
 
         // ✅ 更新 PiP 按钮状态
@@ -740,6 +765,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final markComplete =
         _duration > Duration.zero && _position >= _duration * 0.95;
     _syncProgress(_position, force: true, markComplete: markComplete);
+
+    // ✅ 通知 Emby 服务器停止播放
+    if (_api != null &&
+        _userId != null &&
+        _playSessionId != null &&
+        _mediaSourceId != null) {
+      final positionTicks = (_position.inMicroseconds * 10).toInt();
+      unawaited(_api!.reportPlaybackStopped(
+        itemId: widget.itemId,
+        userId: _userId!,
+        playSessionId: _playSessionId!,
+        mediaSourceId: _mediaSourceId,
+        positionTicks: positionTicks,
+      ));
+      _playerLog('✅ [Player] Reported playback stopped to Emby server');
+    }
     // ✅ 退出时确保保存字幕和音频选择（不等待，后台执行）
     unawaited(_saveStreamSelections());
     unawaited(_player.dispose());
@@ -1385,6 +1426,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
     _lastProgressSync = now;
     _lastReportedPosition = pos;
+
+    // ✅ 通知 Emby 服务器播放进度更新（用于记录播放历史）
+    if (_playSessionId != null && _mediaSourceId != null) {
+      final positionTicks = (pos.inMicroseconds * 10).toInt();
+      unawaited(_api!.reportPlaybackProgress(
+        itemId: widget.itemId,
+        userId: _userId!,
+        playSessionId: _playSessionId!,
+        mediaSourceId: _mediaSourceId,
+        positionTicks: positionTicks,
+        isPaused: !_isPlaying,
+      ));
+    }
+
     if (completed) {
       if (_completedReported) {
         return;
