@@ -33,10 +33,11 @@ final seriesProvider =
   return api.getItem(auth.userId!, seriesId);
 });
 
-// ✅ 获取剧集的季列表
+// ✅ 获取剧集的季列表（不依赖 libraryRefreshTickerProvider，季列表不会因为观看状态变化而改变）
+// 季的观看状态由 seasonWatchStatsProvider 单独管理，不需要重新加载整个季列表
 final seasonsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, seriesId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 不 watch libraryRefreshTickerProvider，避免按钮点击时重新加载整个季列表
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     return const [];
@@ -45,10 +46,13 @@ final seasonsProvider =
   return api.getSeasons(userId: auth.userId!, seriesId: seriesId);
 });
 
-// ✅ 获取某个季的观看统计信息
-final seasonWatchStatsProvider =
-    FutureProvider.family<({int totalEpisodes, int watchedEpisodes, bool allWatched}), (String seriesId, String seasonId)>((ref, params) async {
-  ref.watch(libraryRefreshTickerProvider);
+// ✅ 获取某个季的观看统计信息（不依赖 libraryRefreshTickerProvider）
+// 只在观看按钮点击时手动刷新，收藏按钮不会触发刷新
+final seasonWatchStatsProvider = FutureProvider.family<
+    ({int totalEpisodes, int watchedEpisodes, bool allWatched}),
+    (String seriesId, String seasonId)>((ref, params) async {
+  // ✅ 不 watch libraryRefreshTickerProvider，避免收藏按钮触发不必要的刷新
+  // 只在观看按钮点击时通过 ref.invalidate 手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     return (totalEpisodes: 0, watchedEpisodes: 0, allWatched: false);
@@ -60,7 +64,7 @@ final seasonWatchStatsProvider =
       seriesId: params.$1,
       seasonId: params.$2,
     );
-    
+
     int watchedCount = 0;
     for (final episode in episodes) {
       final userData = episode.userData ?? {};
@@ -69,10 +73,10 @@ final seasonWatchStatsProvider =
         watchedCount++;
       }
     }
-    
+
     final total = episodes.length;
     final allWatched = total > 0 && watchedCount == total;
-    
+
     return (
       totalEpisodes: total,
       watchedEpisodes: watchedCount,
@@ -102,7 +106,7 @@ final nextUpEpisodeProvider =
       sortBy: 'DatePlayed',
       sortOrder: 'Descending',
     );
-    
+
     // 找到第一个有播放进度且未完成的集数
     for (final episode in episodes) {
       final userData = episode.userData ?? {};
@@ -110,7 +114,7 @@ final nextUpEpisodeProvider =
           (userData['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
       final totalTicks = episode.runTimeTicks ?? 0;
       final played = userData['Played'] == true;
-      
+
       if (!played && playbackTicks > 0 && playbackTicks < totalTicks) {
         return episode;
       }
@@ -121,14 +125,15 @@ final nextUpEpisodeProvider =
   }
 });
 
+// ✅ 获取类似影片（不依赖 libraryRefreshTickerProvider，与演员逻辑一致）
 final similarItemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, seriesId) async {
-  ref.watch(libraryRefreshTickerProvider);
+  // ✅ 不 watch libraryRefreshTickerProvider，避免按钮点击时重新请求
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     return const [];
   }
-  final api = await ref.watch(embyApiProvider.future);
+  final api = await ref.read(embyApiProvider.future);
   final items = await api.getSimilarItems(auth.userId!, seriesId, limit: 12);
   return items;
 });
@@ -183,6 +188,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
   Animation<double>? _routeAnimation;
   bool _isRouteSubscribed = false; // ✅ 路由订阅状态
   ItemInfo? _cachedItemData; // ✅ 缓存item数据，避免重新加载时显示loading
+  ItemInfo? _cachedNextUpEpisode; // ✅ 缓存下一集数据，避免刷新时闪烁
 
   @override
   void initState() {
@@ -290,7 +296,6 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
         _isPlayedNotifier?.value = (data.userData?['Played'] as bool?) ?? false;
         _userDataNotifier?.value = data.userData;
       }
-
     });
 
     return StatusBarStyleScope(
@@ -360,7 +365,9 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     final isDark = isDarkModeFromContext(context, ref);
     final performers = data.performers ?? const <PerformerInfo>[];
     final externalLinks = _composeExternalLinks(data);
-    final similarItems = ref.watch(similarItemsProvider(widget.seriesId));
+    // ✅ 使用 ref.read 而不是 ref.watch，避免因为 libraryRefreshTickerProvider 变化而重新构建
+    // 与演员逻辑一致，只在首次加载时请求，不会因为按钮点击而重新请求
+    final similarItems = ref.read(similarItemsProvider(widget.seriesId));
     final seasons = ref.watch(seasonsProvider(widget.seriesId));
 
     return Stack(
@@ -386,9 +393,12 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                       right: 0,
                       top: _headerTopOffset,
                       child: seasons.when(
-                        data: (seasonsList) => _buildHeaderCard(context, data, isDark, seasonsList.length),
-                        loading: () => _buildHeaderCard(context, data, isDark, null),
-                        error: (_, __) => _buildHeaderCard(context, data, isDark, null),
+                        data: (seasonsList) => _buildHeaderCard(
+                            context, data, isDark, seasonsList.length),
+                        loading: () =>
+                            _buildHeaderCard(context, data, isDark, null),
+                        error: (_, __) =>
+                            _buildHeaderCard(context, data, isDark, null),
                       ),
                     ),
                   ],
@@ -416,7 +426,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                       ),
                       const SizedBox(height: 12),
                       SizedBox(
-                        height: 190,
+                        height: 175,
                         child: seasons.when(
                           data: (seasonsList) {
                             if (seasonsList.isEmpty) {
@@ -430,13 +440,18 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                               itemBuilder: (context, index) {
                                 final season = seasonsList[index];
                                 final bool isFirst = index == 0;
-                                final bool isLast = index == seasonsList.length - 1;
+                                final bool isLast =
+                                    index == seasonsList.length - 1;
                                 return Padding(
+                                  key: ValueKey(
+                                      'season_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
                                   padding: EdgeInsets.only(
                                     left: isFirst ? 20 : 12,
                                     right: isLast ? 20 : 0,
                                   ),
                                   child: _SeasonCard(
+                                    key: ValueKey(
+                                        'season_card_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
                                     season: season,
                                     seriesId: widget.seriesId,
                                     isDark: isDark,
@@ -445,9 +460,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                               },
                             );
                           },
-                          loading: () => const Center(
-                            child: CupertinoActivityIndicator(),
-                          ),
+                          loading: () => const SizedBox.shrink(),
                           error: (_, __) => const SizedBox.shrink(),
                         ),
                       ),
@@ -495,9 +508,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                       if (items.isEmpty) {
                         return const SizedBox.shrink();
                       }
-                      final allAre16x9 = items.every(
-                          (item) => !_hasHorizontalArtworkForSimilar(item));
-                      final listHeight = allAre16x9 ? 130.0 : 190.0;
+                      // ✅ 所有卡片统一为90x140（2:3比例），与演员海报一致
+                      final listHeight = 190.0;
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -539,12 +551,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                         ],
                       );
                     },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: CupertinoActivityIndicator(),
-                      ),
-                    ),
+                    loading: () => const SizedBox.shrink(),
                     error: (_, __) => const SizedBox.shrink(),
                   ),
                   if (externalLinks.isNotEmpty) ...[
@@ -781,7 +788,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     ];
   }
 
-  Widget _buildHeaderCard(BuildContext context, ItemInfo item, bool isDark, int? seasonsCount) {
+  Widget _buildHeaderCard(
+      BuildContext context, ItemInfo item, bool isDark, int? seasonsCount) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
     return _MeasureSize(
       onChange: (size) {
@@ -1006,24 +1014,129 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
 
   Widget _buildPlaySection(
       BuildContext context, ItemInfo item, bool isDarkBackground) {
-    // ✅ 获取继续观看的集数
-    final nextUpEpisode = ref.watch(nextUpEpisodeProvider(widget.seriesId));
-    
-    // ✅ 使用 ValueListenableBuilder 来局部更新播放进度
-    return ValueListenableBuilder<Map<String, dynamic>?>(
-      valueListenable: _userDataNotifier!,
-      builder: (context, userData, _) {
-        return nextUpEpisode.when(
-          data: (episode) {
-            // ✅ 如果有继续观看的集数，显示继续观看滚动条
-            if (episode != null) {
-              return _buildResumeEpisodeSection(context, episode, isDarkBackground);
-            }
-            // ✅ 如果没有继续观看，显示播放按钮（从第一季第一集开始）
-            return _buildPlayButton(context, item, isDarkBackground);
+    // ✅ 使用 Consumer 监听 nextUpEpisodeProvider，但只在数据变化时更新缓存
+    // 这样可以避免因为 libraryRefreshTickerProvider 变化导致的频繁重建
+    return Consumer(
+      builder: (context, ref, _) {
+        // ✅ 使用 ref.listen 监听 nextUpEpisodeProvider 的变化，更新缓存
+        // 但不直接 watch，避免频繁重建
+        final nextUpEpisodeAsync =
+            ref.watch(nextUpEpisodeProvider(widget.seriesId));
+        nextUpEpisodeAsync.whenData((episode) {
+          // ✅ 缓存下一集数据，避免刷新时闪烁
+          _cachedNextUpEpisode = episode;
+        });
+
+        // ✅ 使用 ValueListenableBuilder 来局部更新播放进度
+        return ValueListenableBuilder<Map<String, dynamic>?>(
+          valueListenable: _userDataNotifier!,
+          builder: (context, userData, _) {
+            // ✅ 优先使用缓存的数据，避免刷新时的 loading 状态导致闪烁
+            return nextUpEpisodeAsync.when(
+              data: (episode) {
+                // ✅ 如果有继续观看的集数，显示继续观看滚动条
+                if (episode != null) {
+                  // ✅ 使用缓存的 userData 更新 episode 的播放进度（如果 userData 更新了）
+                  final updatedUserData =
+                      userData != null && episode.userData != null
+                          ? {...episode.userData!, ...userData}
+                          : (userData ?? episode.userData);
+                  // ✅ 创建新的 ItemInfo，只更新 userData
+                  final updatedEpisode = updatedUserData != episode.userData
+                      ? ItemInfo(
+                          id: episode.id,
+                          name: episode.name,
+                          type: episode.type,
+                          overview: episode.overview,
+                          runTimeTicks: episode.runTimeTicks,
+                          userData: updatedUserData,
+                          seriesName: episode.seriesName,
+                          parentIndexNumber: episode.parentIndexNumber,
+                          indexNumber: episode.indexNumber,
+                          seriesId: episode.seriesId,
+                          seasonId: episode.seasonId,
+                          seriesPrimaryImageTag: episode.seriesPrimaryImageTag,
+                          seasonPrimaryImageTag: episode.seasonPrimaryImageTag,
+                          imageTags: episode.imageTags,
+                          backdropImageTags: episode.backdropImageTags,
+                          parentThumbItemId: episode.parentThumbItemId,
+                          parentThumbImageTag: episode.parentThumbImageTag,
+                          parentBackdropItemId: episode.parentBackdropItemId,
+                          parentBackdropImageTags:
+                              episode.parentBackdropImageTags,
+                          genres: episode.genres,
+                          mediaSources: episode.mediaSources,
+                          performers: episode.performers,
+                          premiereDate: episode.premiereDate,
+                          endDate: episode.endDate,
+                          productionYear: episode.productionYear,
+                          communityRating: episode.communityRating,
+                          childCount: episode.childCount,
+                          providerIds: episode.providerIds,
+                          dateCreated: episode.dateCreated,
+                          status: episode.status,
+                          externalUrls: episode.externalUrls,
+                        )
+                      : episode;
+                  return _buildResumeEpisodeSection(
+                      context, updatedEpisode, isDarkBackground);
+                }
+                // ✅ 如果没有继续观看，显示播放按钮（从第一季第一集开始）
+                return _buildPlayButton(context, item, isDarkBackground);
+              },
+              loading: () {
+                // ✅ 如果有缓存的 episode，在 loading 时也显示它，避免闪烁
+                if (_cachedNextUpEpisode != null) {
+                  final episode = _cachedNextUpEpisode!;
+                  final updatedUserData =
+                      userData != null && episode.userData != null
+                          ? {...episode.userData!, ...userData}
+                          : (userData ?? episode.userData);
+                  final updatedEpisode = updatedUserData != episode.userData
+                      ? ItemInfo(
+                          id: episode.id,
+                          name: episode.name,
+                          type: episode.type,
+                          overview: episode.overview,
+                          runTimeTicks: episode.runTimeTicks,
+                          userData: updatedUserData,
+                          seriesName: episode.seriesName,
+                          parentIndexNumber: episode.parentIndexNumber,
+                          indexNumber: episode.indexNumber,
+                          seriesId: episode.seriesId,
+                          seasonId: episode.seasonId,
+                          seriesPrimaryImageTag: episode.seriesPrimaryImageTag,
+                          seasonPrimaryImageTag: episode.seasonPrimaryImageTag,
+                          imageTags: episode.imageTags,
+                          backdropImageTags: episode.backdropImageTags,
+                          parentThumbItemId: episode.parentThumbItemId,
+                          parentThumbImageTag: episode.parentThumbImageTag,
+                          parentBackdropItemId: episode.parentBackdropItemId,
+                          parentBackdropImageTags:
+                              episode.parentBackdropImageTags,
+                          genres: episode.genres,
+                          mediaSources: episode.mediaSources,
+                          performers: episode.performers,
+                          premiereDate: episode.premiereDate,
+                          endDate: episode.endDate,
+                          productionYear: episode.productionYear,
+                          communityRating: episode.communityRating,
+                          childCount: episode.childCount,
+                          providerIds: episode.providerIds,
+                          dateCreated: episode.dateCreated,
+                          status: episode.status,
+                          externalUrls: episode.externalUrls,
+                        )
+                      : episode;
+                  return _buildResumeEpisodeSection(
+                      context, updatedEpisode, isDarkBackground);
+                }
+                return _buildPlayButton(context, item, isDarkBackground);
+              },
+              error: (_, __) =>
+                  _buildPlayButton(context, item, isDarkBackground),
+            );
           },
-          loading: () => _buildPlayButton(context, item, isDarkBackground),
-          error: (_, __) => _buildPlayButton(context, item, isDarkBackground),
         );
       },
     );
@@ -1035,7 +1148,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     final seasonNumber = episode.parentIndexNumber;
     final episodeNumber = episode.indexNumber;
     final episodeName = episode.name;
-    
+
     // ✅ 构建标题文本
     String titleText;
     if (seasonNumber != null && seasonNumber > 1) {
@@ -1043,19 +1156,22 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     } else {
       titleText = '第${episodeNumber ?? 0}集';
     }
-    
+
     // ✅ 如果"第x集"和剧集名称相同，只显示一个
     // 去除空格后比较，处理 "第3集" 和 "第 3 集" 的情况
     final String normalizedTitle = titleText.replaceAll(' ', '');
     final String normalizedName = episodeName.replaceAll(' ', '');
     final bool isTitleSameAsName = normalizedTitle == normalizedName;
     final String? displayEpisodeName = isTitleSameAsName ? null : episodeName;
-    
-    final progress = (episode.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
+
+    final progress =
+        (episode.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
     final normalizedProgress = (progress / 100).clamp(0.0, 1.0);
-    final positionTicks = (episode.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+    final positionTicks =
+        (episode.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
     final totalTicks = episode.runTimeTicks ?? 0;
-    final remainingTicks = totalTicks > positionTicks ? totalTicks - positionTicks : 0;
+    final remainingTicks =
+        totalTicks > positionTicks ? totalTicks - positionTicks : 0;
     final remainingDuration = totalTicks > 0
         ? Duration(microseconds: remainingTicks ~/ 10)
         : Duration.zero;
@@ -1097,7 +1213,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                             context,
                             episode.id!,
                             fromBeginning: false,
-                            resumePositionTicks: positionTicks > 0 ? positionTicks : null,
+                            resumePositionTicks:
+                                positionTicks > 0 ? positionTicks : null,
                           )
                       : null,
                   child: Row(
@@ -1159,10 +1276,9 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                       return LinearProgressIndicator(
                         value: animatedValue.clamp(0.0, 1.0),
                         minHeight: 6,
-                        backgroundColor: (isDarkBackground
-                                ? Colors.white
-                                : Colors.black)
-                            .withValues(alpha: 0.18),
+                        backgroundColor:
+                            (isDarkBackground ? Colors.white : Colors.black)
+                                .withValues(alpha: 0.18),
                         valueColor: AlwaysStoppedAnimation(
                           _resumeButtonColor.withValues(alpha: 0.95),
                         ),
@@ -1175,9 +1291,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
               Text(
                 '剩余 ${formatRemaining(remainingDuration)}',
                 style: TextStyle(
-                  color: isDarkBackground
-                      ? Colors.white70
-                      : Colors.black54,
+                  color: isDarkBackground ? Colors.white70 : Colors.black54,
                   fontSize: 13,
                 ),
               ),
@@ -1371,7 +1485,6 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     _modalRoute = null;
   }
 
-
   void _handlePlay(
     BuildContext context,
     String itemId, {
@@ -1429,6 +1542,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
         _userDataNotifier?.value = currentUserData;
 
         // ✅ 延迟触发全局刷新信号，刷新首页的继续观看和其他模块数据
+        // 但不触发当前页面的 provider 重新加载（通过 _isUpdatingFavorite 标记阻止）
+        // ✅ 收藏按钮不影响播放进度条和季海报状态标记，所以不刷新这些 provider
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
             ref.read(libraryRefreshTickerProvider.notifier).state++;
@@ -1500,9 +1615,29 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
         _userDataNotifier?.value = currentUserData;
 
         // ✅ 延迟触发全局刷新信号，刷新首页的继续观看和其他模块数据
+        // 同时手动刷新季海报的状态标记和继续观看集数
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
+            // ✅ 通知全局刷新（首页等其他页面）
             ref.read(libraryRefreshTickerProvider.notifier).state++;
+
+            // ✅ 手动刷新需要更新的 provider（季海报状态标记、继续观看集数）
+            // 不刷新 seriesProvider 和 seasonsProvider，避免整个页面重新加载
+            // 只刷新状态标记相关的 provider（seasonWatchStatsProvider）
+            ref.invalidate(nextUpEpisodeProvider(widget.seriesId));
+            // ✅ 刷新所有季的状态标记（由于 seasonsProvider 不 watch libraryRefreshTickerProvider，
+            // 所以不会导致季列表重建，只会更新状态标记）
+            final seasons = ref.read(seasonsProvider(widget.seriesId));
+            seasons.whenData((seasonsList) {
+              if (mounted) {
+                for (final season in seasonsList) {
+                  if (season.id != null && season.id!.isNotEmpty) {
+                    ref.invalidate(seasonWatchStatsProvider(
+                        (widget.seriesId, season.id!)));
+                  }
+                }
+              }
+            });
           }
         });
 
@@ -1784,25 +1919,6 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
 
     return results;
   }
-
-
-  /// ✅ 判断影片是否有横向艺术图
-  /// 用于判断"其他类似影片"列表的高度
-  /// 注意：返回false表示是16:9（有Primary图片），返回true表示是2:3（有backdrop）
-  bool _hasHorizontalArtworkForSimilar(ItemInfo item) {
-    if (item.backdropImageTags != null && item.backdropImageTags!.isNotEmpty) {
-      return true;
-    }
-    if (item.parentBackdropImageTags != null &&
-        item.parentBackdropImageTags!.isNotEmpty) {
-      return true;
-    }
-    if ((item.imageTags?['Primary'] ?? '').isEmpty) {
-      return false;
-    }
-    return false;
-  }
-
 }
 
 class _PerformerCard extends StatelessWidget {
@@ -1815,8 +1931,8 @@ class _PerformerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
     final theme = Theme.of(context);
-    const double cardWidth = 90;
-    const double cardHeight = 140;
+    const double cardWidth = 95;
+    const double cardHeight = 143;
 
     return SizedBox(
       width: cardWidth,
@@ -1996,10 +2112,9 @@ class _SimilarCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
-    final hasHorizontalArtwork = _hasHorizontalArtwork(item);
-    final double cardWidth = hasHorizontalArtwork ? 100 : 160;
-    final double aspectRatio = hasHorizontalArtwork ? 2 / 3 : 16 / 9;
-    final double imageHeight = cardWidth / aspectRatio;
+    const double cardWidth = 95;
+    const double cardHeight = 143;
+    const double aspectRatio = 2 / 3;
 
     return SizedBox(
       width: cardWidth,
@@ -2014,12 +2129,11 @@ class _SimilarCard extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: SizedBox(
-                height: imageHeight,
+                height: cardHeight,
                 width: cardWidth,
                 child: AspectRatio(
                   aspectRatio: aspectRatio,
-                  child:
-                      _buildPoster(hasHorizontalArtwork: hasHorizontalArtwork),
+                  child: _buildPoster(),
                 ),
               ),
             ),
@@ -2054,7 +2168,7 @@ class _SimilarCard extends StatelessWidget {
     );
   }
 
-  Widget _buildPoster({required bool hasHorizontalArtwork}) {
+  Widget _buildPoster() {
     if (item.id == null || item.id!.isEmpty) {
       return Container(
         color: Colors.grey.withOpacity(0.2),
@@ -2077,15 +2191,7 @@ class _SimilarCard extends StatelessWidget {
           url = api.buildImageUrl(
             itemId: item.id!,
             type: 'Primary',
-            maxWidth: hasHorizontalArtwork ? 480 : 320,
-          );
-        }
-
-        if ((url == null || url.isEmpty) && hasHorizontalArtwork) {
-          url = api.buildImageUrl(
-            itemId: item.id!,
-            type: 'Backdrop',
-            maxWidth: 720,
+            maxWidth: 320,
           );
         }
 
@@ -2124,24 +2230,11 @@ class _SimilarCard extends StatelessWidget {
       context.push('/player/$id');
     }
   }
-
-  bool _hasHorizontalArtwork(ItemInfo item) {
-    if (item.backdropImageTags != null && item.backdropImageTags!.isNotEmpty) {
-      return true;
-    }
-    if (item.parentBackdropImageTags != null &&
-        item.parentBackdropImageTags!.isNotEmpty) {
-      return true;
-    }
-    if ((item.imageTags?['Primary'] ?? '').isEmpty) {
-      return false;
-    }
-    return false;
-  }
 }
 
-class _SeasonCard extends ConsumerWidget {
+class _SeasonCard extends StatelessWidget {
   const _SeasonCard({
+    super.key,
     required this.season,
     required this.seriesId,
     required this.isDark,
@@ -2152,91 +2245,107 @@ class _SeasonCard extends ConsumerWidget {
   final bool isDark;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final stats = ref.watch(seasonWatchStatsProvider((seriesId, season.id ?? '')));
+  Widget build(BuildContext context) {
     final seasonName = season.name;
-    
+
     return SizedBox(
-      width: 120,
+      width: 95,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 海报
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            onPressed: season.id != null && season.id!.isNotEmpty
-                ? () {
-                    final series = ref.read(seriesProvider(seriesId));
-                    series.whenData((seriesData) {
-                      context.push(
-                        '/series/$seriesId/season/${season.id}?seriesName=${Uri.encodeComponent(seriesData.name)}&seasonName=${Uri.encodeComponent(seasonName)}',
-                      );
-                    });
-                  }
-                : null,
+          // ✅ 海报部分完全独立，不依赖 provider，不会重新加载
+          RepaintBoundary(
+            // ✅ 使用 RepaintBoundary 避免海报重新绘制
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: SizedBox(
-                    width: 120,
-                    height: 160,
-                    child: AspectRatio(
-                      aspectRatio: 2 / 3,
-                      child: _buildSeasonPoster(),
+                // ✅ 海报图片（提取为独立 widget，使用稳定的 key，避免重新加载）
+                _SeasonPoster(
+                  key: ValueKey('season_poster_${season.id}'),
+                  season: season,
+                  seriesId: seriesId,
+                ),
+                // ✅ 只有状态标记部分 watch provider，只刷新这一部分
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: RepaintBoundary(
+                    // ✅ 使用 RepaintBoundary 避免状态标记刷新时影响海报
+                    child: Consumer(
+                      builder: (context, ref, _) {
+                        final stats = ref.watch(seasonWatchStatsProvider(
+                            (seriesId, season.id ?? '')));
+                        return stats.when(
+                          data: (data) {
+                            if (data.allWatched) {
+                              // 已观看完成：绿色圆形背景，使用 CupertinoIcons.check_mark
+                              return Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.85),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  CupertinoIcons.check_mark,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
+                              );
+                            } else if (data.totalEpisodes > 0) {
+                              // 显示未观看集数：红色背景，圆角10
+                              final unwatched =
+                                  data.totalEpisodes - data.watchedEpisodes;
+                              if (unwatched > 0) {
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: CupertinoColors.systemRed,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    '$unwatched',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+                            return const SizedBox.shrink();
+                          },
+                          loading: () => const SizedBox.shrink(),
+                          error: (_, __) => const SizedBox.shrink(),
+                        );
+                      },
                     ),
                   ),
                 ),
-              // 右上角观看状态标志（与列表样式保持一致）
-              Positioned(
-                top: 4,
-                right: 4,
-                child: stats.when(
-                  data: (data) {
-                    if (data.allWatched) {
-                      // 已观看完成：绿色圆形背景，使用 CupertinoIcons.check_mark
-                      return Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.85),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          CupertinoIcons.check_mark,
-                          size: 14,
-                          color: Colors.white,
-                        ),
-                      );
-                    } else if (data.totalEpisodes > 0) {
-                      // 显示未观看集数：红色背景，圆角10
-                      final unwatched = data.totalEpisodes - data.watchedEpisodes;
-                      if (unwatched > 0) {
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: CupertinoColors.systemRed,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            '$unwatched',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        );
-                      }
-                    }
-                    return const SizedBox.shrink();
-                  },
-                  loading: () => const SizedBox.shrink(),
-                  error: (_, __) => const SizedBox.shrink(),
+                // ✅ 点击按钮覆盖整个海报区域（只在需要时使用 Consumer）
+                Positioned.fill(
+                  child: season.id != null && season.id!.isNotEmpty
+                      ? Consumer(
+                          builder: (context, ref, _) {
+                            return CupertinoButton(
+                              padding: EdgeInsets.zero,
+                              onPressed: () {
+                                final series =
+                                    ref.read(seriesProvider(seriesId));
+                                series.whenData((seriesData) {
+                                  context.push(
+                                    '/series/$seriesId/season/${season.id}?seriesName=${Uri.encodeComponent(seriesData.name)}&seasonName=${Uri.encodeComponent(seasonName)}',
+                                  );
+                                });
+                              },
+                              child: const SizedBox.shrink(),
+                            );
+                          },
+                        )
+                      : const SizedBox.shrink(),
                 ),
-              ),
-            ],
+              ],
             ),
           ),
           const SizedBox(height: 8),
@@ -2257,38 +2366,111 @@ class _SeasonCard extends ConsumerWidget {
       ),
     );
   }
+}
 
-  Widget _buildSeasonPoster() {
-    if (season.id == null || season.id!.isEmpty) {
-      return Container(
-        color: Colors.grey.withOpacity(0.2),
-        child: const Icon(CupertinoIcons.film, size: 32, color: Colors.grey),
+/// ✅ 季海报独立 widget，使用稳定的 key，避免重新加载
+/// 当季海报缺失时，使用电视剧海报作为备用
+class _SeasonPoster extends ConsumerWidget {
+  const _SeasonPoster({
+    super.key,
+    required this.season,
+    required this.seriesId,
+  });
+
+  final ItemInfo season;
+  final String seriesId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // ✅ 检查季是否有 Primary 图片标签
+    final seasonHasImage = season.imageTags?['Primary'] != null &&
+        season.imageTags!['Primary']!.isNotEmpty;
+
+    // ✅ 如果季有海报，直接使用
+    if (seasonHasImage && season.id != null && season.id!.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(
+          width: 95,
+          height: 143,
+          child: AspectRatio(
+            aspectRatio: 2 / 3,
+            child: FutureBuilder<EmbyApi>(
+              future: EmbyApi.create(),
+              key: ValueKey('season_poster_future_${season.id}'),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return Container(color: Colors.grey.withOpacity(0.2));
+                }
+                final api = snapshot.data!;
+                final posterUrl = api.buildImageUrl(
+                  itemId: season.id!,
+                  type: 'Primary',
+                  maxWidth: 400,
+                  tag: season.imageTags!['Primary'],
+                );
+                return EmbyFadeInImage(
+                  key: ValueKey('season_poster_image_$posterUrl'),
+                  imageUrl: posterUrl,
+                  fit: BoxFit.cover,
+                );
+              },
+            ),
+          ),
+        ),
       );
     }
 
-    return FutureBuilder<EmbyApi>(
-      future: EmbyApi.create(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return Container(color: Colors.grey.withOpacity(0.2));
-        }
-        final api = snapshot.data!;
-        final posterUrl = api.buildImageUrl(
-          itemId: season.id!,
-          type: 'Primary',
-          maxWidth: 400,
-        );
-        if (posterUrl.isEmpty) {
-          return Container(
-            color: Colors.grey.withOpacity(0.2),
-            child: const Icon(CupertinoIcons.photo, size: 28),
-          );
-        }
-        return EmbyFadeInImage(
-          imageUrl: posterUrl,
-          fit: BoxFit.cover,
-        );
-      },
+    // ✅ 季没有海报，使用电视剧海报作为备用
+    final seriesAsync = ref.read(seriesProvider(seriesId));
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox(
+        width: 95,
+        height: 143,
+        child: AspectRatio(
+          aspectRatio: 2 / 3,
+          child: seriesAsync.when(
+            data: (series) {
+              final seriesHasImage = series.imageTags?['Primary'] != null &&
+                  series.imageTags!['Primary']!.isNotEmpty;
+              if (seriesHasImage) {
+                return FutureBuilder<EmbyApi>(
+                  future: EmbyApi.create(),
+                  key: ValueKey('season_poster_future_series_$seriesId'),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return Container(color: Colors.grey.withOpacity(0.2));
+                    }
+                    final api = snapshot.data!;
+                    final posterUrl = api.buildImageUrl(
+                      itemId: seriesId,
+                      type: 'Primary',
+                      maxWidth: 400,
+                      tag: series.imageTags!['Primary'],
+                    );
+                    return EmbyFadeInImage(
+                      key: ValueKey('season_poster_image_series_$posterUrl'),
+                      imageUrl: posterUrl,
+                      fit: BoxFit.cover,
+                    );
+                  },
+                );
+              }
+              // ✅ 如果都没有海报，显示占位符
+              return Container(
+                color: Colors.grey.withOpacity(0.2),
+                child: const Icon(CupertinoIcons.photo, size: 28),
+              );
+            },
+            loading: () => Container(color: Colors.grey.withOpacity(0.2)),
+            error: (_, __) => Container(
+              color: Colors.grey.withOpacity(0.2),
+              child: const Icon(CupertinoIcons.photo, size: 28),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2392,4 +2574,3 @@ class _MeasureSizeRenderObject extends RenderProxyBox {
     });
   }
 }
-

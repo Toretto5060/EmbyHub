@@ -2861,8 +2861,8 @@ class _PerformerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
     final theme = Theme.of(context);
-    const double cardWidth = 90;
-    const double cardHeight = 140;
+    const double cardWidth = 95;
+    const double cardHeight = 143;
 
     return SizedBox(
       width: cardWidth,
@@ -3043,7 +3043,7 @@ class _SimilarCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
     final hasHorizontalArtwork = _hasHorizontalArtwork(item);
-    final double cardWidth = hasHorizontalArtwork ? 100 : 160;
+    final double cardWidth = hasHorizontalArtwork ? 95 : 160;
     final double aspectRatio = hasHorizontalArtwork ? 2 / 3 : 16 / 9;
     final double imageHeight = cardWidth / aspectRatio;
 
