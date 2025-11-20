@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'status_bar_util.dart';
+import 'theme_utils.dart';
 
 /// 全局状态栏样式管理器，支持嵌套覆盖。
 class StatusBarManager {
@@ -14,6 +16,8 @@ class StatusBarManager {
   static int _nextToken = 0;
   static bool _observerRegistered = false;
   static final _BrightnessObserver _brightnessObserver = _BrightnessObserver();
+  // ✅ 当前主题亮度（用户选择的主题模式对应的亮度，而不是系统平台亮度）
+  static Brightness? _currentThemeBrightness;
 
   static ValueListenable<SystemUiOverlayStyle?> get listenable => _notifier;
 
@@ -53,15 +57,23 @@ class StatusBarManager {
     _observerRegistered = true;
   }
 
+  /// ✅ 设置当前主题亮度（用户选择的主题模式对应的亮度）
+  static void setCurrentThemeBrightness(Brightness? brightness) {
+    _currentThemeBrightness = brightness;
+    _notify();
+  }
+
   static void refresh() {
     _notify();
   }
 
   static void _notify() {
     final nextStyle = _stack.isEmpty ? null : _stack.last.style;
-    final styleToApply = nextStyle ??
-        StatusBarUtil.styleForBrightness(
-            WidgetsBinding.instance.platformDispatcher.platformBrightness);
+    // ✅ 如果有自定义主题亮度，使用它；否则使用系统平台亮度
+    final brightnessToUse = _currentThemeBrightness ??
+        WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    final styleToApply =
+        nextStyle ?? StatusBarUtil.styleForBrightness(brightnessToUse);
     StatusBarUtil.applyStyle(styleToApply);
     if (_notifier.value == nextStyle) {
       return;
@@ -78,6 +90,10 @@ class _BrightnessObserver extends WidgetsBindingObserver {
   @override
   void didChangePlatformBrightness() {
     super.didChangePlatformBrightness();
+    // ✅ 只有当用户没有设置自定义主题亮度时，才响应系统平台亮度变化
+    // 如果用户设置了自定义主题亮度（固定深色或浅色），则忽略系统平台亮度变化
+    // 注意：这里不能直接访问 _currentThemeBrightness，因为它可能已经更新
+    // 所以总是调用 _notify()，让它在内部判断是否使用系统平台亮度
     StatusBarManager._notify();
   }
 
@@ -155,6 +171,11 @@ class StatusBarStyleScope extends StatefulWidget {
 
   static Widget adaptive({required Widget child, Key? key}) {
     return _AdaptiveStatusBarStyleScope(key: key, child: child);
+  }
+
+  /// ✅ 根据用户选择的主题模式自适应状态栏样式（而不是系统平台亮度）
+  static Widget adaptiveToTheme({required Widget child, Key? key}) {
+    return _ThemeAdaptiveStatusBarStyleScope(key: key, child: child);
   }
 
   final Widget child;
@@ -291,11 +312,30 @@ class _AdaptiveStatusBarStyleScopeState
 
   @override
   Widget build(BuildContext context) {
+    // ⚠️ 这个实现使用系统平台亮度，用于向后兼容
+    // 新的代码应该使用 adaptiveToTheme() 来根据用户选择的主题模式自适应
     final brightness =
         MediaQuery.maybeOf(context)?.platformBrightness ?? _platformBrightness;
     final style = brightness == Brightness.dark
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
     return StatusBarStyleScope(style: style, child: widget.child);
+  }
+}
+
+/// ✅ 根据用户选择的主题模式自适应状态栏样式（而不是系统平台亮度）
+class _ThemeAdaptiveStatusBarStyleScope extends ConsumerWidget {
+  const _ThemeAdaptiveStatusBarStyleScope({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // ✅ 使用用户选择的主题模式计算亮度，而不是系统平台亮度
+    final brightness = getCurrentBrightnessFromContext(context, ref);
+    final style = brightness == Brightness.dark
+        ? SystemUiOverlayStyle.light
+        : SystemUiOverlayStyle.dark;
+    return StatusBarStyleScope(style: style, child: child);
   }
 }

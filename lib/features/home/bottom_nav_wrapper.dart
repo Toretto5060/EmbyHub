@@ -64,7 +64,9 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
     final location = GoRouterState.of(context).uri.path;
     final isHomePage = location == '/'; // 判断是否在首页
 
-    return StatusBarStyleScope.adaptive(
+    // ✅ 使用 adaptiveToTheme() 根据用户选择的主题模式自适应状态栏样式
+    // 而不是使用 adaptive() 根据系统平台亮度自适应
+    return StatusBarStyleScope.adaptiveToTheme(
       child: PopScope(
         canPop: false, // 拦截返回事件
         onPopInvokedWithResult: (bool didPop, dynamic result) async {

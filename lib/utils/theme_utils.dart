@@ -19,9 +19,9 @@ Brightness getCurrentBrightness(WidgetRef ref) {
 }
 
 /// ✅ 获取当前主题亮度（从 BuildContext，用于非 ConsumerWidget）
-Brightness getCurrentBrightnessFromContext(BuildContext context, WidgetRef ref) {
+Brightness getCurrentBrightnessFromContext(
+    BuildContext context, WidgetRef ref) {
   final themeMode = ref.read(themeModeProvider);
-  final platformBrightness = MediaQuery.of(context).platformBrightness;
 
   switch (themeMode) {
     case AppThemeMode.dark:
@@ -29,6 +29,10 @@ Brightness getCurrentBrightnessFromContext(BuildContext context, WidgetRef ref) 
     case AppThemeMode.light:
       return Brightness.light;
     case AppThemeMode.system:
+      // ✅ 使用 MediaQuery 获取系统平台亮度，但如果 MediaQuery 不存在，使用平台亮度
+      final platformBrightness =
+          MediaQuery.maybeOf(context)?.platformBrightness ??
+              WidgetsBinding.instance.platformDispatcher.platformBrightness;
       return platformBrightness;
   }
 }
@@ -42,4 +46,3 @@ bool isDarkMode(WidgetRef ref) {
 bool isDarkModeFromContext(BuildContext context, WidgetRef ref) {
   return getCurrentBrightnessFromContext(context, ref) == Brightness.dark;
 }
-
