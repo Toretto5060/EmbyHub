@@ -284,7 +284,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
   }
 
   void _scheduleRefresh() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // ✅ 使用 microtask 立即刷新，而不是等待下一帧
+    Future.microtask(() {
       if (!mounted) return;
       // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
       // ignore: unused_result
@@ -296,19 +297,39 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
       // ignore: unused_result
       ref.refresh(similarItemsProvider(widget.seriesId));
 
-      // ✅ 刷新所有季的状态标记（海报右上角的播放状态/剩余剧集）
-      final seasonsAsync = ref.read(seasonsProvider(widget.seriesId));
-      seasonsAsync.whenData((seasonsList) {
-        if (mounted) {
-          for (final season in seasonsList) {
-            if (season.id != null && season.id!.isNotEmpty) {
-              // ignore: unused_result
-              ref.refresh(
-                  seasonWatchStatsProvider((widget.seriesId, season.id!)));
-            }
+      // ✅ 刷新所有季的状态标记
+      _refreshSeasonWatchStats();
+    });
+  }
+
+  void _refreshSeasonWatchStats() {
+    if (!mounted) return;
+    // ✅ 刷新所有季的状态标记（海报右上角的播放状态/剩余剧集）
+    final seasonsAsync = ref.read(seasonsProvider(widget.seriesId));
+    // ✅ 如果数据已经存在，直接刷新
+    if (seasonsAsync.hasValue) {
+      final seasonsList = seasonsAsync.value;
+      if (seasonsList != null && mounted) {
+        for (final season in seasonsList) {
+          if (season.id != null && season.id!.isNotEmpty) {
+            // ignore: unused_result
+            ref.refresh(
+                seasonWatchStatsProvider((widget.seriesId, season.id!)));
           }
         }
-      });
+      }
+    }
+    // ✅ 如果数据还在加载，等待加载完成后再刷新
+    seasonsAsync.whenData((seasonsList) {
+      if (mounted) {
+        for (final season in seasonsList) {
+          if (season.id != null && season.id!.isNotEmpty) {
+            // ignore: unused_result
+            ref.refresh(
+                seasonWatchStatsProvider((widget.seriesId, season.id!)));
+          }
+        }
+      }
     });
   }
 
@@ -376,14 +397,16 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
         _userDataNotifier?.value = data.userData;
       }
 
-      // ✅ 使用 userData 的播放进度作为数据变化的标识
+      // ✅ 使用 userData 的播放进度和观看状态作为数据变化的标识
       final playbackTicks =
           (data.userData?['PlaybackPositionTicks'] as num?)?.toInt();
-      final currentHash = '${data.id}_${playbackTicks ?? 0}';
+      final played = (data.userData?['Played'] as bool?) ?? false;
+      final currentHash = '${data.id}_${playbackTicks ?? 0}_$played';
 
-      // ✅ 如果数据发生变化（不是首次加载），触发刷新
+      // ✅ 如果数据发生变化（不是首次加载），立即刷新季状态标记（不使用 postFrameCallback，减少延迟）
       if (_lastItemDataHash != null && _lastItemDataHash != currentHash) {
-        // ✅ 数据已变化，provider 会自动更新，这里只需要更新哈希值
+        // ✅ 直接调用，不使用 postFrameCallback，减少延迟
+        _refreshSeasonWatchStats();
       }
 
       // ✅ 更新哈希值
