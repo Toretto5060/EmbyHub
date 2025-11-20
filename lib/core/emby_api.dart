@@ -33,8 +33,11 @@ class EmbyApi {
       final token = prefs.getString('emby_token');
       final deviceId = await _ensureDeviceId(prefs);
       final deviceModel = await _getDeviceModel();
+      final packageInfo = await PackageInfo.fromPlatform();
+      final clientName = '${packageInfo.appName}${packageInfo.version}';
+      final clientVersion = packageInfo.version;
       final auth =
-          'MediaBrowser Client="$_clientName", Device="$deviceModel", DeviceId="$deviceId", Version="$_clientVersion"';
+          'MediaBrowser Client="$clientName", Device="$deviceModel", DeviceId="$deviceId", Version="$clientVersion"';
       options.headers['X-Emby-Authorization'] = auth;
       if (token != null && token.isNotEmpty) {
         options.headers['X-Emby-Token'] = token;
