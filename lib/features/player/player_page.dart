@@ -181,8 +181,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       configuration: PlayerConfiguration(
           title: 'Emby Player',
           logLevel: MPVLogLevel.error,
-          bufferSize: 2 * 1024  * 1024 * 1024 // 2g 缓冲区（降低以减少缓冲区压力）
-          ),
+          bufferSize: 2 * 1024  * 1024 * 1024, // 2g 缓冲区（降低以减少缓冲区压力）
+      ),
     );
 
     _controller = VideoController(
@@ -621,6 +621,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             // 说明：通过 AudioTrack 输出，系统会自动应用设备的音效设置
             // 作用：设置 100 就足够大声，同时不破音；系统会根据设备设置自动应用音效
             'ao': 'audiotrack', // Android 系统音频输出，使用 AudioTrack（使用系统音效）
+
+            'audio-backend': 'audiotrack',
             
             // ✅ 音频格式配置，确保杜比全景声和音效增强正常工作
             'audio-format': 's16', // 使用 16 位 PCM（兼容性最好，系统会自动处理更高格式）
