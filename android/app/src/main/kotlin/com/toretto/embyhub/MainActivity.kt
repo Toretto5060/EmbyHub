@@ -29,11 +29,14 @@ import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 class MainActivity: FlutterActivity() {
     private val pipChannelName = "app.pip"
     private val platformChannelName = "com.embyhub/platform"
     private val brightnessChannelName = "com.embyhub/brightness"
+    private val deviceNameChannelName = "device_name_channel"
     private var pipChannel: MethodChannel? = null
     private var isPipExpanded = false // PiP 窗口是否放大
     private var currentPlayingState = true // 当前播放状态
@@ -192,6 +195,16 @@ class MainActivity: FlutterActivity() {
                     result.success(volume)
                 }
                 else -> result.notImplemented()
+            }
+        }
+        
+        // ✅ 获取真实设备商用名称 channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, deviceNameChannelName).setMethodCallHandler { call, result ->
+            if (call.method == "getMarketName") {
+                val name = getMarketName()
+                result.success(name)
+            } else {
+                result.notImplemented()
             }
         }
     }
@@ -705,6 +718,28 @@ class MainActivity: FlutterActivity() {
                 params.preferredDisplayModeId = bestMode.modeId
                 window.attributes = params
             }
+        }
+    }
+    
+    // ✅ 获取设备商用名称
+    private fun getMarketName(): String {
+        // 优先使用系统属性 ro.product.marketname
+        val prop = getSystemProperty("ro.product.marketname")
+        if (prop.isNotEmpty()) {
+            return prop
+        }
+        
+        // 备选：manufacturer + model
+        return "${Build.MANUFACTURER} ${Build.MODEL}"
+    }
+    
+    // ✅ 读取系统属性
+    private fun getSystemProperty(propName: String): String {
+        return try {
+            val process = Runtime.getRuntime().exec("getprop $propName")
+            process.inputStream.bufferedReader().use(BufferedReader::readText).trim()
+        } catch (e: Exception) {
+            ""
         }
     }
 }

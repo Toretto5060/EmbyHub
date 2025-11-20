@@ -4,6 +4,7 @@ import 'package:dio/dio.dart' as dio;
 import 'package:shared_preferences/shared_preferences.dart' as sp;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import '../utils/device_name.dart';
 
 const bool _kEmbyApiLogging = false;
 void _apiLog(String message) {
@@ -32,9 +33,9 @@ class EmbyApi {
         .add(dio.InterceptorsWrapper(onRequest: (options, handler) async {
       final token = prefs.getString('emby_token');
       final deviceId = await _ensureDeviceId(prefs);
-      final deviceModel = await _getDeviceModel();
+      final deviceModel = await _getDeviceModelForHeader();
       final packageInfo = await PackageInfo.fromPlatform();
-      final clientName = '${packageInfo.appName}${packageInfo.version}';
+      final clientName = packageInfo.appName;
       final clientVersion = packageInfo.version;
       final auth =
           'MediaBrowser Client="$clientName", Device="$deviceModel", DeviceId="$deviceId", Version="$clientVersion"';
@@ -113,17 +114,147 @@ class EmbyApi {
     return id;
   }
 
-  // ✅ 获取设备型号（如 "xiaomi17 pro max"）
+  // ✅ 品牌名称中文映射
+  static String _getChineseBrandName(String brand) {
+    final brandLower = brand.toLowerCase();
+    final brandMap = {
+      'xiaomi': '小米',
+      'redmi': '红米',
+      'samsung': '三星',
+      'huawei': '华为',
+      'honor': '荣耀',
+      'oppo': 'OPPO',
+      'vivo': 'vivo',
+      'oneplus': '一加',
+      'realme': 'realme',
+      'meizu': '魅族',
+      'motorola': '摩托罗拉',
+      'lenovo': '联想',
+      'google': 'Google',
+      'sony': '索尼',
+      'lg': 'LG',
+      'asus': '华硕',
+    };
+    return brandMap[brandLower] ?? brand;
+  }
+
+  // ✅ 尝试从 Android 设备信息中提取友好的设备名称
+  static String _extractFriendlyDeviceName(
+    String brand,
+    String model,
+    String? product,
+    String? device,
+  ) {
+    // 如果 model 是纯数字+字母的代号（如 "2509FPN0BC"），尝试使用 product 或 device
+    // 纯代号通常匹配模式：全是大写字母和数字，长度较长
+    final isCodePattern = RegExp(r'^[A-Z0-9]{8,}$').hasMatch(model);
+
+    String friendlyModel = model;
+
+    // 如果 model 看起来像代号，尝试使用 product 或 device
+    if (isCodePattern) {
+      // 优先使用 product（如 "xmsirius"），去除前缀后格式化
+      if (product != null && product.isNotEmpty) {
+        // 移除常见的前缀（如 "xm" 代表小米）
+        final cleanedProduct = product
+            .replaceAll(RegExp(r'^(xm|redmi|huawei|honor)', caseSensitive: false), '');
+        if (cleanedProduct.isNotEmpty && cleanedProduct != product) {
+          // 将下划线或连字符转换为空格，并格式化首字母大写
+          friendlyModel = cleanedProduct
+              .replaceAll(RegExp(r'[_-]'), ' ')
+              .split(' ')
+              .map((word) => word.isNotEmpty
+                  ? word[0].toUpperCase() + word.substring(1).toLowerCase()
+                  : '')
+              .join(' ');
+        } else {
+          // 如果 product 本身就是友好的名称，直接使用（首字母大写）
+          friendlyModel = product[0].toUpperCase() + product.substring(1).toLowerCase();
+        }
+      }
+      // 如果 product 不可用，尝试使用 device
+      else if (device != null && device.isNotEmpty && device != model) {
+        friendlyModel = device
+            .replaceAll(RegExp(r'[_-]'), ' ')
+            .split(' ')
+            .map((word) => word.isNotEmpty
+                ? word[0].toUpperCase() + word.substring(1).toLowerCase()
+                : '')
+            .join(' ');
+      }
+    } else {
+      // 如果 model 本身看起来像友好名称，直接格式化（首字母大写）
+      friendlyModel = model;
+    }
+
+    // 获取中文品牌名称
+    final chineseBrand = _getChineseBrandName(brand);
+
+    // 组合：品牌 + 型号（用空格分隔）
+    return '$chineseBrand $friendlyModel'.trim();
+  }
+
+  // ✅ 获取设备型号（如 "小米 7 Pro Max"）- 用于显示
+  // ignore: unused_element
   static Future<String> _getDeviceModel() async {
     try {
       final deviceInfo = DeviceInfoPlugin();
       if (Platform.isAndroid) {
         final androidInfo = await deviceInfo.androidInfo;
-        // 组合品牌和型号，如 "xiaomi17 pro max"
-        final brand = androidInfo.brand.toLowerCase();
+        // 提取友好的设备名称
+        final brand = androidInfo.brand;
         final model = androidInfo.model;
-        return '$brand$model';
+        final product = androidInfo.product;
+        final device = androidInfo.device;
+
+        return _extractFriendlyDeviceName(
+          brand,
+          model,
+          product,
+          device,
+        );
       } else if (Platform.isIOS) {
+        final iosInfo = await deviceInfo.iosInfo;
+        return iosInfo.model;
+      } else {
+        return Platform.operatingSystem;
+      }
+    } catch (e) {
+      // 如果获取失败，回退到操作系统名称
+      return Platform.operatingSystem;
+    }
+  }
+
+  // ✅ 获取设备型号用于 HTTP header（使用平台通道获取真实商用名称）
+  static Future<String> _getDeviceModelForHeader() async {
+    try {
+      if (Platform.isAndroid) {
+        // ✅ 优先使用平台通道获取真实设备商用名称（从系统属性 ro.product.marketname）
+        try {
+          final deviceName = await DeviceName.getMarketName();
+          if (deviceName.isNotEmpty && deviceName != "Unknown") {
+            return deviceName;
+          }
+        } catch (e) {
+          // 如果平台通道失败，回退到原有逻辑
+        }
+        
+        // ✅ 回退方案：使用 Build.MANUFACTURER + Build.MODEL
+        final deviceInfo = DeviceInfoPlugin();
+        final androidInfo = await deviceInfo.androidInfo;
+        
+        final brand = androidInfo.brand;
+        final model = androidInfo.model;
+
+        // 使用英文品牌名称（首字母大写）
+        final englishBrand = brand.isNotEmpty
+            ? brand[0].toUpperCase() + brand.substring(1).toLowerCase()
+            : brand;
+
+        // 组合：品牌 + 型号
+        return '$englishBrand $model'.trim();
+      } else if (Platform.isIOS) {
+        final deviceInfo = DeviceInfoPlugin();
         final iosInfo = await deviceInfo.iosInfo;
         return iosInfo.model;
       } else {
