@@ -167,6 +167,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   @override
   void initState() {
     super.initState();
+    
+    // ✅ 在页面初始化时立即获取并保存原始亮度（在系统可能调整亮度之前）
+    // 这样即使系统在进入全屏时自动调整了亮度，我们也能恢复正确的原始亮度
+    _getCurrentBrightness().then((_) {
+      if (_originalBrightness == null && _currentBrightness != null) {
+        _originalBrightness = _currentBrightness;
+      }
+    });
+    
     // ✅ 创建播放器，media_kit会自动启用系统媒体会话
     _player = Player(
       configuration: PlayerConfiguration(
@@ -604,17 +613,26 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             'opengl-swapinterval': '0', // 不限制交换间隔，提高流畅度
             'video-latency-hacks': 'yes', // 启用视频延迟优化
             //==========================
-            //【音频：使用系统音效输出（支持杜比音效）】
+            //【音频：使用系统音效输出】
             //==========================
             'audio-pitch-correction': 'yes', // 倍速时保持音调
             'volume-max': '200', // 允许音量最大到 200%
-            // ✅ 明确使用系统音频输出（Android: AudioTrack）
-            // 说明：直接走系统音效管线，系统会自动控制音量峰值，避免破音
-            // 作用：设置 100 就足够大声，同时不破音；系统音效（均衡器、低音增强、杜比音效等）会自动应用
-            // 杜比音效支持：通过 AudioTrack 输出，系统会自动识别并启用杜比音效（如果设备支持）
-            'ao': 'audiotrack', // Android 系统音频输出，使用 AudioTrack（支持杜比音效）
-            // 不设置任何音频滤镜（'af'），保持原始音频流（包括杜比音效），让系统处理
-            // MainActivity 中已配置 AudioAttributes（CONTENT_TYPE_MOVIE + FLAG_DEEP_BUFFER），确保杜比音效自动应用
+            // ✅ 使用系统音频输出（Android: AudioTrack）
+            // 说明：通过 AudioTrack 输出，系统会自动应用设备的音效设置
+            // 作用：设置 100 就足够大声，同时不破音；系统会根据设备设置自动应用音效
+            'ao': 'audiotrack', // Android 系统音频输出，使用 AudioTrack（使用系统音效）
+            
+            // ✅ 音频格式配置，确保杜比全景声和音效增强正常工作
+            'audio-format': 's16', // 使用 16 位 PCM（兼容性最好，系统会自动处理更高格式）
+            'audio-samplerate': 'auto', // 自动采样率，让系统根据音频源和输出设备选择最佳采样率
+            'audio-channels': 'auto', // 自动声道数，保持原始音频流的声道布局（支持杜比全景声多声道）
+            
+            // ✅ 音频缓冲配置，确保流畅播放和音效处理
+            'audio-buffer': '1.0', // 1秒音频缓冲区（足够系统进行音效处理）
+            'audio-stream-silence': 'no', // 不静音，保持原始音频流
+            
+            // ✅ 不设置任何音频滤镜（'af'），保持原始音频流（包括杜比全景声），让系统处理
+            // MainActivity 中已配置 AudioAttributes（CONTENT_TYPE_MOVIE + 杜比全景声支持标志），确保杜比全景声和音效增强自动应用
             //==========================
             //【稳定性】
             //==========================
@@ -836,13 +854,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           // ✅ 不在这里设置 _isBuffering = false
           // _isBuffering 由 buffering stream 控制，确保缓冲完成后才消失
         });
-        // ✅ 获取当前亮度和音量，并保存原始亮度
-        _getCurrentBrightness().then((_) {
-          if (_originalBrightness == null && _currentBrightness != null) {
-            _originalBrightness = _currentBrightness;
-          }
-        });
+        // ✅ 获取当前音量（亮度已在 initState 时保存）
         _getCurrentVolume();
+        
+        // ✅ 如果原始亮度还未保存（可能在 initState 时获取失败），再次尝试保存
+        // 注意：只在 _originalBrightness 为 null 时保存，避免覆盖已保存的原始值
+        if (_originalBrightness == null) {
+          _getCurrentBrightness().then((_) {
+            if (_originalBrightness == null && _currentBrightness != null) {
+              _originalBrightness = _currentBrightness;
+            }
+          });
+        }
       }
       _playerLog(
           '🎬 [Player] ✅ Ready to play, isPlaying: $_isPlaying, isBuffering: $_isBuffering');
@@ -893,10 +916,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     unawaited(_player.dispose());
     _speedTimer?.cancel();
 
-    // ✅ 恢复原始亮度
-    if (_originalBrightness != null) {
-      _setBrightness(_originalBrightness!);
+    // ✅ 恢复原始亮度（只有在保存了原始亮度时才恢复）
+    // 注意：在 dispose 前获取保存的原始亮度值，防止被修改
+    // TODO: 暂时注释掉，等待修复亮度恢复问题
+    /*
+    final brightnessToRestore = _originalBrightness;
+    if (brightnessToRestore != null) {
+      // 使用 unawaited，因为 dispose 不能是 async
+      unawaited(_setBrightness(brightnessToRestore));
     }
+    */
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -943,7 +972,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             .invokeMethod('setBrightness', {'brightness': brightness});
       }
     } catch (e) {
-      _playerLog('🎬 [Player] Failed to set brightness: $e');
+      _playerLog('❌ [Player] Failed to set brightness: $e');
     }
   }
 
@@ -960,7 +989,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         }
       }
     } catch (e) {
-      _playerLog('🎬 [Player] Failed to get brightness: $e');
+      _playerLog('❌ [Player] Failed to get brightness: $e');
     }
   }
 

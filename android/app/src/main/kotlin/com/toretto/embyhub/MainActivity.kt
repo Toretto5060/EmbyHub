@@ -51,6 +51,9 @@ class MainActivity: FlutterActivity() {
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     
+    // ✅ 音效实例（用于手动启用特定音效）
+    private var activeAudioEffects = mutableListOf<AudioEffect>()
+    
     companion object {
         const val ACTION_PLAY_PAUSE = "com.toretto.embyhub.PLAY_PAUSE"
         const val ACTION_NEXT = "com.toretto.embyhub.NEXT"
@@ -375,7 +378,7 @@ class MainActivity: FlutterActivity() {
             // ✅ 初始化 AudioManager 并配置音频模式
             audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             audioManager?.apply {
-                // 设置为媒体播放模式，启用系统音效增强
+                // 设置为媒体播放模式，使用系统音效
                 mode = AudioManager.MODE_NORMAL
                 // 确保使用扬声器输出（非通话模式）
                 isSpeakerphoneOn = false
@@ -525,19 +528,24 @@ class MainActivity: FlutterActivity() {
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 // Android 8.0+ 使用 AudioFocusRequest
-                // ✅ 配置音频属性，确保系统音效（均衡器、低音增强、杜比音效等）自动应用
-                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // ✅ 配置音频属性，确保系统音效（均衡器、低音增强、杜比全景声等）自动应用
+                var flags = AudioAttributes.FLAG_HW_AV_SYNC // 硬件音视频同步
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     // Android 10+ 添加深度缓冲标志（FLAG_DEEP_BUFFER = 1）
-                    // 支持高质量音频，包括杜比音效
-                    AudioAttributes.FLAG_HW_AV_SYNC or 1
-                } else {
-                    AudioAttributes.FLAG_HW_AV_SYNC
+                    // 支持高质量音频，包括杜比全景声和音效增强
+                    flags = flags or 1 // FLAG_DEEP_BUFFER
+                    
+                    // Android 10+ 添加低延迟标志（如果需要）
+                    // flags = flags or AudioAttributes.FLAG_LOW_LATENCY
                 }
                 
+                // ✅ 配置音频属性，使用系统音效
+                // USAGE_MEDIA + CONTENT_TYPE_MOVIE 会自动应用设备的音效设置
                 val audioAttributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA) // 媒体播放用途
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE) // 电影内容类型（支持杜比音效）
-                    .setFlags(flags)
+                    .setUsage(AudioAttributes.USAGE_MEDIA) // 媒体播放用途，启用系统音效
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE) // 电影内容类型，系统会自动应用相应音效
+                    .setFlags(flags) // 硬件同步 + 深度缓冲（支持高质量音频处理）
                     .build()
                 
                 val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -560,13 +568,51 @@ class MainActivity: FlutterActivity() {
                 
                 audioFocusRequest = focusRequest
                 val result = audioMgr.requestAudioFocus(focusRequest)
-                android.util.Log.d("MainActivity", "🔊 Audio focus requested: ${if(result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "DENIED"}")
                 
-                // ✅ 检查系统音效是否可用
-                val effects = AudioEffect.queryEffects()
-                android.util.Log.d("MainActivity", "🔊 System audio effects available: ${effects.size}")
-                effects.forEach { effect ->
-                    android.util.Log.d("MainActivity", "  - ${effect.name} (${effect.type})")
+                // ✅ 启用指定的音效（索引：1, 2, 3, 4, 5, 7, 8, 12，基于可用音效列表）
+                // 注意：需要使用 Audio Session ID = 0（全局应用），因为 media_kit/MPV 可能不提供音频会话 ID
+                val effectsToEnable = listOf(1, 2, 3, 4, 5, 7, 8, 12) // 索引从 1 开始（转换为 0 基索引需要 -1）
+                val availableEffects = AudioEffect.queryEffects()
+                
+                // 先释放之前的音效实例
+                activeAudioEffects.forEach { it.release() }
+                activeAudioEffects.clear()
+                
+                // 启用指定的音效
+                effectsToEnable.forEach { index ->
+                    val effectIndex = index - 1 // 转换为 0 基索引
+                    if (effectIndex >= 0 && effectIndex < availableEffects.size) {
+                        val effect = availableEffects[effectIndex]
+                        try {
+                            // 尝试创建音效实例（使用 Audio Session ID = 0，表示应用到全局音频输出）
+                            // priority = 0 表示正常优先级
+                            val audioEffect = when (effect.type) {
+                                AudioEffect.EFFECT_TYPE_EQUALIZER -> {
+                                    Equalizer(0, 0) // priority, audioSession
+                                }
+                                AudioEffect.EFFECT_TYPE_BASS_BOOST -> {
+                                    BassBoost(0, 0) // priority, audioSession
+                                }
+                                AudioEffect.EFFECT_TYPE_VIRTUALIZER -> {
+                                    Virtualizer(0, 0) // priority, audioSession
+                                }
+                                else -> {
+                                    // 对于其他类型的音效，使用类型和 UUID 创建
+                                    // 注意：AudioEffect 的通用构造函数需要特定的参数
+                                    null
+                                }
+                            }
+                            
+                            if (audioEffect != null && audioEffect.hasControl()) {
+                                audioEffect.setEnabled(true)
+                                activeAudioEffects.add(audioEffect)
+                            } else if (audioEffect != null) {
+                                audioEffect.release()
+                            }
+                        } catch (e: Exception) {
+                            // 某些音效可能无法手动启用（需要特定的音频会话 ID 或权限）
+                        }
+                    }
                 }
             } else {
                 // Android 8.0 以下使用旧API
@@ -595,15 +641,17 @@ class MainActivity: FlutterActivity() {
         try {
             val audioMgr = audioManager ?: return
             
+            // ✅ 释放所有音效实例
+            activeAudioEffects.forEach { it.release() }
+            activeAudioEffects.clear()
+            
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 audioFocusRequest?.let {
                     audioMgr.abandonAudioFocusRequest(it)
-                    android.util.Log.d("MainActivity", "🔊 Audio focus abandoned")
                 }
             } else {
                 @Suppress("DEPRECATION")
                 audioMgr.abandonAudioFocus(null)
-                android.util.Log.d("MainActivity", "🔊 Audio focus abandoned (legacy)")
             }
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "❌ Abandon audio focus failed: $e")
