@@ -571,53 +571,53 @@ class MainActivity: FlutterActivity() {
                     .build()
                 
                 audioFocusRequest = focusRequest
-                // val result = audioMgr.requestAudioFocus(focusRequest)
+                val result = audioMgr.requestAudioFocus(focusRequest)
                 
                 // ✅ 启用指定的音效（索引：1, 2, 3, 4, 5, 7, 8, 12，基于可用音效列表）
                 // 注意：需要使用 Audio Session ID = 0（全局应用），因为 media_kit/MPV 可能不提供音频会话 ID
-                // val effectsToEnable = listOf(1, 2, 3, 4, 5, 7, 8, 12) // 索引从 1 开始（转换为 0 基索引需要 -1）
-                // val availableEffects = AudioEffect.queryEffects()
+                val effectsToEnable = listOf(1, 2, 3, 4, 5, 7, 8, 12) // 索引从 1 开始（转换为 0 基索引需要 -1）
+                val availableEffects = AudioEffect.queryEffects()
                 
                 // 先释放之前的音效实例
-                // activeAudioEffects.forEach { it.release() }
-                // activeAudioEffects.clear()
+                activeAudioEffects.forEach { it.release() }
+                activeAudioEffects.clear()
                 
-                // 启用指定的音效
-                // effectsToEnable.forEach { index ->
-                //     val effectIndex = index - 1 // 转换为 0 基索引
-                //     if (effectIndex >= 0 && effectIndex < availableEffects.size) {
-                //         val effect = availableEffects[effectIndex]
-                //         try {
-                //             // 尝试创建音效实例（使用 Audio Session ID = 0，表示应用到全局音频输出）
-                //             // priority = 0 表示正常优先级
-                //             val audioEffect = when (effect.type) {
-                //                 AudioEffect.EFFECT_TYPE_EQUALIZER -> {
-                //                     Equalizer(0, 0) // priority, audioSession
-                //                 }
-                //                 AudioEffect.EFFECT_TYPE_BASS_BOOST -> {
-                //                     BassBoost(0, 0) // priority, audioSession
-                //                 }
-                //                 AudioEffect.EFFECT_TYPE_VIRTUALIZER -> {
-                //                     Virtualizer(0, 0) // priority, audioSession
-                //                 }
-                //                 else -> {
-                //                     // 对于其他类型的音效，使用类型和 UUID 创建
-                //                     // 注意：AudioEffect 的通用构造函数需要特定的参数
-                //                     null
-                //                 }
-                //             }
+                启用指定的音效
+                effectsToEnable.forEach { index ->
+                    val effectIndex = index - 1 // 转换为 0 基索引
+                    if (effectIndex >= 0 && effectIndex < availableEffects.size) {
+                        val effect = availableEffects[effectIndex]
+                        try {
+                            // 尝试创建音效实例（使用 Audio Session ID = 0，表示应用到全局音频输出）
+                            // priority = 0 表示正常优先级
+                            val audioEffect = when (effect.type) {
+                                AudioEffect.EFFECT_TYPE_EQUALIZER -> {
+                                    Equalizer(0, 0) // priority, audioSession
+                                }
+                                AudioEffect.EFFECT_TYPE_BASS_BOOST -> {
+                                    BassBoost(0, 0) // priority, audioSession
+                                }
+                                AudioEffect.EFFECT_TYPE_VIRTUALIZER -> {
+                                    Virtualizer(0, 0) // priority, audioSession
+                                }
+                                else -> {
+                                    // 对于其他类型的音效，使用类型和 UUID 创建
+                                    // 注意：AudioEffect 的通用构造函数需要特定的参数
+                                    null
+                                }
+                            }
                             
-                //             if (audioEffect != null && audioEffect.hasControl()) {
-                //                 audioEffect.setEnabled(true)
-                //                 activeAudioEffects.add(audioEffect)
-                //             } else if (audioEffect != null) {
-                //                 audioEffect.release()
-                //             }
-                //         } catch (e: Exception) {
-                //             // 某些音效可能无法手动启用（需要特定的音频会话 ID 或权限）
-                //         }
-                //     }
-                // }
+                            if (audioEffect != null && audioEffect.hasControl()) {
+                                audioEffect.setEnabled(true)
+                                activeAudioEffects.add(audioEffect)
+                            } else if (audioEffect != null) {
+                                audioEffect.release()
+                            }
+                        } catch (e: Exception) {
+                            // 某些音效可能无法手动启用（需要特定的音频会话 ID 或权限）
+                        }
+                    }
+                }
             } else {
                 // Android 8.0 以下使用旧API
                 @Suppress("DEPRECATION")

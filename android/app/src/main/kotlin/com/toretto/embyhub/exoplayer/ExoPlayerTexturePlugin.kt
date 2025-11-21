@@ -330,10 +330,13 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     private fun disposePlayer() {
-        player?.removeListener(playerListener)
-        player?.release()
+        val toRelease = player ?: return
         player = null
-        sendStateUpdate()
+        handler.post {
+            toRelease.removeListener(playerListener)
+            toRelease.release()
+            sendStateUpdate()
+        }
     }
 
     private fun sendStateUpdate() {

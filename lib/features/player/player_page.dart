@@ -606,8 +606,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       final resumeFromSavedPosition =
           _initialSeekPosition != null && _initialSeekPosition! > Duration.zero;
-      final initialStartPosition =
-          resumeFromSavedPosition ? _initialSeekPosition : null;
 
       _playerLogImportant(
           '🎬 [Player] resumeFromSavedPosition: $resumeFromSavedPosition, initialPosition: $_initialSeekPosition');
@@ -646,14 +644,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       );
       _playerLog('🎬 [Player] Cache config (ms): $cacheConfig');
 
+      // ✅ 修复：不传入 startPosition，改为播放器完全准备好后手动 seek
+      // 这样可以确保视频解码器有足够的缓冲数据，避免画面卡顿
       await _guardPlayerCommand(
         'open media',
         () => _player.open(
           url: media.uri,
           headers: media.headers,
           isHls: isHlsStream,
-          autoPlay: !resumeFromSavedPosition,
-          startPosition: initialStartPosition,
+          autoPlay: false, // ✅ 总是先不自动播放，等待初始化完成
+          startPosition: null, // ✅ 不在这里 seek，改为手动 seek
           cacheConfig: cacheConfig,
         ),
       );
@@ -678,16 +678,69 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         setState(() => _isPlaying = currentPlaying);
       }
 
-      if (initialStartPosition != null) {
-        await _playerPlay();
+      // ✅ 修复：如果需要 seek 到初始位置，先 seek 再播放
+      // 等待视频解码器缓冲足够的数据后再开始播放，避免画面卡顿
+      if (resumeFromSavedPosition && _initialSeekPosition != null) {
+        _playerLogImportant(
+            '🎬 [Player] Seeking to initial position: ${_initialSeekPosition!.inSeconds}s');
+        
+        // ✅ 先 seek 到目标位置（暂停状态）
+        await _playerSeek(_initialSeekPosition!, swallowErrors: false);
+        
+        // ✅ 1. 等待 position stream 确认已到达目标位置
+        try {
+          await _player.positionStream
+              .firstWhere((pos) =>
+                  (pos - _initialSeekPosition!).abs() < const Duration(seconds: 1))
+              .timeout(const Duration(seconds: 3));
+          _playerLogImportant('🎬 [Player] ✅ Position confirmed at target');
+        } catch (e) {
+          _playerLog('⚠️ [Player] Position confirmation timeout: $e');
+        }
+
+        // ✅ 2. 等待视频尺寸就绪（确保视频解码器已启动）
+        if (_videoSize.width <= 1 || _videoSize.height <= 1) {
+          try {
+            await _player.videoSizeStream
+                .firstWhere((size) => size.width > 1 && size.height > 1)
+                .timeout(const Duration(seconds: 3));
+            _playerLogImportant('🎬 [Player] ✅ Video decoder ready');
+          } catch (e) {
+            _playerLog('⚠️ [Player] Video size wait timeout: $e');
+          }
+        }
+
+        // ✅ 3. 等待缓冲足够的数据（至少3秒，给视频解码器足够时间）
+        try {
+          await _player.bufferStream
+              .firstWhere((buffer) =>
+                  buffer >= _initialSeekPosition! + const Duration(seconds: 3))
+              .timeout(const Duration(seconds: 8));
+          _playerLogImportant('🎬 [Player] ✅ Buffer ready after seek');
+        } catch (e) {
+          _playerLog('⚠️ [Player] Buffer wait timeout (continuing): $e');
+          // ✅ 超时也继续，避免无限等待
+        }
+
+        // ✅ 4. 额外等待一小段时间，让视频解码器完成第一帧解码
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        // ✅ 更新 UI 位置
         if (mounted) {
           setState(() {
-            _position = initialStartPosition;
+            _position = _initialSeekPosition!;
           });
         } else {
-          _position = initialStartPosition;
+          _position = _initialSeekPosition!;
         }
-        _lastReportedPosition = initialStartPosition;
+        _lastReportedPosition = _initialSeekPosition!;
+
+        // ✅ 开始播放
+        _playerLogImportant('🎬 [Player] Starting playback after initial seek');
+        await _playerPlay();
+      } else {
+        // ✅ 不需要 seek，直接开始播放
+        await _playerPlay();
       }
 
       if (mounted) {
@@ -1336,31 +1389,32 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required bool isHlsStream,
     required bool needExtraCache,
   }) {
-    // ✅ 为了“尽可能多缓冲”，整体将缓冲区大幅提高：
-    // - needExtraCache：允许最多缓存 30~60 分钟，但起播缓冲仍保持 2 分钟
+    // ✅ 优化缓冲配置，确保 seek 后有足够的缓冲时间避免画面卡顿：
+    // - bufferForPlaybackAfterRebufferMs 提高到 8-10 秒，确保 seek 后视频解码器有足够时间
+    // - needExtraCache：允许最多缓存 30~60 分钟，起播缓冲保持 2 分钟
     // - HLS：允许最多缓存 20~40 分钟，起播缓冲保持 90 秒
     // - 普通流：允许最多缓存 15~30 分钟，起播缓冲保持 60 秒
     if (needExtraCache) {
       return {
         'minBufferMs': 120000, // 2 分钟，避免 seek 后等待过长
         'maxBufferMs': 3600000, // 60 分钟
-        'bufferForPlaybackMs': 1500,
-        'bufferForPlaybackAfterRebufferMs': 6000,
+        'bufferForPlaybackMs': 1500, // 起播前最小缓冲
+        'bufferForPlaybackAfterRebufferMs': 10000, // ✅ seek后缓冲10秒，确保视频解码器准备好
       };
     }
     if (isHlsStream) {
       return {
         'minBufferMs': 90000, // 1.5 分钟
         'maxBufferMs': 2400000, // 40 分钟
-        'bufferForPlaybackMs': 1200,
-        'bufferForPlaybackAfterRebufferMs': 5000,
+        'bufferForPlaybackMs': 1200, // 起播前最小缓冲
+        'bufferForPlaybackAfterRebufferMs': 8000, // ✅ seek后缓冲8秒
       };
     }
     return {
       'minBufferMs': 60000, // 1 分钟
       'maxBufferMs': 1800000, // 30 分钟
-      'bufferForPlaybackMs': 800,
-      'bufferForPlaybackAfterRebufferMs': 4000,
+      'bufferForPlaybackMs': 800, // 起播前最小缓冲
+      'bufferForPlaybackAfterRebufferMs': 8000, // ✅ seek后缓冲8秒
     };
   }
 
@@ -1378,7 +1432,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (_isDraggingProgress || _suppressPositionUpdates) return;
 
     if (mounted) {
-      setState(() => _position = pos);
+      setState(() {
+        _position = pos;
+      });
     }
     _syncProgress(pos);
   }
@@ -1576,11 +1632,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               ),
 
               // ✅ 自定义字幕显示组件（中间层，在视频上方，UI控制层下方）
-              if (!_isInPipMode && _ready)
+              if (!_isInPipMode)
                 CustomSubtitleOverlay(
                   position: _position,
                   subtitleUrl: _subtitleUrl,
-                  isVisible: true, // 始终显示字幕（当有字幕时）
+                  isVisible: _ready,
                   showControls: _showControls, // ✅ 传递控制栏显示状态
                   isLocked: _isLocked, // ✅ 传递锁定状态
                 ),
@@ -2027,6 +2083,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return;
     }
     if (current != null && current >= 0 && current < _subtitleStreams.length) {
+      _updateSubtitleUrl();
       return;
     }
 
@@ -2043,6 +2100,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         setState(() {
           _selectedSubtitleStreamIndex = fallback;
         });
+        _updateSubtitleUrl();
       }
       return;
     }
@@ -2620,28 +2678,48 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
 
       if (subtitleIndex != null) {
-        // ✅ 获取所有可能的字幕 URL 格式
-        final urls = await _api!.buildSubtitleUrls(
-          itemId: widget.itemId,
-          subtitleStreamIndex: subtitleIndex,
-          mediaSourceId: _mediaSourceId,
-          format: 'vtt',
-        );
+        // ✅ 获取字幕 URL：优先尝试文本格式，如果是 PGSSUB 则直接使用图片流
+        final codec = subtitleStream['Codec']?.toString().toLowerCase() ?? '';
+        final urls = <String>[];
+
+        if (codec == 'pgssub' || codec == 'dvd_subtitle' || codec == 'dvdsub') {
+          // ✅ 图片字幕：直接获取原始流 URL（不指定 format）
+          _playerLog('🎬 [Player] Detected image subtitle codec: $codec');
+          urls.addAll(await _api!.buildSubtitleUrls(
+            itemId: widget.itemId,
+            subtitleStreamIndex: subtitleIndex,
+            mediaSourceId: _mediaSourceId,
+            // 不指定 format，让 Emby 返回原始图片流
+          ));
+        } else {
+          // ✅ 文本字幕：尝试多种格式
+          final formats = ['vtt', 'srt', 'ass'];
+          for (final fmt in formats) {
+            urls.addAll(await _api!.buildSubtitleUrls(
+              itemId: widget.itemId,
+              subtitleStreamIndex: subtitleIndex,
+              mediaSourceId: _mediaSourceId,
+              format: fmt,
+            ));
+          }
+        }
 
         _playerLog(
-            '🎬 [Player] Generated ${urls.length} subtitle URL variants for stream $subtitleIndex');
+            '🎬 [Player] Generated ${urls.length} subtitle URL variants for stream $subtitleIndex (codec=$codec)');
 
-        // ✅ 将所有 URL 传递给字幕组件，让它尝试每一个直到成功
-        if (mounted && urls.isNotEmpty) {
-          final combinedUrl = urls.join('|||');
+        final distinctUrls = urls.toSet().toList();
+
+        if (mounted && distinctUrls.isNotEmpty) {
+          final combinedUrl = distinctUrls.join('|||');
           final previewLength =
               combinedUrl.length > 120 ? 120 : combinedUrl.length;
           _playerLog(
               '🎬 [Player] Applying subtitle URL variants (preview: ${combinedUrl.substring(0, previewLength)})');
           setState(() {
-            // 使用特殊格式传递多个 URL，用 '|||' 分隔
             _subtitleUrl = combinedUrl;
           });
+          _playerLog(
+              '🎬 [Player] subtitleUrl set, urls=${distinctUrls.length}, length=${combinedUrl.length}');
         } else if (mounted) {
           _playerLog('❌ [Player] No subtitle URL variants generated');
           setState(() {
@@ -2663,7 +2741,32 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _subtitleUrl = null;
         });
       }
+      _playerLog('❌ [Player] subtitleUrl cleared due to error');
     }
+  }
+
+  bool _isTextSubtitleCodec(String? codec) {
+    if (codec == null) return false;
+    const textCodecs = {
+      'srt',
+      'ass',
+      'ssa',
+      'webvtt',
+      'vtt',
+      'subrip',
+      'subriptext',
+      'subviewer',
+      'microdvd',
+      'substationalpha',
+      'advancedsubstationalpha',
+      'idx',
+      'smil',
+      'usf',
+      'ttml',
+      'dfxp',
+      'pgssub_text',
+    };
+    return textCodecs.contains(codec.toLowerCase());
   }
 
   Future<void> _guardPlayerCommand(
