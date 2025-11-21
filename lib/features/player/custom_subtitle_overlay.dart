@@ -16,7 +16,6 @@ import 'package:http/http.dart' as http;
 /// 4. 自动检测seek操作，重置缓存确保准确性
 /// 5. HLS时间偏移自动检测和修正，解决HLS流时间戳不一致问题
 /// 6. 减少不必要的日志输出，避免影响性能
-library;
 
 /// ✅ 字幕条目，支持文本和图片字幕
 class SubtitleEntry {

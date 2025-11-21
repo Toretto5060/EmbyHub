@@ -582,7 +582,7 @@ class MainActivity: FlutterActivity() {
                 activeAudioEffects.forEach { it.release() }
                 activeAudioEffects.clear()
                 
-                启用指定的音效
+                // 启用指定的音效
                 effectsToEnable.forEach { index ->
                     val effectIndex = index - 1 // 转换为 0 基索引
                     if (effectIndex >= 0 && effectIndex < availableEffects.size) {
