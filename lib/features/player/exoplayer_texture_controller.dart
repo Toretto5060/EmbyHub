@@ -21,6 +21,7 @@ class ExoPlayerTextureController {
   StreamController<bool>? _readyController;
   StreamController<String>? _errorController;
   StreamController<Size>? _videoSizeController;
+  StreamController<double>? _networkSpeedController; // ✅ 网络速度流 (bps)
 
   StreamSubscription<dynamic>? _eventSubscription;
   Completer<void>? _readyCompleter;
@@ -146,6 +147,8 @@ class ExoPlayerTextureController {
     _errorController = null;
     await _closeController(_videoSizeController);
     _videoSizeController = null;
+    await _closeController(_networkSpeedController);
+    _networkSpeedController = null;
     _activeStreamCount = 0;
   }
 
@@ -200,6 +203,12 @@ class ExoPlayerTextureController {
   Stream<Size> get videoSizeStream => _getStream<Size>(
         () => _videoSizeController,
         (controller) => _videoSizeController = controller,
+      );
+
+  /// 网络速度流（dispose 后不要再监听）。单位：bps (bits per second)
+  Stream<double> get networkSpeedStream => _getStream<double>(
+        () => _networkSpeedController,
+        (controller) => _networkSpeedController = controller,
       );
 
   void _handleEvent(dynamic event) {
@@ -259,6 +268,13 @@ class ExoPlayerTextureController {
           _readyCompleter!.complete();
           _finishReadyWait();
         }
+
+        // ✅ 处理网络速度数据
+        final networkSpeedBps = _asDouble(map, 'networkSpeedBps');
+        if (networkSpeedBps != null && networkSpeedBps > 0) {
+          _addEvent(_networkSpeedController, networkSpeedBps);
+        }
+
         _debugLog(
             'State => buffering=$buffering, playing=$playing, ready=$ready');
         break;

@@ -1,6 +1,7 @@
 package com.toretto.embyhub.exoplayer
 
 import android.content.Context
+import android.net.TrafficStats
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
@@ -38,6 +39,11 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var eventSink: EventChannel.EventSink? = null
     private var renderersFactory: DefaultRenderersFactory? = null
     private val handler = Handler(Looper.getMainLooper())
+
+    // ✅ 网络速度计算相关变量（使用系统 TrafficStats）
+    private var lastTotalRxBytes: Long = 0
+    private var lastSpeedUpdateTime: Long = 0
+    private var currentNetworkSpeedBps: Long = 0
 
     private val progressRunnable = object : Runnable {
         override fun run() {
@@ -345,14 +351,40 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val duration = if (player.duration == C.TIME_UNSET) -1 else player.duration
         val position = max(0L, player.currentPosition)
         val buffered = max(position, player.bufferedPosition)
+        
+        // ✅ 使用系统 TrafficStats 计算真实网络速度（与状态栏一致）
+        val isBuffering = player.playbackState == Player.STATE_BUFFERING
+        val currentTime = System.currentTimeMillis()
+        
+        // ✅ 每秒更新一次网络速度
+        if (currentTime - lastSpeedUpdateTime >= 1000) {
+            val currentRxBytes = TrafficStats.getTotalRxBytes()
+            
+            if (lastTotalRxBytes > 0 && currentRxBytes > lastTotalRxBytes) {
+                // ✅ 计算 1 秒内接收的字节数
+                val bytesReceived = currentRxBytes - lastTotalRxBytes
+                val timeDiffSeconds = (currentTime - lastSpeedUpdateTime) / 1000.0
+                
+                // ✅ 转换为 bps (bits per second)
+                currentNetworkSpeedBps = ((bytesReceived * 8) / timeDiffSeconds).toLong()
+            }
+            
+            lastTotalRxBytes = currentRxBytes
+            lastSpeedUpdateTime = currentTime
+        }
+        
+        // ✅ 不在缓冲时，不显示速度（设为 0）
+        val networkSpeed = if (isBuffering) currentNetworkSpeedBps else 0L
+        
         val state = hashMapOf(
             "event" to "state",
             "position_ms" to position,
             "duration_ms" to duration,
             "buffered_ms" to buffered,
-            "isBuffering" to (player.playbackState == Player.STATE_BUFFERING),
+            "isBuffering" to isBuffering,
             "isPlaying" to player.isPlaying,
-            "isReady" to (player.playbackState == Player.STATE_READY)
+            "isReady" to (player.playbackState == Player.STATE_READY),
+            "networkSpeedBps" to networkSpeed
         )
         sink.success(state)
     }

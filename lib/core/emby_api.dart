@@ -1415,6 +1415,10 @@ class EmbyApi {
       'MediaSourceId': mediaSourceId,
       'PlaySessionId': playSessionId,
       'api_key': token,
+      // ✅ 强制音频转码参数，确保 AC3/DTS/TrueHD 等格式能正常播放
+      'AudioCodec': 'aac',  // 转码为 AAC（所有设备都支持）
+      'TranscodingMaxAudioChannels': '2',  // 转为立体声（避免多声道问题）
+      'EnableAutoStreamCopy': 'false',  // 禁用直接复制，强制转码
     };
 
     // ✅ 添加音频流索引（如果指定）

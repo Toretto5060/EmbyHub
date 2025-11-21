@@ -73,6 +73,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   StreamSubscription<bool>? _readySub;
   StreamSubscription<Size>? _videoSizeSub;
   StreamSubscription<String>? _errorSub;
+  StreamSubscription<double>? _networkSpeedSub; // ✅ 网络速度订阅
   Future<void>? _seekChain;
   bool _isLandscape = true; // ✅ 默认横屏
   bool _isBuffering = true;
@@ -88,7 +89,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _completedReported = false;
   bool _progressSyncUnavailableLogged = false;
   // ✅ 移除 _refreshTicker，改为在页面生命周期时手动刷新
-  Timer? _speedTimer;
 
   // ✅ 控制栏显示/隐藏（初始隐藏，点击屏幕显示）
   bool _showControls = false;
@@ -253,26 +253,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     // ✅ 添加应用生命周期监听
     WidgetsBinding.instance.addObserver(this);
 
-    // ✅ 定时更新缓冲时的速度显示，添加波动模拟真实网络速度
-    // 注意：Flutter/media_kit 不提供实时网络速度 API，
-    // 我们在视频比特率基础上添加合理的波动来模拟真实速度变化
-    _speedTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-      if (!mounted) return;
-      setState(() {
-        // ✅ 只在缓冲时显示速度
-        final buffering = _isBuffering;
-
-        if (_expectedBitrateKbps != null && buffering) {
-          // ✅ 添加 85%-115% 的随机波动模拟真实网络速度
-          // 使用 DateTime.now().millisecond 作为随机源
-          final seed = DateTime.now().millisecondsSinceEpoch % 1000;
-          final variance = 0.85 + (seed % 300) / 1000.0; // 0.85 - 1.15
-          _currentSpeedKbps = _expectedBitrateKbps! * variance;
-        } else {
-          _currentSpeedKbps = null;
-        }
-      });
-    });
+    // ✅ 网络速度现在通过 ExoPlayer 的 networkSpeedStream 实时获取
+    // 不再需要模拟速度，移除 _speedTimer
 
     // ✅ 监听 PiP 控制按钮的回调
     _pip.setMethodCallHandler((call) async {
@@ -469,6 +451,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         setState(() => _videoSize = size);
       }
     });
+
+    _networkSpeedSub?.cancel();
+    _networkSpeedSub = _player.networkSpeedStream.listen((speedBps) {
+      if (mounted && _isBuffering) {
+        // ✅ 将 bps 转换为 kbps
+        final speedKbps = speedBps / 1000;
+        setState(() {
+          _currentSpeedKbps = speedKbps;
+        });
+      }
+    });
   }
 
   // ✅ 保存音频和字幕选择
@@ -654,11 +647,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _updateSubtitleUrl();
       }
 
-      // ✅ 构建 HLS URL，传入选中的音频和字幕流索引
+      // ✅ 构建 HLS URL
+      // 注意：对于 HLS 流，Emby 会自动处理音频和字幕选择
+      // 只有在用户手动选择时才传递参数，否则让 Emby 自动选择
       final media = await api.buildHlsUrl(
         widget.itemId,
-        audioStreamIndex: _selectedAudioStreamIndex,
-        subtitleStreamIndex: _selectedSubtitleStreamIndex,
+        audioStreamIndex: _hasManuallySelectedAudio ? _selectedAudioStreamIndex : null,
+        subtitleStreamIndex: _hasManuallySelectedSubtitle ? _selectedSubtitleStreamIndex : null,
       );
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
       _playerLog('🎬 [Player] Video Title: $_videoTitle');
@@ -898,6 +893,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _readySub?.cancel();
     _videoSizeSub?.cancel();
     _errorSub?.cancel();
+    _networkSpeedSub?.cancel(); // ✅ 取消网络速度订阅
     _hideControlsTimer?.cancel();
     _videoFitHintTimer?.cancel(); // ✅ 取消视频裁切模式提示计时器
     _longPressTimer?.cancel(); // ✅ 取消长按定时器
@@ -926,7 +922,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     // ✅ 退出时确保保存字幕和音频选择（不等待，后台执行）
     unawaited(_saveStreamSelections());
     unawaited(_player.dispose());
-    _speedTimer?.cancel();
 
     // ✅ 恢复原始亮度（只有在保存了原始亮度时才恢复）
     // 注意：在 dispose 前获取保存的原始亮度值，防止被修改
