@@ -11,6 +11,8 @@ import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.PlaybackParameters
 import com.google.android.exoplayer2.Player
+import com.google.android.exoplayer2.DefaultRenderersFactory
+import com.google.android.exoplayer2.RenderersFactory
 import com.google.android.exoplayer2.audio.AudioAttributes
 import com.google.android.exoplayer2.source.DefaultMediaSourceFactory
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector
@@ -34,6 +36,7 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var player: ExoPlayer? = null
     private var trackSelector: DefaultTrackSelector? = null
     private var eventSink: EventChannel.EventSink? = null
+    private var renderersFactory: DefaultRenderersFactory? = null
     private val handler = Handler(Looper.getMainLooper())
 
     private val progressRunnable = object : Runnable {
@@ -107,6 +110,7 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         surface = null
         textureEntry = null
         eventSink = null
+        renderersFactory = null
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -213,7 +217,8 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
         }
 
-        val builder = ExoPlayer.Builder(ctx).setTrackSelector(trackSelector!!)
+        val builder = ExoPlayer.Builder(ctx, obtainRenderersFactory(ctx))
+            .setTrackSelector(trackSelector!!)
         if (loadControl != null) {
             builder.setLoadControl(loadControl)
         }
@@ -234,6 +239,18 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         exoPlayer.addListener(playerListener)
         player = exoPlayer
         sendStateUpdate()
+    }
+
+    private fun obtainRenderersFactory(ctx: Context): RenderersFactory {
+        val existing = renderersFactory
+        if (existing != null) {
+            return existing
+        }
+        val factory = DefaultRenderersFactory(ctx)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+            .setEnableDecoderFallback(true)
+        renderersFactory = factory
+        return factory
     }
 
     private fun openMedia(

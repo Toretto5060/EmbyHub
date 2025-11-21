@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/emby_api.dart';
@@ -27,7 +26,9 @@ void _playerLog(String message) {
 }
 
 // 重要日志，总是输出
-void _playerLogImportant(String message) {}
+void _playerLogImportant(String message) {
+  debugPrint('[Player][Important] $message');
+}
 
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({
@@ -59,6 +60,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     2.0,
     3.0
   ];
+  static const Duration _playerReadyTimeout = Duration(seconds: 30);
   // ✅ 显示速度列表的状态
   bool _showSpeedList = false;
   Duration _position = Duration.zero;
@@ -71,10 +73,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   StreamSubscription<bool>? _readySub;
   StreamSubscription<Size>? _videoSizeSub;
   StreamSubscription<String>? _errorSub;
+  Future<void>? _seekChain;
   bool _isLandscape = true; // ✅ 默认横屏
   bool _isBuffering = true;
   bool _isPlaying = false; // ✅ 添加播放状态
-  bool _isHlsStream = false; // ✅ 是否为 HLS (m3u8) 流
   Duration _bufferPosition = Duration.zero; // ✅ 实时缓冲进度
   double? _expectedBitrateKbps;
   double? _currentSpeedKbps;
@@ -84,6 +86,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   DateTime _lastProgressSync = DateTime.fromMillisecondsSinceEpoch(0);
   Duration _lastReportedPosition = Duration.zero;
   bool _completedReported = false;
+  bool _progressSyncUnavailableLogged = false;
   // ✅ 移除 _refreshTicker，改为在页面生命周期时手动刷新
   Timer? _speedTimer;
 
@@ -101,6 +104,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Timer? _longPressTimer; // 长按定时器（用于倒退时的定时更新）
   Timer? _speedAccelerationTimer; // ✅ 倍速加速定时器（用于平滑加速到3倍速）
   DateTime? _longPressStartTime; // ✅ 长按开始时间（用于显示按住时长）
+  bool _suppressPositionUpdates = false; // ✅ 长按seek时抑制位置更新
 
   // ✅ 视频画面裁切模式
   BoxFit _videoFit = BoxFit.contain; // contain(原始), cover(覆盖), fill(填充)
@@ -111,6 +115,48 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ 进度条拖动状态
   bool _isDraggingProgress = false;
   Duration? _draggingPosition;
+  bool _wasPlayingBeforeDrag = false;
+  Future<void> _performSeek(
+    Duration target, {
+    bool resumeAfterSeek = true,
+    bool forcePlayAfterSeek = false,
+  }) {
+    _seekChain ??= Future.value();
+    return _seekChain = _seekChain!.then((_) async {
+      _playerLogImportant(
+          '🎬 [Player] 🔁 Seek requested to ${target.inSeconds}s (resume: $resumeAfterSeek)');
+      final wasPlaying = _isPlaying;
+      if (wasPlaying) {
+        await _playerPause();
+        _playerLogImportant('🎬 [Player] 🔁 Paused for seek');
+      }
+      await _playerSeek(target);
+      _lastReportedPosition = target;
+      if (mounted) {
+        setState(() {
+          _position = target;
+        });
+      }
+
+      // 等待 positionStream 确认落在目标附近（误差 <1 秒）
+      try {
+        await _player.positionStream
+            .firstWhere(
+                (pos) => (pos - target).abs() < const Duration(seconds: 1))
+            .timeout(const Duration(seconds: 3));
+      } catch (_) {}
+
+      final shouldResume = forcePlayAfterSeek || resumeAfterSeek;
+      if (shouldResume) {
+        await _playerPlay();
+        _playerLogImportant('🎬 [Player] 🔁 Seek done, resumed playback');
+      } else {
+        _playerLogImportant('🎬 [Player] 🔁 Seek done, remain paused');
+      }
+    }).whenComplete(() {
+      _seekChain = null;
+    });
+  }
 
   // ✅ 亮度/音量控制状态
   bool _isAdjustingBrightness = false; // ✅ 是否正在调整亮度
@@ -238,10 +284,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _playerLog(
               '🎬 [Player] PiP toggle play/pause, current playing: $playing');
           if (playing) {
-            await _player.pause();
+            await _playerPause();
             _playerLog('🎬 [Player] Paused from PiP control');
           } else {
-            await _player.play();
+            await _playerPlay();
             _playerLog('🎬 [Player] Playing from PiP control');
           }
 
@@ -272,17 +318,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
 
     _loadStreamSelections();
-    _load();
   }
 
   /// ✅ 禁用字幕显示（在创建播放器后立即调用）
   Future<void> _disableSubtitle() async {
-    try {
-      await _player.disableSubtitles();
-      _playerLog('🎬 [Player] Subtitle disabled via ExoPlayer plugin');
-    } catch (e) {
-      _playerLog('❌ [Player] Failed to disable subtitle: $e');
-    }
+    await _guardPlayerCommand(
+      'disable subtitles',
+      () async {
+        await _player.disableSubtitles();
+        _playerLog('🎬 [Player] Subtitle disabled via ExoPlayer plugin');
+      },
+      swallowErrors: true,
+    );
   }
 
   /// ✅ 加载保存的音频和字幕选择
@@ -313,13 +360,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   Future<void> _initializeExoPlayer() async {
     try {
-      final textureId = await _player.initialize();
+      final textureId = await _guardPlayerRequest<int>(
+        'initialize ExoPlayer',
+        () => _player.initialize(),
+      );
+      if (textureId == null) return;
       if (!mounted) return;
       setState(() {
         _textureId = textureId;
       });
       _attachPlayerStreams();
-      await _player.disableSubtitles();
+      await _disableSubtitle();
       await _load();
     } catch (e, stack) {
       _playerLog('❌ [Player] Initialize ExoPlayer failed: $e');
@@ -343,13 +394,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _bufferSub = _player.bufferStream.listen((buffer) {
       if (mounted) {
         _bufferPosition = buffer;
+        final bufferSeconds = buffer.inSeconds;
+        final positionSeconds = _position.inSeconds;
+        final bufferedAhead = (buffer - _position).inSeconds;
+        _playerLog(
+            '🎬 [Player] Buffer updated: ${bufferSeconds}s, position: ${positionSeconds}s, buffered ahead: ${bufferedAhead}s');
         setState(() {});
       }
     });
 
     _bufferingSub?.cancel();
     _bufferingSub = _player.bufferingStream.listen((isBuffering) {
-      _playerLog('🎬 [Player] Buffering状态变化: $isBuffering');
+      final bufferSeconds = _bufferPosition.inSeconds;
+      final positionSeconds = _position.inSeconds;
+      final bufferedAhead = (_bufferPosition - _position).inSeconds;
+      _playerLog(
+          '🎬 [Player] Buffering状态变化: $isBuffering, buffer: ${bufferSeconds}s, position: ${positionSeconds}s, buffered ahead: ${bufferedAhead}s');
       if (!mounted) return;
       setState(() => _isBuffering = isBuffering);
     });
@@ -522,7 +582,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       final prefs = await SharedPreferences.getInstance();
       _speed = prefs.getDouble('playback_speed') ?? 1.0;
-      await _player.setRate(_speed);
+      await _playerSetRate(_speed);
 
       // ✅ 读取保存的视频裁切模式
       final videoFitString = prefs.getString('video_fit') ?? 'contain';
@@ -546,6 +606,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       final resumeFromSavedPosition =
           _initialSeekPosition != null && _initialSeekPosition! > Duration.zero;
+      final initialStartPosition =
+          resumeFromSavedPosition ? _initialSeekPosition : null;
 
       _playerLogImportant(
           '🎬 [Player] resumeFromSavedPosition: $resumeFromSavedPosition, initialPosition: $_initialSeekPosition');
@@ -556,11 +618,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // ✅ 检测是否为 HLS 流
       final isHlsStream =
           media.uri.contains('.m3u8') || media.uri.contains('hls');
-      if (mounted) {
-        setState(() {
-          _isHlsStream = isHlsStream;
-        });
-      }
       _playerLog('🎬 [Player] Is HLS stream: $isHlsStream');
       _playerLog('🎬 [Player] Media URI: ${media.uri}');
       _playerLog(
@@ -589,21 +646,24 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       );
       _playerLog('🎬 [Player] Cache config (ms): $cacheConfig');
 
-      await _player.open(
-        url: media.uri,
-        headers: media.headers,
-        isHls: isHlsStream,
-        autoPlay: true,
-        startPosition: _initialSeekPosition,
-        cacheConfig: cacheConfig,
+      await _guardPlayerCommand(
+        'open media',
+        () => _player.open(
+          url: media.uri,
+          headers: media.headers,
+          isHls: isHlsStream,
+          autoPlay: !resumeFromSavedPosition,
+          startPosition: initialStartPosition,
+          cacheConfig: cacheConfig,
+        ),
       );
 
-      await _player.waitUntilReady();
+      await _waitForPlayerReady();
 
       // ✅ 在 open 之后再次确保字幕被禁用
       await _disableSubtitle();
 
-      await _player.setVolume(100.0);
+      await _playerSetVolume(100.0);
       _currentVolume = 100.0; // ✅ 保存当前音量
       _playerLog('🎬 [Player] Volume set to 100%');
 
@@ -618,10 +678,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         setState(() => _isPlaying = currentPlaying);
       }
 
-      if (_initialSeekPosition != null) {
-        _lastReportedPosition = _initialSeekPosition!;
-        _playerLogImportant(
-            '🎬 [Player] ✅ Playback will start from ${_initialSeekPosition!.inSeconds}s via startPosition');
+      if (initialStartPosition != null) {
+        await _playerPlay();
+        if (mounted) {
+          setState(() {
+            _position = initialStartPosition;
+          });
+        } else {
+          _position = initialStartPosition;
+        }
+        _lastReportedPosition = initialStartPosition;
       }
 
       if (mounted) {
@@ -732,7 +798,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Future<void> _changeSpeed(double v) async {
     _playerLog('🎬 [Player] Changing playback speed to: ${v}x');
     setState(() => _speed = v);
-    await _player.setRate(v);
+    await _playerSetRate(v);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('playback_speed', v);
     _playerLog('🎬 [Player] ✅ Playback speed changed to: ${v}x');
@@ -751,6 +817,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         await platform
             .invokeMethod('setBrightness', {'brightness': brightness});
       }
+    } on PlatformException catch (e) {
+      _playerLog(
+          '❌ [Player] Failed to set brightness (code: ${e.code}): ${e.message}');
     } catch (e) {
       _playerLog('❌ [Player] Failed to set brightness: $e');
     }
@@ -768,6 +837,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           });
         }
       }
+    } on PlatformException catch (e) {
+      _playerLog(
+          '❌ [Player] Failed to get brightness (code: ${e.code}): ${e.message}');
     } catch (e) {
       _playerLog('❌ [Player] Failed to get brightness: $e');
     }
@@ -793,6 +865,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           });
         }
       }
+    } on PlatformException catch (e) {
+      _playerLog(
+          '❌ [Player] Failed to get volume (code: ${e.code}): ${e.message}');
     } catch (e) {
       _playerLog('🎬 [Player] Failed to get volume: $e');
     }
@@ -805,6 +880,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         const platform = MethodChannel('com.embyhub/brightness');
         await platform.invokeMethod('setVolume', {'volume': volume});
       }
+    } on PlatformException catch (e) {
+      _playerLog(
+          '❌ [Player] Failed to set volume (code: ${e.code}): ${e.message}');
     } catch (e) {
       _playerLog('🎬 [Player] Failed to set volume: $e');
     }
@@ -831,6 +909,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ 停止长按
   void _stopLongPress() async {
     _longPressTimer?.cancel();
+    _suppressPositionUpdates = false;
 
     if (_isLongPressingForward || _isLongPressingRewind) {
       final originalSpeed = _originalSpeed;
@@ -847,6 +926,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       if (originalSpeed != null) {
         _restoreSpeed(originalSpeed);
       }
+    }
+  }
+
+  void _applyTransientSpeed(double targetSpeed) {
+    unawaited(_playerSetRate(
+      targetSpeed,
+      swallowErrors: true,
+      action: 'set transient playback speed',
+    ));
+    if (mounted) {
+      setState(() {
+        _speed = targetSpeed;
+      });
+    } else {
+      _speed = targetSpeed;
     }
   }
 
@@ -871,9 +965,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final currentSpeed = startSpeed + (speedStep * step);
       final clampedSpeed = currentSpeed.clamp(startSpeed, targetSpeed);
 
-      // ✅ 更新倍速（不触发 setState，直接调用 _changeSpeed）
-      _player.setRate(clampedSpeed);
-      _speed = clampedSpeed;
+      // ✅ 更新倍速（临时设置，不写入偏好）
+      _applyTransientSpeed(clampedSpeed);
 
       // ✅ 如果达到目标倍速，停止定时器
       if (clampedSpeed >= targetSpeed) {
@@ -903,9 +996,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final currentSpeed = startSpeed + (speedStep * step);
       final clampedSpeed = currentSpeed.clamp(targetSpeed, startSpeed);
 
-      // ✅ 更新倍速（不触发 setState，直接调用 _changeSpeed）
-      _player.setRate(clampedSpeed);
-      _speed = clampedSpeed;
+      // ✅ 更新倍速（临时设置，不写入偏好）
+      _applyTransientSpeed(clampedSpeed);
 
       // ✅ 如果达到目标倍速，停止定时器
       if (clampedSpeed <= targetSpeed) {
@@ -936,14 +1028,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           ? currentSpeed.clamp(startSpeed, targetSpeed)
           : currentSpeed.clamp(targetSpeed, startSpeed);
 
-      // ✅ 更新倍速（不触发 setState，直接调用 _changeSpeed）
-      _player.setRate(clampedSpeed);
-      _speed = clampedSpeed;
+      // ✅ 更新倍速（临时设置，不写入偏好）
+      _applyTransientSpeed(clampedSpeed);
 
       // ✅ 如果达到目标倍速，停止定时器
       if ((startSpeed < targetSpeed && clampedSpeed >= targetSpeed) ||
           (startSpeed > targetSpeed && clampedSpeed <= targetSpeed)) {
         timer.cancel();
+        unawaited(_changeSpeed(targetSpeed));
       }
     });
   }
@@ -952,6 +1044,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   void _startRewindTimer() {
     _longPressTimer?.cancel();
     bool _isSeeking = false; // ✅ 防止并发 seek
+    _suppressPositionUpdates = true;
     _longPressTimer =
         Timer.periodic(const Duration(milliseconds: 100), (timer) async {
       if (!_isLongPressingRewind || !mounted || _isSeeking) {
@@ -969,13 +1062,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             newPosition < Duration.zero ? Duration.zero : newPosition;
 
         // ✅ seek 到目标位置（倍速已降到0.1，画面会实时更新）
-        await _player.seek(targetPosition);
+        await _playerSeek(
+          targetPosition,
+          swallowErrors: true,
+        );
 
         if (mounted) {
           setState(() {
             _position = targetPosition;
           });
         }
+      } catch (e) {
+        _playerLog('❌ [Player] Long-press rewind seek failed: $e');
+        timer.cancel();
       } finally {
         _isSeeking = false;
       }
@@ -1237,25 +1336,29 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required bool isHlsStream,
     required bool needExtraCache,
   }) {
+    // ✅ 为了“尽可能多缓冲”，整体将缓冲区大幅提高：
+    // - needExtraCache：允许最多缓存 30~60 分钟，但起播缓冲仍保持 2 分钟
+    // - HLS：允许最多缓存 20~40 分钟，起播缓冲保持 90 秒
+    // - 普通流：允许最多缓存 15~30 分钟，起播缓冲保持 60 秒
     if (needExtraCache) {
       return {
-        'minBufferMs': 180000,
-        'maxBufferMs': 360000,
+        'minBufferMs': 120000, // 2 分钟，避免 seek 后等待过长
+        'maxBufferMs': 3600000, // 60 分钟
         'bufferForPlaybackMs': 1500,
-        'bufferForPlaybackAfterRebufferMs': 8000,
+        'bufferForPlaybackAfterRebufferMs': 6000,
       };
     }
     if (isHlsStream) {
       return {
-        'minBufferMs': 90000,
-        'maxBufferMs': 180000,
+        'minBufferMs': 90000, // 1.5 分钟
+        'maxBufferMs': 2400000, // 40 分钟
         'bufferForPlaybackMs': 1200,
-        'bufferForPlaybackAfterRebufferMs': 6000,
+        'bufferForPlaybackAfterRebufferMs': 5000,
       };
     }
     return {
-      'minBufferMs': 60000,
-      'maxBufferMs': 120000,
+      'minBufferMs': 60000, // 1 分钟
+      'maxBufferMs': 1800000, // 30 分钟
       'bufferForPlaybackMs': 800,
       'bufferForPlaybackAfterRebufferMs': 4000,
     };
@@ -1272,7 +1375,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   void _handlePositionUpdate(Duration pos) {
     // ✅ 拖动期间忽略位置更新，避免闪烁
-    if (_isDraggingProgress) return;
+    if (_isDraggingProgress || _suppressPositionUpdates) return;
 
     if (mounted) {
       setState(() => _position = pos);
@@ -1314,15 +1417,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   // ✅ 开始自动隐藏控制栏的计时器
   void _startHideControlsTimer() {
-    // ✅ 如果速度列表正在显示，不启动隐藏计时器
-    // 注意：锁定时也允许自动隐藏（锁定按钮会跟随隐藏）
-    if (_showSpeedList) return;
+    // ✅ 如果速度列表正在显示或已锁定，不启动隐藏计时器，避免无法解锁
+    if (_showSpeedList || _isLocked) return;
 
     _cancelHideControlsTimer();
     _hideControlsTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted && _showControls && _isPlaying && !_showSpeedList) {
-        // ✅ 锁定时也允许自动隐藏，锁定按钮会跟随控制栏隐藏
-
+      if (mounted &&
+          _showControls &&
+          _isPlaying &&
+          !_showSpeedList &&
+          !_isLocked) {
         _controlsAnimationController.reverse();
         // ✅ 自动隐藏时也隐藏状态栏
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -1356,8 +1460,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   void _syncProgress(Duration pos,
       {bool force = false, bool markComplete = false}) {
     if (_api == null || _userId == null) {
+      if (!_progressSyncUnavailableLogged) {
+        _playerLog(
+            '⚠️ [Player] Skip progress sync: api=${_api != null}, user=$_userId');
+        _progressSyncUnavailableLogged = true;
+      }
       return;
     }
+    _progressSyncUnavailableLogged = false;
     final now = DateTime.now();
     final bool completed =
         markComplete || (_duration > Duration.zero && pos >= _duration * 0.95);
@@ -1437,7 +1547,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               Positioned.fill(
                 child: _ready && _textureId != null
                     ? Opacity(
-                        // opacity: _isInitialSeeking ? 0.0 : 1.0,
                         opacity: 1.0,
                         child: IgnorePointer(
                           child: LayoutBuilder(
@@ -1720,9 +1829,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     final playing = _isPlaying;
                     // ✅ 只调用播放器方法，状态由 stream 监听更新
                     if (playing) {
-                      await _player.pause();
+                      await _playerPause();
                     } else {
-                      await _player.play();
+                      await _playerPlay();
                     }
                     _resetHideControlsTimer();
                   },
@@ -1735,6 +1844,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   onDragStart: () {
                     setState(() {
                       _isDraggingProgress = true;
+                      _wasPlayingBeforeDrag = _isPlaying;
                     });
                     _cancelHideControlsTimer();
                   },
@@ -1744,15 +1854,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     });
                   },
                   onDragEnd: (d) async {
+                    final shouldResume = _wasPlayingBeforeDrag;
                     setState(() {
-                      _position = d;
                       _draggingPosition = null;
                     });
-                    await _player.seek(d);
-                    await Future.delayed(const Duration(milliseconds: 100));
+                    await _performSeek(d, resumeAfterSeek: shouldResume);
                     if (mounted) {
                       setState(() {
                         _isDraggingProgress = false;
+                        _wasPlayingBeforeDrag = false;
                       });
                     }
                     _resetHideControlsTimer();
@@ -1788,26 +1898,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     }
                   },
                   onRewind: () async {
-                    // ✅ 快退10秒
+                    final shouldResume = _isPlaying;
                     final newPosition = _position - const Duration(seconds: 10);
                     final targetPosition = newPosition < Duration.zero
                         ? Duration.zero
                         : newPosition;
-                    await _player.seek(targetPosition);
-                    setState(() {
-                      _position = targetPosition;
-                    });
+                    await _performSeek(targetPosition,
+                        resumeAfterSeek: shouldResume);
                     _resetHideControlsTimer();
                   },
                   onForward: () async {
-                    // ✅ 快进20秒
+                    final shouldResume = _isPlaying;
                     final newPosition = _position + const Duration(seconds: 20);
                     final targetPosition =
                         newPosition > _duration ? _duration : newPosition;
-                    await _player.seek(targetPosition);
-                    setState(() {
-                      _position = targetPosition;
-                    });
+                    await _performSeek(targetPosition,
+                        resumeAfterSeek: shouldResume);
                     _resetHideControlsTimer();
                   },
                   isLongPressingForward: _isLongPressingForward,
@@ -1857,9 +1963,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         if (element is Map) {
           final type = (element['Type'] as String?)?.toLowerCase();
           if (type == 'subtitle') {
-            final elementMap = element as Map<dynamic, dynamic>;
-            final streamMap = Map<String, dynamic>.from(elementMap
-                .map((key, value) => MapEntry(key.toString(), value)));
+            final streamMap = Map<String, dynamic>.from(
+                element.map((key, value) => MapEntry(key.toString(), value)));
             // ✅ 保存字幕流在原始 MediaStreams 数组中的索引位置
             // 这是 Emby API 需要的索引
             streamMap['_originalIndex'] = i;
@@ -2523,19 +2628,24 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           format: 'vtt',
         );
 
-        print('🔥🔥🔥 [Player] Generated ${urls.length} subtitle URL variants');
-        for (var i = 0; i < urls.length; i++) {
-          print('🔥 [Player] URL $i: ${urls[i]}');
-        }
+        _playerLog(
+            '🎬 [Player] Generated ${urls.length} subtitle URL variants for stream $subtitleIndex');
 
         // ✅ 将所有 URL 传递给字幕组件，让它尝试每一个直到成功
         if (mounted && urls.isNotEmpty) {
           final combinedUrl = urls.join('|||');
-          print(
-              '🔥 [Player] Setting subtitle URL: ${combinedUrl.substring(0, combinedUrl.length > 100 ? 100 : combinedUrl.length)}...');
+          final previewLength =
+              combinedUrl.length > 120 ? 120 : combinedUrl.length;
+          _playerLog(
+              '🎬 [Player] Applying subtitle URL variants (preview: ${combinedUrl.substring(0, previewLength)})');
           setState(() {
             // 使用特殊格式传递多个 URL，用 '|||' 分隔
             _subtitleUrl = combinedUrl;
+          });
+        } else if (mounted) {
+          _playerLog('❌ [Player] No subtitle URL variants generated');
+          setState(() {
+            _subtitleUrl = null;
           });
         }
       } else {
@@ -2555,4 +2665,81 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
     }
   }
+
+  Future<void> _guardPlayerCommand(
+    String action,
+    Future<void> Function() command, {
+    bool swallowErrors = false,
+  }) async {
+    try {
+      await command();
+    } catch (error, stackTrace) {
+      _handlePlayerError(action, error, stackTrace, swallowErrors);
+    }
+  }
+
+  Future<T?> _guardPlayerRequest<T>(
+    String action,
+    Future<T> Function() request, {
+    bool swallowErrors = false,
+  }) async {
+    try {
+      return await request();
+    } catch (error, stackTrace) {
+      _handlePlayerError(action, error, stackTrace, swallowErrors);
+    }
+    return null;
+  }
+
+  void _handlePlayerError(
+    String action,
+    Object error,
+    StackTrace stackTrace,
+    bool swallowErrors,
+  ) {
+    _playerLog('❌ [Player] $action failed: $error');
+    debugPrintStack(stackTrace: stackTrace);
+    if (!swallowErrors) {
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  Future<void> _waitForPlayerReady() async {
+    await _guardPlayerCommand(
+      'wait until ready',
+      () => _player.waitUntilReady(timeout: _playerReadyTimeout),
+    );
+  }
+
+  Future<void> _playerPlay() =>
+      _guardPlayerCommand('play', _player.play, swallowErrors: true);
+
+  Future<void> _playerPause() =>
+      _guardPlayerCommand('pause', _player.pause, swallowErrors: true);
+
+  Future<void> _playerSeek(
+    Duration position, {
+    bool swallowErrors = false,
+  }) =>
+      _guardPlayerCommand(
+        'seek to ${position.inMilliseconds}ms',
+        () => _player.seek(position),
+        swallowErrors: swallowErrors,
+      );
+
+  Future<void> _playerSetRate(
+    double rate, {
+    bool swallowErrors = false,
+    String action = 'set playback speed',
+  }) =>
+      _guardPlayerCommand(
+        action,
+        () => _player.setRate(rate),
+        swallowErrors: swallowErrors,
+      );
+
+  Future<void> _playerSetVolume(double volumePercent) => _guardPlayerCommand(
+        'set volume',
+        () => _player.setVolume(volumePercent),
+      );
 }

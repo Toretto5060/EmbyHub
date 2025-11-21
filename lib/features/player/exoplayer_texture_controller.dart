@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Flutter 端的 ExoPlayer + Texture 控制器包装。
@@ -10,27 +11,34 @@ class ExoPlayerTextureController {
       MethodChannel('com.embyhub/exoplayer_texture');
   static const EventChannel _eventChannel =
       EventChannel('com.embyhub/exoplayer_texture/events');
+  static const String _logTag = 'ExoPlayerTextureController';
 
-  final _positionController = StreamController<Duration>.broadcast();
-  final _bufferController = StreamController<Duration>.broadcast();
-  final _durationController = StreamController<Duration>.broadcast();
-  final _bufferingController = StreamController<bool>.broadcast();
-  final _playingController = StreamController<bool>.broadcast();
-  final _readyController = StreamController<bool>.broadcast();
-  final _errorController = StreamController<String>.broadcast();
-  final _videoSizeController = StreamController<Size>.broadcast();
+  StreamController<Duration>? _positionController;
+  StreamController<Duration>? _bufferController;
+  StreamController<Duration>? _durationController;
+  StreamController<bool>? _bufferingController;
+  StreamController<bool>? _playingController;
+  StreamController<bool>? _readyController;
+  StreamController<String>? _errorController;
+  StreamController<Size>? _videoSizeController;
 
   StreamSubscription<dynamic>? _eventSubscription;
   Completer<void>? _readyCompleter;
+  Timer? _readyTimeoutTimer;
 
   int? _textureId;
   bool _ready = false;
   bool _isBuffering = true;
   bool _isPlaying = false;
   bool _isDisposed = false;
+  int _activeStreamCount = 0;
+  Duration? _lastEmittedPosition;
+
+  static const Duration _positionEmitResolution = Duration(milliseconds: 200);
 
   /// 初始化插件并获取 TextureId。
   Future<int> initialize() async {
+    _ensureNotDisposed();
     if (_textureId != null) {
       return _textureId!;
     }
@@ -38,11 +46,7 @@ class ExoPlayerTextureController {
     final textureId = await _channel.invokeMethod<int>('initialize') ??
         (throw Exception('Failed to initialize ExoPlayer texture'));
     _textureId = textureId;
-    _eventSubscription ??= _eventChannel
-        .receiveBroadcastStream()
-        .listen(_handleEvent, onError: (Object error) {
-      _handleError(error.toString());
-    });
+    _updateEventSubscription();
     return textureId;
   }
 
@@ -54,75 +58,95 @@ class ExoPlayerTextureController {
     bool autoPlay = true,
     Map<String, dynamic>? cacheConfig,
     bool isHls = false,
+    bool waitForReady = false,
   }) async {
+    _ensureNotDisposed();
+    await _ensureTextureInitialized();
     _ready = false;
-    _readyController.add(false);
-    _readyCompleter = Completer<void>();
+    _lastEmittedPosition = null;
+    _addEvent(_readyController, false);
+    _failReadyWait(StateError('Player reopened before readiness resolved'));
 
-    await _channel.invokeMethod('open', {
+    final sanitizedCacheConfig = _sanitizeCacheConfig(cacheConfig);
+    final args = {
       'url': url,
       'headers': headers ?? const <String, String>{},
       'startPositionMs': startPosition?.inMilliseconds,
       'autoPlay': autoPlay,
-      'cacheConfig': cacheConfig,
       'isHls': isHls,
-    });
+    };
+    if (sanitizedCacheConfig != null) {
+      args['cacheConfig'] = sanitizedCacheConfig;
+    }
+
+    await _invoke('open', args);
+    if (waitForReady) {
+      await waitUntilReady();
+    }
   }
 
-  /// 等待播放器进入 ready 状态。
+  /// 等待播放器进入 ready 状态。超时将抛出 [TimeoutException] 并同步推送到 [errorStream]。
   Future<void> waitUntilReady(
       {Duration timeout = const Duration(seconds: 15)}) {
+    _ensureNotDisposed();
+    _assertInitialized('waitUntilReady');
     if (_ready) {
       return Future.value();
     }
+    final isNewWait = _readyCompleter == null;
     _readyCompleter ??= Completer<void>();
-    return _readyCompleter!.future.timeout(timeout, onTimeout: () {});
+    final completer = _readyCompleter!;
+    if (isNewWait) {
+      _updateEventSubscription();
+      _scheduleReadyTimeout(timeout, completer);
+    }
+    return completer.future;
   }
 
-  Future<void> play() async {
-    await _channel.invokeMethod('play');
-  }
+  Future<void> play() => _invoke('play');
 
-  Future<void> pause() async {
-    await _channel.invokeMethod('pause');
-  }
+  Future<void> pause() => _invoke('pause');
 
-  Future<void> seek(Duration position) async {
-    await _channel.invokeMethod('seekTo', {
-      'positionMs': position.inMilliseconds,
-    });
-  }
+  Future<void> seek(Duration position) =>
+      _invoke('seekTo', {'positionMs': position.inMilliseconds});
 
-  Future<void> setRate(double rate) async {
-    await _channel.invokeMethod('setRate', {'rate': rate});
-  }
+  Future<void> setRate(double rate) => _invoke('setRate', {'rate': rate});
 
   /// [volumePercent] 取值 0-100。
   Future<void> setVolume(double volumePercent) async {
     final normalized = (volumePercent / 100).clamp(0.0, 1.0);
-    await _channel.invokeMethod('setVolume', {'volume': normalized});
+    await _invoke('setVolume', {'volume': normalized});
   }
 
-  Future<void> disableSubtitles() async {
-    await _channel.invokeMethod('disableSubtitles');
-  }
+  Future<void> disableSubtitles() => _invoke('disableSubtitles');
 
+  /// 释放资源。调用后请勿再监听任何流或调用其他控制方法。
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
 
-    await _eventSubscription?.cancel();
+    _failReadyWait(StateError('Controller disposed before readiness resolved'));
+    _cancelEventSubscription();
     await _channel.invokeMethod('dispose');
     _textureId = null;
 
-    await _positionController.close();
-    await _bufferController.close();
-    await _durationController.close();
-    await _bufferingController.close();
-    await _playingController.close();
-    await _readyController.close();
-    await _errorController.close();
-    await _videoSizeController.close();
+    await _closeController(_positionController);
+    _positionController = null;
+    await _closeController(_bufferController);
+    _bufferController = null;
+    await _closeController(_durationController);
+    _durationController = null;
+    await _closeController(_bufferingController);
+    _bufferingController = null;
+    await _closeController(_playingController);
+    _playingController = null;
+    await _closeController(_readyController);
+    _readyController = null;
+    await _closeController(_errorController);
+    _errorController = null;
+    await _closeController(_videoSizeController);
+    _videoSizeController = null;
+    _activeStreamCount = 0;
   }
 
   int? get textureId => _textureId;
@@ -130,70 +154,342 @@ class ExoPlayerTextureController {
   bool get isPlaying => _isPlaying;
   bool get isBuffering => _isBuffering;
 
-  Stream<Duration> get positionStream => _positionController.stream;
-  Stream<Duration> get bufferStream => _bufferController.stream;
-  Stream<Duration> get durationStream => _durationController.stream;
-  Stream<bool> get bufferingStream => _bufferingController.stream;
-  Stream<bool> get playingStream => _playingController.stream;
-  Stream<bool> get readyStream => _readyController.stream;
-  Stream<String> get errorStream => _errorController.stream;
-  Stream<Size> get videoSizeStream => _videoSizeController.stream;
+  /// 播放进度流（约 200 ms 节流；dispose 后不要再监听）。
+  Stream<Duration> get positionStream => _getStream<Duration>(
+        () => _positionController,
+        (controller) => _positionController = controller,
+      );
+
+  /// 缓冲进度流（dispose 后不要再监听）。
+  Stream<Duration> get bufferStream => _getStream<Duration>(
+        () => _bufferController,
+        (controller) => _bufferController = controller,
+      );
+
+  /// 总时长流（dispose 后不要再监听）。
+  Stream<Duration> get durationStream => _getStream<Duration>(
+        () => _durationController,
+        (controller) => _durationController = controller,
+      );
+
+  /// 缓冲状态流（dispose 后不要再监听）。
+  Stream<bool> get bufferingStream => _getStream<bool>(
+        () => _bufferingController,
+        (controller) => _bufferingController = controller,
+      );
+
+  /// 播放状态流（dispose 后不要再监听）。
+  Stream<bool> get playingStream => _getStream<bool>(
+        () => _playingController,
+        (controller) => _playingController = controller,
+      );
+
+  /// Ready 状态流（dispose 后不要再监听）。
+  Stream<bool> get readyStream => _getStream<bool>(
+        () => _readyController,
+        (controller) => _readyController = controller,
+      );
+
+  /// 错误事件流（dispose 后不要再监听）。
+  Stream<String> get errorStream => _getStream<String>(
+        () => _errorController,
+        (controller) => _errorController = controller,
+      );
+
+  /// 视频尺寸流（dispose 后不要再监听）。
+  Stream<Size> get videoSizeStream => _getStream<Size>(
+        () => _videoSizeController,
+        (controller) => _videoSizeController = controller,
+      );
 
   void _handleEvent(dynamic event) {
-    if (event is! Map) return;
+    if (event is! Map) {
+      _handleError('Unexpected event: $event');
+      return;
+    }
     final map = Map<String, dynamic>.from(event);
     switch (map['event']) {
       case 'state':
-        final positionMs = (map['position_ms'] as num?)?.toInt();
+        final positionMs = _asInt(map, 'position_ms');
         if (positionMs != null && positionMs >= 0) {
-          _positionController.add(Duration(milliseconds: positionMs));
+          _emitPosition(Duration(milliseconds: positionMs));
         }
 
-        final bufferMs = (map['buffered_ms'] as num?)?.toInt();
+        final bufferMs = _asInt(map, 'buffered_ms');
         if (bufferMs != null && bufferMs >= 0) {
-          _bufferController.add(Duration(milliseconds: bufferMs));
+          _addEvent(
+            _bufferController,
+            Duration(milliseconds: bufferMs),
+          );
         }
 
-        final durationMs = (map['duration_ms'] as num?)?.toInt();
+        final durationMs = _asInt(map, 'duration_ms');
         if (durationMs != null && durationMs >= 0) {
-          _durationController.add(Duration(milliseconds: durationMs));
+          _addEvent(
+            _durationController,
+            Duration(milliseconds: durationMs),
+          );
         }
 
         final buffering = map['isBuffering'] == true;
-        if (_isBuffering != buffering) {
-          _isBuffering = buffering;
-          _bufferingController.add(buffering);
-        }
+        _updateState<bool>(
+          newValue: buffering,
+          currentValue: _isBuffering,
+          setter: (value) => _isBuffering = value,
+          controller: _bufferingController,
+        );
 
         final playing = map['isPlaying'] == true;
-        if (_isPlaying != playing) {
-          _isPlaying = playing;
-          _playingController.add(playing);
-        }
+        _updateState<bool>(
+          newValue: playing,
+          currentValue: _isPlaying,
+          setter: (value) => _isPlaying = value,
+          controller: _playingController,
+        );
 
         final ready = map['isReady'] == true;
-        if (_ready != ready) {
-          _ready = ready;
-          _readyController.add(ready);
-        }
+        _updateState<bool>(
+          newValue: ready,
+          currentValue: _ready,
+          setter: (value) => _ready = value,
+          controller: _readyController,
+        );
+        // ready 变 true 时通知 waitUntilReady 调用者。
         if (ready && _readyCompleter != null && !_readyCompleter!.isCompleted) {
           _readyCompleter!.complete();
+          _finishReadyWait();
         }
+        _debugLog(
+            'State => buffering=$buffering, playing=$playing, ready=$ready');
         break;
       case 'error':
         _handleError(map['message']?.toString() ?? 'Unknown playback error');
         break;
       case 'videoSize':
-        final width = (map['width'] as num?)?.toDouble();
-        final height = (map['height'] as num?)?.toDouble();
+        final width = _asDouble(map, 'width');
+        final height = _asDouble(map, 'height');
         if (width != null && width > 0 && height != null && height > 0) {
-          _videoSizeController.add(Size(width, height));
+          _addEvent(
+            _videoSizeController,
+            Size(width, height),
+          );
         }
         break;
     }
   }
 
   void _handleError(String message) {
-    _errorController.add(message);
+    _addEvent(_errorController, message);
+    _debugLog('Error => $message');
+  }
+
+  void _ensureEventSubscription() {
+    if (_eventSubscription != null || !_shouldListenToEvents) {
+      return;
+    }
+    _eventSubscription = _eventChannel.receiveBroadcastStream().listen(
+      _handleEvent,
+      onError: (Object error) {
+        _handleError(error.toString());
+        _restartEventSubscription();
+      },
+    );
+    _debugLog('Event subscription established');
+  }
+
+  void _cancelEventSubscription() {
+    if (_eventSubscription == null) return;
+    _eventSubscription?.cancel();
+    _eventSubscription = null;
+    _debugLog('Event subscription cancelled');
+  }
+
+  Future<void> _restartEventSubscription() async {
+    await _eventSubscription?.cancel();
+    _eventSubscription = null;
+    if (_shouldListenToEvents) {
+      _debugLog('Restarting event subscription');
+      _ensureEventSubscription();
+    }
+  }
+
+  Map<String, dynamic>? _sanitizeCacheConfig(
+      Map<String, dynamic>? cacheConfig) {
+    if (cacheConfig == null || cacheConfig.isEmpty) {
+      return null;
+    }
+    final sanitized = <String, dynamic>{};
+    cacheConfig.forEach((key, value) {
+      if (key.isEmpty) return;
+      if (value is num || value is String || value is bool) {
+        sanitized[key] = value;
+      } else if (value is Map<String, dynamic>) {
+        final nested = _sanitizeCacheConfig(value);
+        if (nested != null) {
+          sanitized[key] = nested;
+        }
+      }
+    });
+    return sanitized.isEmpty ? null : sanitized;
+  }
+
+  void _addEvent<T>(StreamController<T>? controller, T data) {
+    if (controller == null || controller.isClosed) return;
+    controller.add(data);
+  }
+
+  Future<void> _closeController<T>(StreamController<T>? controller) async {
+    if (controller == null || controller.isClosed) return;
+    await controller.close();
+  }
+
+  bool _updateState<T>({
+    required T newValue,
+    required T currentValue,
+    required void Function(T value) setter,
+    StreamController<T>? controller,
+  }) {
+    if (currentValue == newValue) {
+      return false;
+    }
+    setter(newValue);
+    _addEvent(controller, newValue);
+    return true;
+  }
+
+  int? _asInt(Map<String, dynamic> map, String key) {
+    final value = map[key];
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return null;
+  }
+
+  double? _asDouble(Map<String, dynamic> map, String key) {
+    final value = map[key];
+    if (value is double) return value;
+    if (value is num) return value.toDouble();
+    return null;
+  }
+
+  void _debugLog(String message) {
+    if (kDebugMode) {
+      debugPrint('[$_logTag] $message');
+    }
+  }
+
+  Future<void> _invoke(String method, [Map<String, dynamic>? arguments]) async {
+    _ensureNotDisposed();
+    _assertInitialized(method);
+    try {
+      await _channel.invokeMethod(method, arguments);
+    } catch (error, stackTrace) {
+      _handleError('Method $method failed: $error');
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  Stream<T> _getStream<T>(
+    StreamController<T>? Function() getter,
+    void Function(StreamController<T> controller) setter,
+  ) {
+    if (_isDisposed) {
+      return Stream<T>.empty();
+    }
+    return _ensureController<T>(getter(), setter).stream;
+  }
+
+  StreamController<T> _ensureController<T>(
+    StreamController<T>? controller,
+    void Function(StreamController<T> controller) setter,
+  ) {
+    if (controller != null) {
+      return controller;
+    }
+    final newController = StreamController<T>.broadcast(
+      onListen: _onStreamListen,
+      onCancel: _onStreamCancel,
+    );
+    setter(newController);
+    return newController;
+  }
+
+  void _emitPosition(Duration position) {
+    if (_lastEmittedPosition == null ||
+        (position - _lastEmittedPosition!).abs() >= _positionEmitResolution) {
+      _lastEmittedPosition = position;
+      _addEvent(_positionController, position);
+    }
+  }
+
+  void _onStreamListen() {
+    _activeStreamCount++;
+    _updateEventSubscription();
+  }
+
+  void _onStreamCancel() {
+    if (_activeStreamCount > 0) {
+      _activeStreamCount--;
+      _updateEventSubscription();
+    }
+  }
+
+  void _updateEventSubscription() {
+    if (_shouldListenToEvents) {
+      _ensureEventSubscription();
+    } else if (_eventSubscription != null) {
+      _cancelEventSubscription();
+    }
+  }
+
+  bool get _shouldListenToEvents =>
+      !_isDisposed && (_activeStreamCount > 0 || _readyCompleter != null);
+
+  void _scheduleReadyTimeout(Duration timeout, Completer<void> completer) {
+    _readyTimeoutTimer?.cancel();
+    _readyTimeoutTimer = Timer(timeout, () {
+      if (identical(_readyCompleter, completer) && !completer.isCompleted) {
+        final exception = TimeoutException(
+            'ExoPlayerTextureController waitUntilReady timed out', timeout);
+        completer.completeError(exception);
+        _handleError(
+            'waitUntilReady timed out after ${timeout.inMilliseconds} ms');
+        _finishReadyWait();
+      }
+    });
+  }
+
+  void _finishReadyWait() {
+    if (_readyCompleter == null) return;
+    _readyTimeoutTimer?.cancel();
+    _readyTimeoutTimer = null;
+    _readyCompleter = null;
+    _updateEventSubscription();
+  }
+
+  void _failReadyWait(Object error) {
+    if (_readyCompleter == null) return;
+    if (!_readyCompleter!.isCompleted) {
+      _readyCompleter!.completeError(error);
+    }
+    _finishReadyWait();
+  }
+
+  Future<void> _ensureTextureInitialized() async {
+    if (_textureId != null) {
+      return;
+    }
+    await initialize();
+  }
+
+  void _ensureNotDisposed() {
+    if (_isDisposed) {
+      throw StateError('ExoPlayerTextureController has been disposed');
+    }
+  }
+
+  void _assertInitialized(String context) {
+    if (_textureId == null) {
+      throw StateError('$context called before initialize/open completed');
+    }
   }
 }

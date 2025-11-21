@@ -156,8 +156,8 @@ class EmbyApi {
       // 优先使用 product（如 "xmsirius"），去除前缀后格式化
       if (product != null && product.isNotEmpty) {
         // 移除常见的前缀（如 "xm" 代表小米）
-        final cleanedProduct = product
-            .replaceAll(RegExp(r'^(xm|redmi|huawei|honor)', caseSensitive: false), '');
+        final cleanedProduct = product.replaceAll(
+            RegExp(r'^(xm|redmi|huawei|honor)', caseSensitive: false), '');
         if (cleanedProduct.isNotEmpty && cleanedProduct != product) {
           // 将下划线或连字符转换为空格，并格式化首字母大写
           friendlyModel = cleanedProduct
@@ -169,7 +169,8 @@ class EmbyApi {
               .join(' ');
         } else {
           // 如果 product 本身就是友好的名称，直接使用（首字母大写）
-          friendlyModel = product[0].toUpperCase() + product.substring(1).toLowerCase();
+          friendlyModel =
+              product[0].toUpperCase() + product.substring(1).toLowerCase();
         }
       }
       // 如果 product 不可用，尝试使用 device
@@ -238,11 +239,11 @@ class EmbyApi {
         } catch (e) {
           // 如果平台通道失败，回退到原有逻辑
         }
-        
+
         // ✅ 回退方案：使用 Build.MANUFACTURER + Build.MODEL
         final deviceInfo = DeviceInfoPlugin();
         final androidInfo = await deviceInfo.androidInfo;
-        
+
         final brand = androidInfo.brand;
         final model = androidInfo.model;
 
