@@ -8,8 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/emby_api.dart';
@@ -18,6 +16,7 @@ import '../../providers/settings_provider.dart';
 import '../../utils/status_bar_manager.dart';
 import '../../utils/theme_utils.dart';
 import 'custom_subtitle_overlay.dart';
+import 'exoplayer_texture_controller.dart';
 import 'player_controls.dart';
 
 const bool _kPlayerLogging = true; // ✅ 临时启用日志，用于调试字幕问题
@@ -45,8 +44,9 @@ class PlayerPage extends ConsumerStatefulWidget {
 
 class _PlayerPageState extends ConsumerState<PlayerPage>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  late final Player _player;
-  late final VideoController _controller;
+  late final ExoPlayerTextureController _player;
+  int? _textureId;
+  Size _videoSize = const Size(1920, 1080);
   bool _ready = false;
   double _speed = 1.0;
   // ✅ 速度档位列表
@@ -67,6 +67,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   StreamSubscription<Duration>? _durSub; // ✅ 添加 duration 订阅
   StreamSubscription<bool>? _bufferingSub;
   StreamSubscription<bool>? _playingSub; // ✅ 添加播放状态订阅
+  StreamSubscription<Duration>? _bufferSub;
+  StreamSubscription<bool>? _readySub;
+  StreamSubscription<Size>? _videoSizeSub;
+  StreamSubscription<String>? _errorSub;
   bool _isLandscape = true; // ✅ 默认横屏
   bool _isBuffering = true;
   bool _isPlaying = false; // ✅ 添加播放状态
@@ -167,7 +171,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   @override
   void initState() {
     super.initState();
-    
+
     // ✅ 在页面初始化时立即获取并保存原始亮度（在系统可能调整亮度之前）
     // 这样即使系统在进入全屏时自动调整了亮度，我们也能恢复正确的原始亮度
     _getCurrentBrightness().then((_) {
@@ -175,30 +179,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _originalBrightness = _currentBrightness;
       }
     });
-    
-    // ✅ 创建播放器，media_kit会自动启用系统媒体会话
-    _player = Player(
-      configuration: PlayerConfiguration(
-          title: 'Emby Player',
-          logLevel: MPVLogLevel.error,
-          bufferSize: 2 * 1024  * 1024 * 1024, // 2g 缓冲区（降低以减少缓冲区压力）
-      ),
-    );
 
-    _controller = VideoController(
-      _player,
-      configuration: const VideoControllerConfiguration(
-        // ✅ 启用硬件加速，提升解码性能（特别是倍速播放时）
-        enableHardwareAcceleration: true,
-        // ✅ 改为 false，延迟 Surface 附加，避免 ImageReader 缓冲区溢出
-        // 说明：true 可能导致在视频参数确定前就附加 Surface，引发缓冲区错误
-        // false 会等待视频参数确定后再附加，更稳定
-        androidAttachSurfaceAfterVideoParameters: false,
-      ),
-    );
-
-    // ✅ 创建播放器后立即禁用字幕显示
-    _disableSubtitle();
+    // ✅ 创建 ExoPlayer 控制器
+    _player = ExoPlayerTextureController();
+    _initializeExoPlayer();
 
     // ✅ 初始化控制栏动画
     _controlsAnimationController = AnimationController(
@@ -250,7 +234,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       if (call.method == 'togglePlayPause') {
         if (mounted) {
-          final playing = _player.state.playing;
+          final playing = _player.isPlaying;
           _playerLog(
               '🎬 [Player] PiP toggle play/pause, current playing: $playing');
           if (playing) {
@@ -266,7 +250,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
           // 触发状态更新并通知原生层更新按钮
           if (mounted) {
-            final newState = _player.state.playing;
+            final newState = _player.isPlaying;
             setState(() {
               _isPlaying = newState;
             });
@@ -294,15 +278,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   /// ✅ 禁用字幕显示（在创建播放器后立即调用）
   Future<void> _disableSubtitle() async {
     try {
-      // 尝试使用 setSubtitleTrack 禁用字幕
-      // 如果 SubtitleTrack.no() 不存在，extras 配置中的设置应该已经足够
-      try {
-        await _player.setSubtitleTrack(SubtitleTrack.no());
-        _playerLog('🎬 [Player] Subtitle disabled via setSubtitleTrack');
-      } catch (e) {
-        // 如果 SubtitleTrack.no() 不存在，只记录日志，extras 配置应该已经禁用了字幕
-        _playerLog('🎬 [Player] Subtitle should be disabled by extras config');
-      }
+      await _player.disableSubtitles();
+      _playerLog('🎬 [Player] Subtitle disabled via ExoPlayer plugin');
     } catch (e) {
       _playerLog('❌ [Player] Failed to disable subtitle: $e');
     }
@@ -332,6 +309,106 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     } catch (e) {
       _playerLog('❌ [Player] Load stream selections failed: $e');
     }
+  }
+
+  Future<void> _initializeExoPlayer() async {
+    try {
+      final textureId = await _player.initialize();
+      if (!mounted) return;
+      setState(() {
+        _textureId = textureId;
+      });
+      _attachPlayerStreams();
+      await _player.disableSubtitles();
+      await _load();
+    } catch (e, stack) {
+      _playerLog('❌ [Player] Initialize ExoPlayer failed: $e');
+      debugPrintStack(stackTrace: stack);
+    }
+  }
+
+  void _attachPlayerStreams() {
+    _posSub?.cancel();
+    _posSub = _player.positionStream.listen(_handlePositionUpdate);
+
+    _durSub?.cancel();
+    _durSub = _player.durationStream.listen((d) {
+      if (mounted && d != Duration.zero) {
+        _playerLog('🎬 [Player] Duration updated: $d');
+        setState(() => _duration = d);
+      }
+    });
+
+    _bufferSub?.cancel();
+    _bufferSub = _player.bufferStream.listen((buffer) {
+      if (mounted) {
+        _bufferPosition = buffer;
+        setState(() {});
+      }
+    });
+
+    _bufferingSub?.cancel();
+    _bufferingSub = _player.bufferingStream.listen((isBuffering) {
+      _playerLog('🎬 [Player] Buffering状态变化: $isBuffering');
+      if (!mounted) return;
+      setState(() => _isBuffering = isBuffering);
+    });
+
+    _playingSub?.cancel();
+    _playingSub = _player.playingStream.listen((isPlaying) async {
+      _playerLog('🎬 [Player] Playing: $isPlaying');
+      if (mounted) {
+        setState(() => _isPlaying = isPlaying);
+      }
+      if (!isPlaying) {
+        _syncProgress(_position, force: true);
+        _cancelHideControlsTimer(); // 暂停时不自动隐藏控制栏
+      } else {
+        _startHideControlsTimer(); // 播放时自动隐藏控制栏
+
+        if (_api != null &&
+            _userId != null &&
+            _playSessionId != null &&
+            _mediaSourceId != null) {
+          try {
+            await _api!.reportPlaybackStart(
+              itemId: widget.itemId,
+              userId: _userId!,
+              playSessionId: _playSessionId!,
+              mediaSourceId: _mediaSourceId,
+              positionTicks: _initialSeekPosition != null
+                  ? (_initialSeekPosition!.inMicroseconds * 10).toInt()
+                  : 0,
+            );
+            _playerLog('✅ [Player] Reported playback start to Emby server');
+          } catch (e) {
+            _playerLog('⚠️ [Player] Failed to report playback start: $e');
+          }
+        }
+      }
+
+      _updatePipActions();
+      _updateMediaNotification();
+    });
+
+    _readySub?.cancel();
+    _readySub = _player.readyStream.listen((ready) {
+      if (mounted) {
+        setState(() => _ready = ready);
+      }
+    });
+
+    _errorSub?.cancel();
+    _errorSub = _player.errorStream.listen((message) {
+      _playerLog('❌ [Player] Error: $message');
+    });
+
+    _videoSizeSub?.cancel();
+    _videoSizeSub = _player.videoSizeStream.listen((size) {
+      if (mounted) {
+        setState(() => _videoSize = size);
+      }
+    });
   }
 
   /// ✅ 保存音频和字幕选择
@@ -424,7 +501,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final media = await api.buildHlsUrl(widget.itemId); // ✅ 添加 await
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
       _playerLog('🎬 [Player] Video Title: $_videoTitle');
-      
+
       // ✅ 保存 PlaySessionId，用于调用 /Sessions/Playing
       _playSessionId = media.playSessionId;
       if (mounted) {
@@ -481,9 +558,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       // ✅ 打开媒体（设置标题以支持系统媒体通知）
       _playerLog('🎬 [Player] Opening media with title: $_videoTitle');
-      
+
       // ✅ 检测是否为 HLS 流
-      final isHlsStream = media.uri.contains('.m3u8') || media.uri.contains('hls');
+      final isHlsStream =
+          media.uri.contains('.m3u8') || media.uri.contains('hls');
       if (mounted) {
         setState(() {
           _isHlsStream = isHlsStream;
@@ -491,184 +569,48 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
       _playerLog('🎬 [Player] Is HLS stream: $isHlsStream');
       _playerLog('🎬 [Player] Media URI: ${media.uri}');
-      _playerLog('🎬 [Player] Video resolution: ${media.width}x${media.height}');
+      _playerLog(
+          '🎬 [Player] Video resolution: ${media.width}x${media.height}');
       _playerLog('🎬 [Player] Video bitrate: ${media.bitrate} bps');
-      
+
       // ✅ 根据视频分辨率和格式动态调整缓存配置
       // 检测4K视频：分辨率 >= 3840x2160
       final is4KVideo = media.width != null && media.width! >= 3840;
       // 检测HEVC：通过URL或高码率推断（4K视频通常使用HEVC编码）
       // HLS URL可能不包含codec信息，所以通过分辨率和码率推断
-      final isHEVC = media.uri.contains('hevc') || 
-                     media.uri.contains('h265') || 
-                     (is4KVideo && media.bitrate != null && media.bitrate! > 20000000); // 4K + 高码率 (>20Mbps) 通常为HEVC
+      final isHEVC = media.uri.contains('hevc') ||
+          media.uri.contains('h265') ||
+          (is4KVideo &&
+              media.bitrate != null &&
+              media.bitrate! > 20000000); // 4K + 高码率 (>20Mbps) 通常为HEVC
       // 需要额外缓存：4K视频或HEVC编码
       final needExtraCache = is4KVideo || isHEVC;
-      
-      _playerLog('🎬 [Player] Is 4K video: $is4KVideo, Is HEVC: $isHEVC, Need extra cache: $needExtraCache');
-      
-      // ✅ 根据视频分辨率和格式动态计算缓存配置
-      final demuxerMaxBytes = needExtraCache ? '50G' : (isHlsStream ? '20G' : '5G');
-      final demuxerMaxBackBytes = needExtraCache ? '5G' : (isHlsStream ? '2G' : '300M');
-      final cacheSecs = needExtraCache ? '28800' : (isHlsStream ? '14400' : '3600'); // 8小时 for 4K
-      final readaheadSecs = needExtraCache ? '21600' : (isHlsStream ? '10800' : '1800'); // 6小时 for 4K
-      final streamBufferSize = needExtraCache ? '1G' : (isHlsStream ? '512M' : '64M');
-      final hlsSegmentThreads = needExtraCache ? '64' : '32';
-      final cachePause = needExtraCache ? '180' : '120';
-      
-      _playerLog('🎬 [Player] Cache config: demuxer-max-bytes=$demuxerMaxBytes, cache-secs=$cacheSecs, stream-buffer-size=$streamBufferSize, hls-segment-threads=$hlsSegmentThreads');
-      
-      await _player.open(
-        Media(
-          media.uri,
-          httpHeaders: media.headers,
-          extras: {
-            // ===== 大容量缓冲配置 =====
-            // demuxer-max-bytes: 向前缓存上限
-            // 说明：从当前位置向后可以缓存多少压缩视频数据
-            // 作用：对于4K HEVC视频，需要更大的缓存空间
-            // ✅ 对于 4K HEVC 视频，大幅增加缓存上限
-            'demuxer-max-bytes': demuxerMaxBytes,
 
-            // demuxer-max-back-bytes: 向后缓存上限
-            // 说明：当前位置之前保留多少已播放的数据
-            // 作用：倒退时直接从缓存读取，不重新下载
-            // ✅ 对于 HLS 流，增加向后缓存，确保快进时使用缓存
-            'demuxer-max-back-bytes': demuxerMaxBackBytes,
+      _playerLog(
+          '🎬 [Player] Is 4K video: $is4KVideo, Is HEVC: $isHEVC, Need extra cache: $needExtraCache');
 
-            // cache: 启用缓存
-            'cache': 'yes',
-
-            // cache-secs: 目标缓存时长
-            // 说明：尝试缓存多长时间的视频（秒）
-            // 作用：与空间限制配合，达到任一限制停止缓存
-            // ✅ 对于 HLS 流，大幅增加缓存时长，确保有足够的缓存用于快进
-            // 4K视频码率更高，需要更长的缓存时间
-            'cache-secs': cacheSecs,
-
-            // demuxer-readahead-secs: 积极预读
-            // 说明：提前读取未来多少秒的数据
-            // 作用：播放器会持续下载，填满缓冲区
-            // ✅ 对于 HLS 流，大幅增加预读时长，更快填充缓冲区
-            // 4K视频需要更多预读时间
-            'demuxer-readahead-secs': readaheadSecs,
-
-            // stream-buffer-size: 网络流缓冲区
-            // 说明：从网络读取数据的临时缓冲
-            // 作用：更大的缓冲 = 更快的下载速度
-            // 4K视频需要更大的网络缓冲区
-            'stream-buffer-size': streamBufferSize,
-
-            // demuxer-seekable-cache: 可搜索缓存
-            // 说明：缓存支持随机访问
-            // 作用：在已缓存区域seek不会丢失数据
-            // ✅ 对于 HLS 流，这是关键配置，确保缓存可用于 seek
-            'demuxer-seekable-cache': 'yes',
-
-            // force-seekable: 强制可搜索
-            'force-seekable': 'yes',
-            
-            // ===== HLS 特定配置 =====
-            // ✅ HLS 播放列表重载配置
-            if (isHlsStream) 'hls-playlist-reload-attempts': '10',
-            if (isHlsStream) 'hls-segment-attempts': '5',
-            if (isHlsStream) 'hls-segment-threads': hlsSegmentThreads, // ✅ 4K需要更多并行下载线程
-            if (isHlsStream) 'hls-segment-timeout': '30',
-            if (isHlsStream) 'hls-playlist-reload-time': '10',
-            if (isHlsStream) 'hls-connect-timeout': '10',
-            
-            // ✅ HLS 预加载和缓存配置
-            if (isHlsStream) 'hls-preload': 'yes', // ✅ 提前下载片段
-            if (isHlsStream) 'hr-seek': 'yes', // ✅ 高精度 seek，使用缓存
-            
-            // ✅ 缓存暂停配置：确保缓存足够才开始播放
-            // 4K视频需要更长的缓存时间，所以增加等待时间
-            if (isHlsStream) 'cache-pause': cachePause, // ✅ 4K: 等待缓存至少180秒（3分钟）再播放
-
-            //==========================
-            //【核心：解码与渲染优化】
-            //==========================
-            'hwdec': 'mediacodec-auto', // Android 最稳定硬解
-            'gpu-api': 'opengl', // GPU 渲染最稳定
-
-            // 视频同步方式：使用 display-resample 更温和，避免音频处理
-            'video-sync': 'display-resample',
-
-            // 不使用插帧，减少卡顿
-            'interpolation': 'no',
-
-            // 减少解码压力（倍速时很重要）
-            'vd-lavc-skiploopfilter': 'all',
-            'vd-lavc-skipidct': 'approx',
-            'vd-lavc-fast': 'yes',
-
-            // 帧丢弃策略：优先保证流畅性，更积极的丢帧
-            'framedrop': 'decoder+vo',
-
-            //==========================
-            //【ImageReader 缓冲区限制 - 解决黑屏问题】
-            //==========================
-            // 限制视频输出缓冲区数量，避免 ImageReader 缓冲区溢出
-            'opengl-glfinish': 'yes', // 确保 OpenGL 命令及时执行
-            'opengl-swapinterval': '0', // 不限制交换间隔，提高流畅度
-            'video-latency-hacks': 'yes', // 启用视频延迟优化
-            //==========================
-            //【音频：使用系统音效输出】
-            //==========================
-            'audio-pitch-correction': 'yes', // 倍速时保持音调
-            'volume-max': '200', // 允许音量最大到 200%
-            // ✅ 使用系统音频输出（Android: AudioTrack）
-            // 说明：通过 AudioTrack 输出，系统会自动应用设备的音效设置
-            // 作用：设置 100 就足够大声，同时不破音；系统会根据设备设置自动应用音效
-            'ao': 'audiotrack', // Android 系统音频输出，使用 AudioTrack（使用系统音效）
-
-            'audio-backend': 'audiotrack',
-            
-            // ✅ 音频格式配置，确保杜比全景声和音效增强正常工作
-            'audio-format': 's16', // 使用 16 位 PCM（兼容性最好，系统会自动处理更高格式）
-            'audio-samplerate': 'auto', // 自动采样率，让系统根据音频源和输出设备选择最佳采样率
-            'audio-channels': 'auto', // 自动声道数，保持原始音频流的声道布局（支持杜比全景声多声道）
-            
-            // ✅ 音频缓冲配置，确保流畅播放和音效处理
-            'audio-buffer': '1.0', // 1秒音频缓冲区（足够系统进行音效处理）
-            'audio-stream-silence': 'no', // 不静音，保持原始音频流
-            
-            // ✅ 不设置任何音频滤镜（'af'），保持原始音频流（包括杜比全景声），让系统处理
-            // MainActivity 中已配置 AudioAttributes（CONTENT_TYPE_MOVIE + 杜比全景声支持标志），确保杜比全景声和音效增强自动应用
-            //==========================
-            //【稳定性】
-            //==========================
-            'opengl-early-flush': 'no', // 防止倍速时丢帧
-            'msg-level': 'all=no', // 关闭大量冗余日志
-
-            //==========================
-            //【字幕：完全禁用原生字幕显示】
-            //==========================
-            'sub-visibility': 'no', // 禁用原生字幕显示
-            'sub-auto': 'no', // 禁用自动加载字幕
-            'sub-forced-only': 'no', // 不显示强制字幕
-            'sub-ass-override': 'no', // 禁用 ASS 字幕覆盖
-            'sub-ass-style-override': 'no', // 禁用 ASS 样式覆盖
-            'sid': 'no', // 禁用字幕轨道（不选择任何字幕轨道）
-          },
-        ),
-        play: !needsSeek,
+      final cacheConfig = _buildCacheConfig(
+        isHlsStream: isHlsStream,
+        needExtraCache: needExtraCache,
       );
+      _playerLog('🎬 [Player] Cache config (ms): $cacheConfig');
+
+      await _player.open(
+        url: media.uri,
+        headers: media.headers,
+        isHls: isHlsStream,
+        autoPlay: !needsSeek,
+        startPosition:
+            needsSeek ? null : (_initialSeekPosition ?? Duration.zero),
+        cacheConfig: cacheConfig,
+      );
+
+      await _player.waitUntilReady();
 
       // ✅ 在 open 之后再次确保字幕被禁用
       await _disableSubtitle();
 
-      // ✅ 在 open 之后设置 buffering 监听，确保能正确捕获缓冲状态
-      _bufferingSub?.cancel();
-      _bufferingSub = _player.stream.buffering.listen((isBuffering) {
-        _playerLog('🎬 [Player] Buffering状态变化: $isBuffering');
-        if (!mounted) return;
-        setState(() => _isBuffering = isBuffering);
-      });
-
-      // ✅ 如果不需要seek，设置音量为150%（增强音量）
-      // 如果需要seek，在seek流程中控制音量（先静音再恢复）
-      // 注意：dynaudnorm 已经会增强音量，所以播放器音量设置为 150% 即可
+      // ✅ 如果不需要seek，设置音量为100%
       if (!needsSeek) {
         await _player.setVolume(100.0);
         _currentVolume = 100.0; // ✅ 保存当前音量
@@ -679,135 +621,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerLog('🎬 [Player] ✅ Media opened successfully');
       _showMediaNotification();
 
-      // ✅ 先设置监听器，确保状态能正确更新
-      // ✅ 监听播放位置
-      _posSub = _player.stream.position.listen(_handlePositionUpdate);
-
-      // ✅ 监听总时长
-      _durSub = _player.stream.duration.listen((d) {
-        if (mounted && d != Duration.zero) {
-          _playerLog('🎬 [Player] Duration updated: $d');
-          setState(() => _duration = d);
-        }
-      });
-
-      // ✅ 监听播放状态
-      _playingSub = _player.stream.playing.listen((isPlaying) async {
-        _playerLog('🎬 [Player] Playing: $isPlaying');
-        if (mounted) {
-          setState(() => _isPlaying = isPlaying);
-        }
-        if (!isPlaying) {
-          _syncProgress(_position, force: true);
-          _cancelHideControlsTimer(); // 暂停时不自动隐藏控制栏
-        } else {
-          _startHideControlsTimer(); // 播放时自动隐藏控制栏
-
-          // ✅ 通知 Emby 服务器开始播放（必须在播放开始时调用，才能记录播放历史）
-          if (_api != null &&
-              _userId != null &&
-              _playSessionId != null &&
-              _mediaSourceId != null) {
-            try {
-              await _api!.reportPlaybackStart(
-                itemId: widget.itemId,
-                userId: _userId!,
-                playSessionId: _playSessionId!,
-                mediaSourceId: _mediaSourceId,
-                positionTicks: _initialSeekPosition != null
-                    ? (_initialSeekPosition!.inMicroseconds * 10).toInt()
-                    : 0,
-              );
-              _playerLog('✅ [Player] Reported playback start to Emby server');
-            } catch (e) {
-              _playerLog('⚠️ [Player] Failed to report playback start: $e');
-            }
-          }
-        }
-
-        // ✅ 更新 PiP 按钮状态
-        _updatePipActions();
-
-        // ✅ 更新系统媒体通知状态
-        _updateMediaNotification();
-      });
-
       // ✅ 立即读取一次当前播放状态，确保初始状态正确
-      // 避免在 stream 回调之前显示错误的按钮状态
       if (mounted) {
-        final currentPlaying = _player.state.playing;
+        final currentPlaying = _player.isPlaying;
         _playerLog('🎬 [Player] Initial playing state: $currentPlaying');
         setState(() => _isPlaying = currentPlaying);
       }
-
-      // ✅ 监听缓冲进度（用于显示进度条上的缓冲位置）
-      _player.stream.buffer.listen((buffer) {
-        if (mounted) {
-          _playerLog('🎬 [Player] Buffer stream updated: $buffer (position: $_position, duration: $_duration)');
-          
-          if (buffer > Duration.zero) {
-            // ✅ 对于 HLS 流，buffer 可能返回的是已下载的时长，而不是缓冲位置
-            // 检查 buffer 是否大于当前播放位置，如果大于，说明有缓冲
-            if (_isHlsStream) {
-              // ✅ HLS 流：buffer 可能是从开始到当前已缓冲的总时长
-              // 我们需要计算实际的缓冲位置：当前播放位置 + (buffer - position)
-              if (buffer > _position) {
-                setState(() {
-                  _bufferPosition = buffer; // ✅ 直接使用 buffer，它应该是缓冲位置
-                });
-                // ✅ 计算进度条宽度（用于调试）
-                final totalSeconds = _duration.inSeconds.clamp(1, 1 << 30);
-                final bufferValue = _bufferPosition.inSeconds / totalSeconds;
-                final playedValue = _position.inSeconds / totalSeconds;
-                final bufferSliderValue = bufferValue.isNaN ? 0.0 : bufferValue.clamp(0.0, 1.0).toDouble();
-                final playedSliderValue = playedValue.isNaN ? 0.0 : playedValue.clamp(0.0, 1.0).toDouble();
-                // 假设 Slider 实际可用宽度约为 480px（减去 padding 24*2 = 48）
-                const estimatedTrackWidth = 480.0;
-                final bufferBarWidth = estimatedTrackWidth * bufferSliderValue;
-                final playedBarWidth = estimatedTrackWidth * playedSliderValue;
-                _playerLog('🎬 [Player] HLS: Buffer position set to: $_bufferPosition (diff: ${(_bufferPosition - _position).inSeconds}s)');
-                _playerLog('🎬 [Player] UI Widths: Buffer bar: ${bufferBarWidth.toStringAsFixed(1)}px, Played bar: ${playedBarWidth.toStringAsFixed(1)}px, Difference: ${(bufferBarWidth - playedBarWidth).toStringAsFixed(1)}px');
-              } else {
-                // ✅ 如果 buffer 小于或等于 position，说明缓冲不足
-                // 将缓冲位置设置为播放位置，但至少保持 5 秒的缓冲显示
-                setState(() {
-                  _bufferPosition = _position + const Duration(seconds: 5);
-                });
-                _playerLog('🎬 [Player] HLS: Buffer insufficient, estimated buffer: $_bufferPosition');
-              }
-            } else {
-              // ✅ 非 HLS 流：直接使用 buffer
-              setState(() {
-                _bufferPosition = buffer;
-              });
-              _playerLog('🎬 [Player] Buffer position set to: $_bufferPosition');
-            }
-          } else if (_isHlsStream && _position > Duration.zero) {
-            // ✅ HLS 流且 buffer 为 0：如果正在播放，说明有一定缓冲
-            // 估算缓冲位置为当前位置 + 10 秒
-            setState(() {
-              _bufferPosition = _position + const Duration(seconds: 10);
-            });
-            _playerLog('🎬 [Player] HLS: Buffer is 0 but playing, estimated buffer: $_bufferPosition');
-          }
-        }
-      });
-
-      // ✅ 监听错误
-      _player.stream.error.listen((error) {
-        _playerLog('❌ [Player] Error: $error');
-      });
-
-      // ✅ 监听媒体轨道，并在轨道加载后确保禁用字幕
-      _player.stream.tracks.listen((tracks) {
-        _playerLog(
-            '🎬 [Player] Tracks: ${tracks.video.length} video, ${tracks.audio.length} audio, ${tracks.subtitle.length} subtitle');
-        // 确保字幕被禁用（轨道加载后可能自动启用字幕，需要再次禁用）
-        if (tracks.subtitle.isNotEmpty) {
-          _disableSubtitle();
-          _playerLog('🎬 [Player] Subtitle tracks detected, disabled again');
-        }
-      });
 
       // ✅ 如果需要从指定位置开始播放
       if (needsSeek) {
@@ -825,7 +644,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _playerLogImportant(
             '🎬 [Player] ⏱️ Waiting for playback to actually start...');
         // 等待播放真正开始（position 开始更新）
-        await _player.stream.position.firstWhere((pos) => pos > Duration.zero);
+        await _player.positionStream.firstWhere((pos) => pos > Duration.zero);
 
         _playerLogImportant(
             '🎬 [Player] ⏱️ Playback started, now seeking to ${_initialSeekPosition!.inSeconds}s...');
@@ -836,6 +655,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _playerLogImportant(
             '🎬 [Player] ✅ Seeked, restoring volume and resuming playback...');
         await _player.setVolume(100.0);
+        _currentVolume = 100.0;
         _playerLogImportant('🎬 [Player] 🔊 Volume restored to 100%');
         await _player.play();
 
@@ -858,7 +678,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         });
         // ✅ 获取当前音量（亮度已在 initState 时保存）
         _getCurrentVolume();
-        
+
         // ✅ 如果原始亮度还未保存（可能在 initState 时获取失败），再次尝试保存
         // 注意：只在 _originalBrightness 为 null 时保存，避免覆盖已保存的原始值
         if (_originalBrightness == null) {
@@ -888,6 +708,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _durSub?.cancel(); // ✅ 取消 duration 订阅
     _bufferingSub?.cancel();
     _playingSub?.cancel(); // ✅ 取消播放状态订阅
+    _bufferSub?.cancel();
+    _readySub?.cancel();
+    _videoSizeSub?.cancel();
+    _errorSub?.cancel();
     _hideControlsTimer?.cancel();
     _videoFitHintTimer?.cancel(); // ✅ 取消视频裁切模式提示计时器
     _longPressTimer?.cancel(); // ✅ 取消长按定时器
@@ -1455,6 +1279,34 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
   }
 
+  Map<String, int> _buildCacheConfig({
+    required bool isHlsStream,
+    required bool needExtraCache,
+  }) {
+    if (needExtraCache) {
+      return {
+        'minBufferMs': 180000,
+        'maxBufferMs': 360000,
+        'bufferForPlaybackMs': 1500,
+        'bufferForPlaybackAfterRebufferMs': 8000,
+      };
+    }
+    if (isHlsStream) {
+      return {
+        'minBufferMs': 90000,
+        'maxBufferMs': 180000,
+        'bufferForPlaybackMs': 1200,
+        'bufferForPlaybackAfterRebufferMs': 6000,
+      };
+    }
+    return {
+      'minBufferMs': 60000,
+      'maxBufferMs': 120000,
+      'bufferForPlaybackMs': 800,
+      'bufferForPlaybackAfterRebufferMs': 4000,
+    };
+  }
+
   // ✅ 格式化时间（用于显示）
   String _formatTime(Duration d) {
     String two(int n) => n.toString().padLeft(2, '0');
@@ -1629,14 +1481,30 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             children: [
               // ✅ 视频播放器（最底层，使用 IgnorePointer 让触摸事件穿透）
               Positioned.fill(
-                child: _ready
+                child: _ready && _textureId != null
                     ? Opacity(
                         opacity: _isInitialSeeking ? 0.0 : 1.0,
                         child: IgnorePointer(
-                          child: Video(
-                            controller: _controller,
-                            fit: _videoFit,
-                            controls: NoVideoControls, // ✅ 隐藏原生播放控件
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final width = _videoSize.width > 0
+                                  ? _videoSize.width
+                                  : constraints.maxWidth;
+                              final height = _videoSize.height > 0
+                                  ? _videoSize.height
+                                  : constraints.maxHeight;
+                              return FittedBox(
+                                fit: _videoFit,
+                                child: SizedBox(
+                                  width: width,
+                                  height: height,
+                                  child: Texture(
+                                    textureId: _textureId!,
+                                    filterQuality: FilterQuality.high,
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                         ),
                       )
@@ -1890,12 +1758,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   selectedSubtitleStreamIndex: _selectedSubtitleStreamIndex,
                   controlsAnimation: _controlsAnimation,
                   speedListScrollController: _speedListScrollController,
-                  player: _player,
                   onToggleVideoFit: _toggleVideoFit,
                   onEnterPip: _enterPip,
                   onToggleOrientation: _toggleOrientation,
                   onPlayPause: () async {
-                    final playing = _player.state.playing;
+                    final playing = _isPlaying;
                     // ✅ 只调用播放器方法，状态由 stream 监听更新
                     if (playing) {
                       await _player.pause();

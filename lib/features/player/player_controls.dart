@@ -4,7 +4,6 @@ import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
 import '../../utils/theme_utils.dart';
 
 /// ✅ 播放器控制状态数据类
@@ -34,7 +33,6 @@ class PlayerControlsState {
   final int? selectedSubtitleStreamIndex;
   final Animation<double> controlsAnimation;
   final ScrollController speedListScrollController;
-  final Player player;
   final VoidCallback onToggleVideoFit;
   final VoidCallback onEnterPip;
   final VoidCallback onToggleOrientation;
@@ -98,7 +96,6 @@ class PlayerControlsState {
     required this.selectedSubtitleStreamIndex,
     required this.controlsAnimation,
     required this.speedListScrollController,
-    required this.player,
     required this.onToggleVideoFit,
     required this.onEnterPip,
     required this.onToggleOrientation,
