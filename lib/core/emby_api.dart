@@ -1347,7 +1347,11 @@ class EmbyApi {
   }
 
   // Prefer HLS master for adaptive bitrate
-  Future<MediaSourceUrl> buildHlsUrl(String itemId) async {
+  Future<MediaSourceUrl> buildHlsUrl(
+    String itemId, {
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+  }) async {
     // ✅ 从 SharedPreferences 获取 token（因为 dio headers 是在拦截器中动态设置的）
     final prefs = await sp.SharedPreferences.getInstance();
     final token = prefs.getString('emby_token') ?? '';
@@ -1406,11 +1410,28 @@ class EmbyApi {
     }
 
     // ✅ 使用 HLS master 流（支持自适应码率）
-    uri = _dio.options.baseUrl +
-        '/Videos/$itemId/master.m3u8' +
-        '?MediaSourceId=$mediaSourceId' +
-        '&PlaySessionId=$playSessionId' +
-        '&api_key=$token';
+    // 添加音频和字幕流选择参数
+    final queryParams = <String, String>{
+      'MediaSourceId': mediaSourceId,
+      'PlaySessionId': playSessionId,
+      'api_key': token,
+    };
+
+    // ✅ 添加音频流索引（如果指定）
+    if (audioStreamIndex != null && audioStreamIndex >= 0) {
+      queryParams['AudioStreamIndex'] = audioStreamIndex.toString();
+    }
+
+    // ✅ 添加字幕流索引（如果指定且不是-1）
+    if (subtitleStreamIndex != null && subtitleStreamIndex >= 0) {
+      queryParams['SubtitleStreamIndex'] = subtitleStreamIndex.toString();
+    }
+
+    // ✅ 构建完整的 URL
+    final queryString = queryParams.entries
+        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    uri = '${_dio.options.baseUrl}/Videos/$itemId/master.m3u8?$queryString';
 
     // ✅ 根据 Emby 要求：
     // - 使用 DirectStreamUrl 或 HLS 时，token 必须作为 api_key 参数在 URL 里

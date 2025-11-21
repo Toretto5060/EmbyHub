@@ -65,8 +65,9 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
   bool _isImageSubtitle = false; // ✅ 标记是否为图片字幕
   Duration _lastPosition = Duration.zero; // ✅ 记录上次位置，用于检测大跳跃
 
-  // ✅ 字幕同步容差：字幕提前50ms显示，补偿渲染延迟
-  static const Duration _subtitleAdvance = Duration(milliseconds: 50);
+  // ✅ 字幕同步容差：字幕提前20ms显示，补偿渲染延迟
+  // 减少提前量，避免字幕过早显示
+  static const Duration _subtitleAdvance = Duration(milliseconds: 20);
 
   // ✅ HLS时间偏移：用于修正HLS流的时间戳差异
   Duration _timeOffset = Duration.zero;
@@ -331,9 +332,10 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     var adjustedPos = widget.position + _subtitleAdvance;
 
     // ✅ HLS时间偏移自动检测和修正
-    // 如果播放位置 > 10秒且还没有找到任何字幕，尝试自动检测时间偏移
+    // 如果播放位置 > 30秒且还没有找到任何字幕，尝试自动检测时间偏移
+    // 延迟检测时间，避免在片头无字幕时误判
     if (!_timeOffsetCalculated && 
-        widget.position > const Duration(seconds: 10) && 
+        widget.position > const Duration(seconds: 30) && 
         _subtitles.isNotEmpty) {
       _calculateTimeOffset(adjustedPos);
     }
@@ -400,28 +402,29 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     return null;
   }
 
-  /// ✅ 智能计算HLS时间偏移
+  /// ✅ 智能计算HLS时间偏移（保守策略）
   /// 
   /// HLS流常见的时间戳问题：
   /// 1. ExoPlayer的currentPosition从0开始，但字幕时间戳可能从视频的实际时间开始
   /// 2. 转码后的HLS流可能重置时间戳，导致字幕与视频不同步
   /// 3. 部分HLS流使用PTS（Presentation Time Stamp），可能有偏移
   /// 
-  /// 检测策略：
-  /// 1. 找到当前播放位置附近应该出现的字幕
-  /// 2. 如果找不到，尝试在字幕列表中搜索最接近的条目
-  /// 3. 计算时间差作为偏移量
+  /// 检测策略（保守）：
+  /// 1. 只在明确检测到大偏移时才应用（>1分钟）
+  /// 2. 优先假设时间轴一致，避免误判
+  /// 3. 多次确认后才应用偏移
   void _calculateTimeOffset(Duration currentPosition) {
     if (_subtitles.isEmpty) return;
 
     debugPrint(
         '🔍 [Subtitle] Calculating time offset... Video position: ${currentPosition.inSeconds}s');
 
-    // ✅ 策略1：查找当前位置附近（±5秒）是否有字幕
+    // ✅ 策略1：查找当前位置附近（±10秒）是否有字幕
+    // 扩大搜索范围，减少误判
     SubtitleEntry? nearbySubtitle;
     for (final subtitle in _subtitles) {
       final diff = (subtitle.start - currentPosition).abs();
-      if (diff < const Duration(seconds: 5)) {
+      if (diff < const Duration(seconds: 10)) {
         nearbySubtitle = subtitle;
         break;
       }
@@ -436,17 +439,16 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       return;
     }
 
-    // ✅ 策略2：没找到附近的字幕，检查是否需要偏移
-    // 找到第一个字幕和最后一个字幕，判断当前位置在哪个范围
+    // ✅ 策略2：只在明确的大偏移时才应用（>1分钟）
     final firstSubtitle = _subtitles.first;
     final lastSubtitle = _subtitles.last;
 
     debugPrint(
         '📊 [Subtitle] Subtitle range: ${firstSubtitle.start.inSeconds}s - ${lastSubtitle.end.inSeconds}s');
 
-    // ✅ 情况1：当前位置在第一个字幕之前很久（>30秒）
-    // 说明字幕时间轴比视频快，需要负偏移
-    if (currentPosition < firstSubtitle.start - const Duration(seconds: 30)) {
+    // ✅ 情况1：当前位置在第一个字幕之前很久（>1分钟）
+    // 说明字幕时间轴比视频快，需要正偏移
+    if (currentPosition < firstSubtitle.start - const Duration(minutes: 1)) {
       _timeOffset = firstSubtitle.start - currentPosition;
       debugPrint(
           '⚠️ [Subtitle] Detected POSITIVE offset: +${_timeOffset.inSeconds}s (subtitles start later)');
@@ -454,32 +456,8 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       return;
     }
 
-    // ✅ 情况2：当前位置在最后一个字幕之后很久（>30秒）
-    // 可能是视频已经播放很久了，字幕还没开始
-    if (currentPosition > lastSubtitle.end + const Duration(seconds: 30)) {
-      // ✅ 尝试找到最接近当前位置的字幕
-      SubtitleEntry? closestSubtitle;
-      Duration minDiff = const Duration(days: 1);
-      
-      for (final subtitle in _subtitles) {
-        final diff = (subtitle.start - currentPosition).abs();
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestSubtitle = subtitle;
-        }
-      }
-
-      if (closestSubtitle != null && minDiff < const Duration(minutes: 5)) {
-        _timeOffset = closestSubtitle.start - currentPosition;
-        debugPrint(
-            '⚠️ [Subtitle] Detected offset from closest subtitle: ${_timeOffset.inSeconds}s (diff: ${minDiff.inSeconds}s)');
-        _timeOffsetCalculated = true;
-        return;
-      }
-    }
-
-    // ✅ 情况3：当前位置在字幕范围内，但找不到匹配的字幕
-    // 可能是字幕时间轴整体偏移了
+    // ✅ 情况2：当前位置在字幕范围内，但找不到附近的字幕
+    // 检查是否整体偏移
     if (currentPosition >= firstSubtitle.start &&
         currentPosition <= lastSubtitle.end) {
       // ✅ 使用二分查找找到最接近的字幕
@@ -501,16 +479,22 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
         }
       }
 
-      // ✅ 计算前后字幕的时间差
+      // ✅ 只在间隙非常大时（>3分钟）才认为有偏移
       if (closestBefore != null && closestAfter != null) {
         final gapBefore = currentPosition - closestBefore.end;
         final gapAfter = closestAfter.start - currentPosition;
 
-        // ✅ 如果间隙很大（>2分钟），说明可能有偏移
-        if (gapBefore > const Duration(minutes: 2) &&
-            gapAfter > const Duration(minutes: 2)) {
-          // ✅ 使用第一个字幕的开始时间作为参考
-          _timeOffset = firstSubtitle.start - currentPosition;
+        if (gapBefore > const Duration(minutes: 3) &&
+            gapAfter > const Duration(minutes: 3)) {
+          // ✅ 使用最接近的字幕计算偏移
+          final offsetFromBefore = closestBefore.start - currentPosition;
+          final offsetFromAfter = closestAfter.start - currentPosition;
+          
+          // ✅ 选择绝对值较小的偏移
+          _timeOffset = offsetFromBefore.abs() < offsetFromAfter.abs()
+              ? offsetFromBefore
+              : offsetFromAfter;
+          
           debugPrint(
               '⚠️ [Subtitle] Detected offset from gap analysis: ${_timeOffset.inSeconds}s');
           _timeOffsetCalculated = true;
@@ -519,7 +503,7 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       }
     }
 
-    // ✅ 默认：不需要偏移
+    // ✅ 默认：不需要偏移（保守策略）
     _timeOffset = Duration.zero;
     debugPrint('✅ [Subtitle] No time offset detected, using zero offset');
     _timeOffsetCalculated = true;

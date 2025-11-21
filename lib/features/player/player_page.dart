@@ -471,7 +471,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
   }
 
-  /// ✅ 保存音频和字幕选择
+  // ✅ 保存音频和字幕选择
   Future<void> _saveStreamSelections() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -492,6 +492,102 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _hasManuallySelectedSubtitle);
     } catch (e) {
       _playerLog('❌ [Player] Save stream selections failed: $e');
+    }
+  }
+
+  // ✅ 重新加载播放器（当音频或字幕流改变时）
+  Future<void> _reloadPlayer() async {
+    if (_api == null) return;
+
+    try {
+      _playerLogImportant('🔄 [Player] Reloading player with new stream selection...');
+      
+      // ✅ 保存当前播放位置
+      final currentPosition = _position;
+      final wasPlaying = _isPlaying;
+      
+      // ✅ 暂停播放
+      if (wasPlaying) {
+        await _playerPause();
+      }
+
+      // ✅ 构建新的 HLS URL
+      final media = await _api!.buildHlsUrl(
+        widget.itemId,
+        audioStreamIndex: _selectedAudioStreamIndex,
+        subtitleStreamIndex: _selectedSubtitleStreamIndex,
+      );
+      
+      _playerLog('🎬 [Player] New media URL: ${media.uri}');
+
+      // ✅ 检测是否为 HLS 流
+      final isHlsStream =
+          media.uri.contains('.m3u8') || media.uri.contains('hls');
+      
+      // ✅ 根据视频分辨率和格式动态调整缓存配置
+      final is4KVideo = media.width != null && media.width! >= 3840;
+      final isHEVC = media.uri.contains('hevc') ||
+          media.uri.contains('h265') ||
+          (is4KVideo &&
+              media.bitrate != null &&
+              media.bitrate! > 20000000);
+      final needExtraCache = is4KVideo || isHEVC;
+
+      final cacheConfig = _buildCacheConfig(
+        isHlsStream: isHlsStream,
+        needExtraCache: needExtraCache,
+      );
+
+      // ✅ 重新打开媒体
+      await _guardPlayerCommand(
+        'reload media',
+        () => _player.open(
+          url: media.uri,
+          headers: media.headers,
+          isHls: isHlsStream,
+          autoPlay: false,
+          startPosition: null,
+          cacheConfig: cacheConfig,
+        ),
+      );
+
+      await _waitForPlayerReady();
+
+      // ✅ 禁用内置字幕
+      await _disableSubtitle();
+
+      // ✅ Seek 到之前的位置
+      if (currentPosition > Duration.zero) {
+        _playerLogImportant('🎬 [Player] Seeking to previous position: ${currentPosition.inSeconds}s');
+        await _playerSeek(currentPosition, swallowErrors: false);
+        
+        // ✅ 等待 seek 完成
+        try {
+          await _player.positionStream
+              .firstWhere((pos) =>
+                  (pos - currentPosition).abs() < const Duration(seconds: 1))
+              .timeout(const Duration(seconds: 3));
+        } catch (e) {
+          _playerLog('⚠️ [Player] Position confirmation timeout: $e');
+        }
+
+        // ✅ 更新 UI 位置
+        if (mounted) {
+          setState(() {
+            _position = currentPosition;
+          });
+        }
+      }
+
+      // ✅ 如果之前在播放，继续播放
+      if (wasPlaying) {
+        await _playerPlay();
+      }
+
+      _playerLogImportant('✅ [Player] Player reloaded successfully');
+    } catch (e, stack) {
+      _playerLog('❌ [Player] Reload player failed: $e');
+      debugPrintStack(stackTrace: stack);
     }
   }
 
@@ -558,9 +654,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _updateSubtitleUrl();
       }
 
-      final media = await api.buildHlsUrl(widget.itemId); // ✅ 添加 await
+      // ✅ 构建 HLS URL，传入选中的音频和字幕流索引
+      final media = await api.buildHlsUrl(
+        widget.itemId,
+        audioStreamIndex: _selectedAudioStreamIndex,
+        subtitleStreamIndex: _selectedSubtitleStreamIndex,
+      );
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
       _playerLog('🎬 [Player] Video Title: $_videoTitle');
+      _playerLog(
+          '🎬 [Player] Selected audio stream: $_selectedAudioStreamIndex, subtitle stream: $_selectedSubtitleStreamIndex');
 
       // ✅ 保存 PlaySessionId，用于调用 /Sessions/Playing
       _playSessionId = media.playSessionId;
@@ -734,12 +837,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _position = _initialSeekPosition!;
         }
         _lastReportedPosition = _initialSeekPosition!;
+      }
 
-        // ✅ 开始播放
-        _playerLogImportant('🎬 [Player] Starting playback after initial seek');
-        await _playerPlay();
-      } else {
-        // ✅ 不需要 seek，直接开始播放
+      // ✅ 开始播放（无论是否 seek，都确保播放）
+      _playerLogImportant('🎬 [Player] Starting playback...');
+      await _playerPlay();
+      
+      // ✅ 等待播放状态确认（最多等待2秒）
+      try {
+        await _player.playingStream
+            .firstWhere((playing) => playing)
+            .timeout(const Duration(seconds: 2));
+        _playerLogImportant('✅ [Player] Playback started successfully');
+      } catch (e) {
+        _playerLog('⚠️ [Player] Playback start confirmation timeout: $e');
+        // ✅ 超时后再次尝试播放
+        _playerLogImportant('🔄 [Player] Retrying playback...');
         await _playerPlay();
       }
 
@@ -2398,11 +2511,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _resetHideControlsTimer();
 
     if (result != null && result >= 0 && result < _audioStreams.length) {
+      final previousIndex = _selectedAudioStreamIndex;
       setState(() {
         _selectedAudioStreamIndex = result;
         _hasManuallySelectedAudio = true;
       });
-      _saveStreamSelections();
+      await _saveStreamSelections();
+      
+      // ✅ 如果音频流改变，重新加载播放器
+      if (previousIndex != result) {
+        _playerLogImportant('🔄 [Player] Audio stream changed from $previousIndex to $result, reloading...');
+        await _reloadPlayer();
+      }
     }
   }
 
@@ -2636,12 +2756,26 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     // ✅ 支持选择"不显示"（-1）或有效的字幕流索引
     if (result != null &&
         (result == -1 || (result >= 0 && result < _subtitleStreams.length))) {
+      final previousIndex = _selectedSubtitleStreamIndex;
       setState(() {
         _selectedSubtitleStreamIndex = result;
         _hasManuallySelectedSubtitle = true;
       });
-      _saveStreamSelections();
+      await _saveStreamSelections();
       _updateSubtitleUrl();
+      
+      // ✅ 检查是否为内嵌字幕（需要重新加载播放器）
+      // 外挂字幕通过 URL 加载，不需要重新加载播放器
+      if (previousIndex != result && result >= 0 && result < _subtitleStreams.length) {
+        final subtitleStream = _subtitleStreams[result];
+        final isExternal = (subtitleStream['IsExternal'] as bool?) == true;
+        
+        // ✅ 如果是内嵌字幕，需要重新加载播放器
+        if (!isExternal) {
+          _playerLogImportant('🔄 [Player] Embedded subtitle stream changed from $previousIndex to $result, reloading...');
+          await _reloadPlayer();
+        }
+      }
     }
   }
 
