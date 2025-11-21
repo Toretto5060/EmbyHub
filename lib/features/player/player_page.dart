@@ -132,7 +132,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isInPipMode = false;
 
   // ✅ 是否正在执行初始seek（用于隐藏第一帧）
-  bool _isInitialSeeking = false;
+  // bool _isInitialSeeking = false;
 
   // ✅ 视频裁切模式提示
   bool _showVideoFitHint = false;
@@ -544,17 +544,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         });
       }
 
-      final needsSeek =
+      final resumeFromSavedPosition =
           _initialSeekPosition != null && _initialSeekPosition! > Duration.zero;
 
       _playerLogImportant(
-          '🎬 [Player] needsSeek: $needsSeek, initialPosition: $_initialSeekPosition');
-
-      // ✅ 如果需要seek，先静音，避免第一帧有声音
-      if (needsSeek) {
-        await _player.setVolume(0.0);
-        _playerLogImportant('🎬 [Player] 🔇 Pre-muted for initial seek');
-      }
+          '🎬 [Player] resumeFromSavedPosition: $resumeFromSavedPosition, initialPosition: $_initialSeekPosition');
 
       // ✅ 打开媒体（设置标题以支持系统媒体通知）
       _playerLog('🎬 [Player] Opening media with title: $_videoTitle');
@@ -599,9 +593,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         url: media.uri,
         headers: media.headers,
         isHls: isHlsStream,
-        autoPlay: !needsSeek,
-        startPosition:
-            needsSeek ? null : (_initialSeekPosition ?? Duration.zero),
+        autoPlay: true,
+        startPosition: _initialSeekPosition,
         cacheConfig: cacheConfig,
       );
 
@@ -610,12 +603,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // ✅ 在 open 之后再次确保字幕被禁用
       await _disableSubtitle();
 
-      // ✅ 如果不需要seek，设置音量为100%
-      if (!needsSeek) {
-        await _player.setVolume(100.0);
-        _currentVolume = 100.0; // ✅ 保存当前音量
-        _playerLog('🎬 [Player] Volume set to 100%');
-      }
+      await _player.setVolume(100.0);
+      _currentVolume = 100.0; // ✅ 保存当前音量
+      _playerLog('🎬 [Player] Volume set to 100%');
 
       // ✅ 显示系统媒体通知
       _playerLog('🎬 [Player] ✅ Media opened successfully');
@@ -628,46 +618,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         setState(() => _isPlaying = currentPlaying);
       }
 
-      // ✅ 如果需要从指定位置开始播放
-      if (needsSeek) {
-        // 标记正在执行初始seek，隐藏视频画面
-        if (mounted) {
-          setState(() => _isInitialSeeking = true);
-        }
-
-        _playerLogImportant(
-            '🎬 [Player] ⏱️ Starting playback from beginning first (hidden and muted)...');
-
-        // 先开始播放，让播放器进入稳定状态（已在open前静音）
-        await _player.play();
-
-        _playerLogImportant(
-            '🎬 [Player] ⏱️ Waiting for playback to actually start...');
-        // 等待播放真正开始（position 开始更新）
-        await _player.positionStream.firstWhere((pos) => pos > Duration.zero);
-
-        _playerLogImportant(
-            '🎬 [Player] ⏱️ Playback started, now seeking to ${_initialSeekPosition!.inSeconds}s...');
-        await _player.seek(_initialSeekPosition!);
+      if (_initialSeekPosition != null) {
         _lastReportedPosition = _initialSeekPosition!;
-
-        // Seek 后恢复音量并确保继续播放
         _playerLogImportant(
-            '🎬 [Player] ✅ Seeked, restoring volume and resuming playback...');
-        await _player.setVolume(100.0);
-        _currentVolume = 100.0;
-        _playerLogImportant('🎬 [Player] 🔊 Volume restored to 100%');
-        await _player.play();
-
-        // 延迟一下确保seek后的帧已经渲染
-        await Future.delayed(const Duration(milliseconds: 100));
-
-        // 显示视频画面
-        if (mounted) {
-          setState(() => _isInitialSeeking = false);
-        }
-        _playerLogImportant(
-            '🎬 [Player] ✅ Playback resumed from ${_initialSeekPosition!.inSeconds}s, video visible');
+            '🎬 [Player] ✅ Playback will start from ${_initialSeekPosition!.inSeconds}s via startPosition');
       }
 
       if (mounted) {
@@ -1410,7 +1364,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (!force && !completed) {
       final timeDiff = now.difference(_lastProgressSync);
       final posDiffMs = (pos - _lastReportedPosition).inMilliseconds.abs();
-      if (timeDiff < const Duration(seconds: 5) && posDiffMs < 3000) {
+      if (timeDiff < const Duration(seconds: 3) && posDiffMs < 2000) {
         return;
       }
     }
@@ -1483,7 +1437,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               Positioned.fill(
                 child: _ready && _textureId != null
                     ? Opacity(
-                        opacity: _isInitialSeeking ? 0.0 : 1.0,
+                        // opacity: _isInitialSeeking ? 0.0 : 1.0,
+                        opacity: 1.0,
                         child: IgnorePointer(
                           child: LayoutBuilder(
                             builder: (context, constraints) {
