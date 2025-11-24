@@ -37,7 +37,8 @@ class SettingsPage extends ConsumerWidget {
                   title: '账户',
                   children: [
                     Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
                       decoration: BoxDecoration(
                         color: Theme.of(context)
                             .colorScheme
@@ -54,7 +55,8 @@ class SettingsPage extends ConsumerWidget {
                                 color: Colors.purple.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(Icons.dns_rounded, color: Colors.purple, size: 24),
+                              child: const Icon(Icons.dns_rounded,
+                                  color: Colors.purple, size: 24),
                             ),
                             title: const Text(
                               '服务器地址',
@@ -68,11 +70,14 @@ class SettingsPage extends ConsumerWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                             trailing: OutlinedButton(
-                              onPressed: () => _showServerSwitcher(context, ref),
+                              onPressed: () =>
+                                  _showServerSwitcher(context, ref),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.purple,
-                                side: BorderSide(color: Colors.purple.withOpacity(0.5)),
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                side: BorderSide(
+                                    color: Colors.purple.withOpacity(0.5)),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 8),
                               ),
                               child: const Text('切换'),
                             ),
@@ -80,8 +85,8 @@ class SettingsPage extends ConsumerWidget {
                           ListTile(
                             leading: authData.userId != null
                                 ? _UserAvatarRounded(
-                                    key: ValueKey(
-                                        authData.userId), // ✅ 使用 userId 作为 key 强制重建
+                                    key: ValueKey(authData
+                                        .userId), // ✅ 使用 userId 作为 key 强制重建
                                     userId: authData.userId,
                                     username: authData.userName ?? 'U',
                                     color: Colors.blue,
@@ -92,7 +97,8 @@ class SettingsPage extends ConsumerWidget {
                                       color: Colors.blue.withOpacity(0.1),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
-                                    child: const Icon(Icons.person_rounded, color: Colors.blue, size: 24),
+                                    child: const Icon(Icons.person_rounded,
+                                        color: Colors.blue, size: 24),
                                   ),
                             title: const Text(
                               '当前用户',
@@ -105,12 +111,14 @@ class SettingsPage extends ConsumerWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                             trailing: OutlinedButton(
-                              onPressed: () =>
-                                  _showAccountSwitcher(context, ref, serverData),
+                              onPressed: () => _showAccountSwitcher(
+                                  context, ref, serverData),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.blue,
-                                side: BorderSide(color: Colors.blue.withOpacity(0.5)),
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                side: BorderSide(
+                                    color: Colors.blue.withOpacity(0.5)),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 8),
                               ),
                               child: const Text('切换'),
                             ),
@@ -125,7 +133,8 @@ class SettingsPage extends ConsumerWidget {
                   title: '主题',
                   children: [
                     Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
                       decoration: BoxDecoration(
                         color: Theme.of(context)
                             .colorScheme
@@ -170,6 +179,24 @@ class SettingsPage extends ConsumerWidget {
                           );
                         },
                       ),
+                    ),
+                  ],
+                ),
+                _buildSection(
+                  context,
+                  title: '播放设置',
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const _QualityStrategySelector(),
                     ),
                   ],
                 ),
@@ -1194,6 +1221,210 @@ class _UserAvatarRounded extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Icon(Icons.person_rounded, color: color, size: 24),
+    );
+  }
+}
+
+// ✅ 画质策略选择器（StatefulWidget）
+class _QualityStrategySelector extends StatefulWidget {
+  const _QualityStrategySelector();
+
+  @override
+  State<_QualityStrategySelector> createState() =>
+      _QualityStrategySelectorState();
+}
+
+class _QualityStrategySelectorState extends State<_QualityStrategySelector> {
+  String _currentStrategy = 'quality';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStrategy();
+  }
+
+  Future<void> _loadStrategy() async {
+    final prefs = await SharedPreferences.getInstance();
+    final strategy = prefs.getString('playback_quality_strategy') ?? 'quality';
+    if (mounted) {
+      setState(() {
+        _currentStrategy = strategy;
+      });
+    }
+  }
+
+  Future<void> _changeStrategy(String newStrategy, String label) async {
+    final prefs = await SharedPreferences.getInstance();
+    final oldStrategy =
+        prefs.getString('playback_quality_strategy') ?? 'quality';
+
+    // ✅ 如果策略相同，不做任何操作
+    if (oldStrategy == newStrategy) return;
+
+    // ✅ 显示确认对话框（类似切换用户的样式）
+    if (!mounted) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('切换画质策略'),
+        content: Text(
+          '切换到「$label」后：\n\n'
+          '• 将清空所有视频的手动画质选择\n'
+          '• 正在播放的视频需要重新播放才能生效\n'
+          '• 新播放的视频将自动使用新策略\n\n'
+          '确定要切换吗？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    // ✅ 保存新策略
+    await prefs.setString('playback_quality_strategy', newStrategy);
+
+    // ✅ 清空所有 selected_quality_* 和 manual_quality_* 的保存
+    final keys = prefs.getKeys();
+    for (final key in keys) {
+      if (key.startsWith('selected_quality_') ||
+          key.startsWith('manual_quality_')) {
+        await prefs.remove(key);
+      }
+    }
+
+    // ✅ 更新状态
+    if (mounted) {
+      setState(() {
+        _currentStrategy = newStrategy;
+      });
+    }
+  }
+
+  String _getDescription(String strategy) {
+    switch (strategy) {
+      case 'quality':
+        return '总是选择最高画质，适合高速网络环境';
+      case 'speed':
+        return '优先保证流畅播放，适合网络较慢时使用';
+      case 'auto':
+        return '使用视频原始画质，平衡质量与速度';
+      default:
+        return '';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              '画质策略',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildStrategyButton(
+                'quality',
+                '质量优先',
+                Icons.hd_rounded,
+                _currentStrategy == 'quality',
+              ),
+              _buildStrategyButton(
+                'auto',
+                '自动',
+                Icons.auto_awesome_rounded,
+                _currentStrategy == 'auto',
+              ),
+              _buildStrategyButton(
+                'speed',
+                '速度优先',
+                Icons.speed_rounded,
+                _currentStrategy == 'speed',
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _getDescription(_currentStrategy),
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).textTheme.bodySmall?.color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStrategyButton(
+    String strategy,
+    String label,
+    IconData icon,
+    bool isSelected,
+  ) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Material(
+          color: isSelected
+              ? Theme.of(context).colorScheme.primaryContainer
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: () => _changeStrategy(strategy, label),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: isSelected
+                      ? Theme.of(context).colorScheme.primary
+                      : (Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white.withOpacity(0.2)
+                          : Colors.black.withOpacity(0.2)),
+                  width: isSelected ? 2 : 1,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 20),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

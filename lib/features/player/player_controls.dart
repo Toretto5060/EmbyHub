@@ -69,6 +69,14 @@ class PlayerControlsState {
   final bool isAdjustingVolume; // ✅ 是否正在调整音量
   final double? currentBrightness; // ✅ 当前亮度（0.0-1.0）
   final double? currentVolume; // ✅ 当前音量（0.0-100.0）
+  final List<Map<String, dynamic>>
+      qualityOptions; // ✅ 可选分辨率列表 [{label: "4K-200Mbps", bitrate: 200000, ...}]
+  final String? selectedQuality; // ✅ 当前选中的分辨率标签（null表示自动）
+  final bool showQualityList; // ✅ 是否显示分辨率列表
+  final ValueChanged<String?> onQualitySelected; // ✅ 分辨率选择回调（null表示自动）
+  final ValueChanged<bool> onShowQualityListChanged; // ✅ 显示/隐藏分辨率列表
+  final ScrollController qualityListScrollController; // ✅ 分辨率列表滚动控制器
+  final VoidCallback onScrollToSelectedQuality; // ✅ 滚动到选中的分辨率
 
   const PlayerControlsState({
     required this.isInPipMode,
@@ -132,6 +140,13 @@ class PlayerControlsState {
     this.isAdjustingVolume = false,
     this.currentBrightness,
     this.currentVolume,
+    required this.qualityOptions,
+    this.selectedQuality,
+    this.showQualityList = false,
+    required this.onQualitySelected,
+    required this.onShowQualityListChanged,
+    required this.qualityListScrollController,
+    required this.onScrollToSelectedQuality,
   });
 }
 
@@ -152,15 +167,21 @@ class PlayerControls extends ConsumerWidget {
         // ✅ 空白区域点击检测层（最底层，当控制层显示时，用于隐藏控制层）
         // 使用 translucent 允许事件穿透到按钮，按钮会用 AbsorbPointer 吸收事件
         // 锁定状态下不响应点击隐藏
-        if (!state.isInPipMode &&
-            state.showControls &&
-            !state.showSpeedList &&
-            !state.isLocked)
+        if (!state.isInPipMode && state.showControls && !state.isLocked)
           Positioned.fill(
             child: GestureDetector(
               onTap: () {
-                // ✅ 点击空白区域隐藏控制层
-                state.onToggleControls();
+                // ✅ 如果有列表显示，先关闭列表
+                if (state.showSpeedList) {
+                  state.onShowSpeedListChanged(false);
+                  state.onResetHideControlsTimer();
+                } else if (state.showQualityList) {
+                  state.onShowQualityListChanged(false);
+                  state.onResetHideControlsTimer();
+                } else {
+                  // ✅ 没有列表显示时，点击空白区域隐藏控制层
+                  state.onToggleControls();
+                }
               },
               behavior: HitTestBehavior.translucent,
               child: Container(color: Colors.transparent),
@@ -249,6 +270,14 @@ class PlayerControls extends ConsumerWidget {
             !state.isLocked)
           _SpeedList(state: state, context: context),
 
+        // ✅ 分辨率列表（显示在右侧，放在最后确保在最上层）
+        // 锁定状态下隐藏
+        if (!state.isInPipMode &&
+            state.showQualityList &&
+            state.showControls &&
+            !state.isLocked)
+          _QualityList(state: state, context: context),
+
         // ✅ 亮度/音量调整提示（显示在屏幕中间，不受锁定影响）
         if (state.isAdjustingBrightness && state.currentBrightness != null)
           _BrightnessIndicator(brightness: state.currentBrightness!),
@@ -257,6 +286,14 @@ class PlayerControls extends ConsumerWidget {
       ],
     );
   }
+}
+
+/// ✅ 提取分辨率短标签（只显示 "xxxP" 部分，不显示比特率）
+String _getShortQualityLabel(String? fullLabel) {
+  if (fullLabel == null) return '自动';
+  // ✅ 格式：1080p-60Mbps -> 1080p
+  final parts = fullLabel.split('-');
+  return parts.isNotEmpty ? parts[0] : fullLabel;
 }
 
 /// ✅ 顶部控制栏
@@ -300,7 +337,16 @@ class _TopControlsBar extends ConsumerWidget {
                     children: [
                       _buildIconButton(
                         icon: Icons.arrow_back_ios_new_rounded,
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: () {
+                          // ✅ 关闭所有列表
+                          if (state.showSpeedList) {
+                            state.onShowSpeedListChanged(false);
+                          }
+                          if (state.showQualityList) {
+                            state.onShowQualityListChanged(false);
+                          }
+                          Navigator.of(context).pop();
+                        },
                         size: 24,
                       ),
                       const SizedBox(width: 8),
@@ -356,6 +402,50 @@ class _TopControlsBar extends ConsumerWidget {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                // ✅ 分辨率选择按钮
+                                CupertinoButton(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 6,
+                                  ),
+                                  minSize: 0,
+                                  onPressed: () {
+                                    final willShow = !state.showQualityList;
+                                    state.onShowQualityListChanged(willShow);
+                                    if (willShow) {
+                                      // ✅ 显示列表时，取消自动隐藏计时器
+                                      state.onCancelHideControlsTimer();
+                                      // ✅ 关闭速度列表
+                                      if (state.showSpeedList) {
+                                        state.onShowSpeedListChanged(false);
+                                      }
+                                      // ✅ 滚动逻辑已在 _QualityList.initState 中处理
+                                    } else {
+                                      // ✅ 隐藏列表时，重新启动自动隐藏计时器
+                                      state.onResetHideControlsTimer();
+                                    }
+                                  },
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.high_quality_rounded,
+                                        color: Colors.white,
+                                        size: 22,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _getShortQualityLabel(
+                                            state.selectedQuality),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                                 // ✅ 视频画面裁切模式切换按钮（带动画）
                                 CupertinoButton(
                                   padding: const EdgeInsets.symmetric(
@@ -364,6 +454,13 @@ class _TopControlsBar extends ConsumerWidget {
                                   ),
                                   minSize: 0,
                                   onPressed: () {
+                                    // ✅ 关闭所有列表
+                                    if (state.showSpeedList) {
+                                      state.onShowSpeedListChanged(false);
+                                    }
+                                    if (state.showQualityList) {
+                                      state.onShowQualityListChanged(false);
+                                    }
                                     state.onToggleVideoFit();
                                     state.onResetHideControlsTimer();
                                   },
@@ -394,6 +491,13 @@ class _TopControlsBar extends ConsumerWidget {
                                   ),
                                   minSize: 0,
                                   onPressed: () {
+                                    // ✅ 关闭所有列表
+                                    if (state.showSpeedList) {
+                                      state.onShowSpeedListChanged(false);
+                                    }
+                                    if (state.showQualityList) {
+                                      state.onShowQualityListChanged(false);
+                                    }
                                     state.onEnterPip();
                                     state.onResetHideControlsTimer();
                                   },
@@ -411,6 +515,13 @@ class _TopControlsBar extends ConsumerWidget {
                                   ),
                                   minSize: 0,
                                   onPressed: () {
+                                    // ✅ 关闭所有列表
+                                    if (state.showSpeedList) {
+                                      state.onShowSpeedListChanged(false);
+                                    }
+                                    if (state.showQualityList) {
+                                      state.onShowQualityListChanged(false);
+                                    }
                                     state.onToggleOrientation();
                                     state.onResetHideControlsTimer();
                                   },
@@ -549,7 +660,7 @@ class _VideoFitHint extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Positioned(
-      top: 90, // 在顶部按钮下方，紧贴按钮组
+      top: 80, // 在顶部按钮下方，紧贴按钮组
       right: 85, // 对齐裁剪按钮位置
       child: AnimatedOpacity(
         opacity: state.showVideoFitHint ? 1.0 : 0.0,
@@ -1149,6 +1260,10 @@ class _SpeedControl extends StatelessWidget {
                                   if (state.showSpeedList) {
                                     state.onShowSpeedListChanged(false);
                                   }
+                                  // ✅ 关闭分辨率列表
+                                  if (state.showQualityList) {
+                                    state.onShowQualityListChanged(false);
+                                  }
                                   state.onResetHideControlsTimer();
                                 }
                               },
@@ -1172,11 +1287,11 @@ class _SpeedControl extends StatelessWidget {
                                 if (willShow) {
                                   // ✅ 显示列表时，取消自动隐藏计时器
                                   state.onCancelHideControlsTimer();
-                                  // ✅ 滚动到选中项
-                                  WidgetsBinding.instance
-                                      .addPostFrameCallback((_) {
-                                    state.onScrollToSelectedSpeed();
-                                  });
+                                  // ✅ 关闭分辨率列表
+                                  if (state.showQualityList) {
+                                    state.onShowQualityListChanged(false);
+                                  }
+                                  // ✅ 滚动逻辑已在 _SpeedList.initState 中处理
                                 } else {
                                   // ✅ 隐藏列表时，重新启动自动隐藏计时器
                                   state.onResetHideControlsTimer();
@@ -1204,6 +1319,10 @@ class _SpeedControl extends StatelessWidget {
                                   // ✅ 关闭倍速列表
                                   if (state.showSpeedList) {
                                     state.onShowSpeedListChanged(false);
+                                  }
+                                  // ✅ 关闭分辨率列表
+                                  if (state.showQualityList) {
+                                    state.onShowQualityListChanged(false);
                                   }
                                   state.onResetHideControlsTimer();
                                 }
@@ -1285,11 +1404,25 @@ class _BottomControlsBar extends StatelessWidget {
 }
 
 /// ✅ 速度档位列表
-class _SpeedList extends StatelessWidget {
+class _SpeedList extends StatefulWidget {
   const _SpeedList({required this.state, required this.context});
 
   final PlayerControlsState state;
   final BuildContext context;
+
+  @override
+  State<_SpeedList> createState() => _SpeedListState();
+}
+
+class _SpeedListState extends State<_SpeedList> {
+  @override
+  void initState() {
+    super.initState();
+    // ✅ 列表构建后立即滚动到选中项
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.state.onScrollToSelectedSpeed();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1299,8 +1432,9 @@ class _SpeedList extends StatelessWidget {
       bottom: 0,
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            maxHeight: 220, // ✅ 设置最大高度
+          constraints: BoxConstraints(
+            maxHeight:
+                MediaQuery.of(context).size.height * 0.4, // ✅ 最大高度为屏幕高度的40%
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
@@ -1324,21 +1458,26 @@ class _SpeedList extends StatelessWidget {
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: SingleChildScrollView(
-                  controller: state.speedListScrollController,
+                  controller: widget.state.speedListScrollController,
+                  physics: const BouncingScrollPhysics(), // ✅ 添加弹性滚动效果
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: state.speedOptions.map((speed) {
-                      final isSelected = speed == state.speed;
+                    children:
+                        widget.state.speedOptions.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final speed = entry.value;
+                      final isSelected = speed == widget.state.speed;
                       return CupertinoButton(
+                        key: ValueKey('speed_option_$index'), // ✅ 添加 key 便于识别
                         padding: const EdgeInsets.symmetric(
                           horizontal: 24,
                           vertical: 12,
                         ),
                         onPressed: () async {
-                          await state.onChangeSpeed(speed);
-                          state.onShowSpeedListChanged(false);
-                          state.onResetHideControlsTimer();
+                          await widget.state.onChangeSpeed(speed);
+                          widget.state.onShowSpeedListChanged(false);
+                          widget.state.onResetHideControlsTimer();
                         },
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.start,
@@ -1366,6 +1505,135 @@ class _SpeedList extends StatelessWidget {
                       );
                     }).toList(),
                   ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ✅ 分辨率列表（显示在分辨率按钮下方，右侧对齐）
+class _QualityList extends StatefulWidget {
+  const _QualityList({required this.state, required this.context});
+
+  final PlayerControlsState state;
+  final BuildContext context;
+
+  @override
+  State<_QualityList> createState() => _QualityListState();
+}
+
+class _QualityListState extends State<_QualityList> {
+  @override
+  void initState() {
+    super.initState();
+    // ✅ 列表构建后立即滚动到选中项
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.state.onScrollToSelectedQuality();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // ✅ 调试：打印分辨率选项数量
+    print(
+        '🎬 [QualityList] qualityOptions count: ${widget.state.qualityOptions.length}');
+    print('🎬 [QualityList] qualityOptions: ${widget.state.qualityOptions}');
+
+    // ✅ 构建选项列表：自动 + 所有可选分辨率
+    final options = [
+      {'label': '自动', 'value': null}, // ✅ null 表示自动
+      ...widget.state.qualityOptions.map((q) => {
+            'label': q['label'] as String,
+            'value': q['label'] as String,
+          }),
+    ];
+
+    print('🎬 [QualityList] Total options count: ${options.length}');
+
+    return Positioned(
+      top: 80, // ✅ 在顶部按钮下方（与视频裁切提示对齐）
+      right: 16, // ✅ 与顶部右侧按钮组对齐
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight:
+              MediaQuery.of(context).size.height * 0.5, // ✅ 最大高度为屏幕高度的50%
+          minWidth: 140, // ✅ 设置最小宽度
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: Theme.of(context).brightness == Brightness.dark
+                      ? [
+                          Colors.grey.shade900.withValues(alpha: 0.7),
+                          Colors.grey.shade800.withValues(alpha: 0.5),
+                        ]
+                      : [
+                          Colors.white.withValues(alpha: 0.25),
+                          Colors.white.withValues(alpha: 0.15),
+                        ],
+                ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: SingleChildScrollView(
+                controller: widget.state.qualityListScrollController,
+                physics: const BouncingScrollPhysics(), // ✅ 添加弹性滚动效果
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: options.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final option = entry.value;
+                    final label = option['label'] as String;
+                    final value = option['value'];
+                    final isSelected = value == widget.state.selectedQuality;
+
+                    return CupertinoButton(
+                      key: ValueKey('quality_option_$index'), // ✅ 添加 key 便于识别
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      onPressed: () {
+                        widget.state.onQualitySelected(value);
+                        widget.state.onShowQualityListChanged(false);
+                        widget.state.onResetHideControlsTimer();
+                      },
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            label,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: isSelected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                          if (isSelected) ...[
+                            const SizedBox(width: 8),
+                            const Icon(
+                              Icons.check_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }).toList(),
                 ),
               ),
             ),

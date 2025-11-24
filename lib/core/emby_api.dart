@@ -1351,6 +1351,9 @@ class EmbyApi {
     String itemId, {
     int? audioStreamIndex,
     int? subtitleStreamIndex,
+    int? maxWidth,
+    int? maxHeight,
+    int? maxBitrate,
   }) async {
     // ✅ 从 SharedPreferences 获取 token（因为 dio headers 是在拦截器中动态设置的）
     final prefs = await sp.SharedPreferences.getInstance();
@@ -1416,9 +1419,9 @@ class EmbyApi {
       'PlaySessionId': playSessionId,
       'api_key': token,
       // ✅ 强制音频转码参数，确保 AC3/DTS/TrueHD 等格式能正常播放
-      'AudioCodec': 'aac',  // 转码为 AAC（所有设备都支持）
-      'TranscodingMaxAudioChannels': '2',  // 转为立体声（避免多声道问题）
-      'EnableAutoStreamCopy': 'false',  // 禁用直接复制，强制转码
+      'AudioCodec': 'aac', // 转码为 AAC（所有设备都支持）
+      'TranscodingMaxAudioChannels': '2', // 转为立体声（避免多声道问题）
+      'EnableAutoStreamCopy': 'false', // 禁用直接复制，强制转码
     };
 
     // ✅ 添加音频流索引（如果指定）
@@ -1429,6 +1432,18 @@ class EmbyApi {
     // ✅ 添加字幕流索引（如果指定且不是-1）
     if (subtitleStreamIndex != null && subtitleStreamIndex >= 0) {
       queryParams['SubtitleStreamIndex'] = subtitleStreamIndex.toString();
+    }
+
+    // ✅ 添加分辨率限制参数（如果指定）
+    if (maxWidth != null && maxWidth > 0) {
+      queryParams['MaxWidth'] = maxWidth.toString();
+    }
+    if (maxHeight != null && maxHeight > 0) {
+      queryParams['MaxHeight'] = maxHeight.toString();
+    }
+    if (maxBitrate != null && maxBitrate > 0) {
+      queryParams['VideoBitrate'] = maxBitrate.toString();
+      queryParams['MaxStreamingBitrate'] = maxBitrate.toString();
     }
 
     // ✅ 构建完整的 URL

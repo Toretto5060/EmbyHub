@@ -187,6 +187,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ 速度列表滚动控制器
   final ScrollController _speedListScrollController = ScrollController();
 
+  // ✅ 分辨率选择
+  List<Map<String, dynamic>> _qualityOptions = []; // ✅ 可选分辨率列表
+  String? _selectedQuality; // ✅ 当前选中的分辨率（null表示自动）
+  bool _showQualityList = false; // ✅ 是否显示分辨率列表
+  final ScrollController _qualityListScrollController = ScrollController();
+
   // ✅ 音频和字幕选择
   int? _selectedAudioStreamIndex;
   int? _selectedSubtitleStreamIndex;
@@ -454,12 +460,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     _networkSpeedSub?.cancel();
     _networkSpeedSub = _player.networkSpeedStream.listen((speedBps) {
-      if (mounted && _isBuffering) {
-        // ✅ 将 bps 转换为 kbps
+      if (mounted) {
+        // ✅ 将 bps 转换为 kbps（始终更新，不仅在缓冲时）
         final speedKbps = speedBps / 1000;
         setState(() {
           _currentSpeedKbps = speedKbps;
         });
+        // ✅ 只在缓冲时显示日志
+        if (_isBuffering) {
+          _playerLog(
+              '📶 [Player] Network speed: ${(speedKbps / 1000).toStringAsFixed(1)} Mbps');
+        }
       }
     });
   }
@@ -493,12 +504,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (_api == null) return;
 
     try {
-      _playerLogImportant('🔄 [Player] Reloading player with new stream selection...');
-      
+      _playerLogImportant(
+          '🔄 [Player] Reloading player with new stream selection...');
+
       // ✅ 保存当前播放位置
       final currentPosition = _position;
       final wasPlaying = _isPlaying;
-      
+
       // ✅ 暂停播放
       if (wasPlaying) {
         await _playerPause();
@@ -510,20 +522,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         audioStreamIndex: _selectedAudioStreamIndex,
         subtitleStreamIndex: _selectedSubtitleStreamIndex,
       );
-      
+
       _playerLog('🎬 [Player] New media URL: ${media.uri}');
 
       // ✅ 检测是否为 HLS 流
       final isHlsStream =
           media.uri.contains('.m3u8') || media.uri.contains('hls');
-      
+
       // ✅ 根据视频分辨率和格式动态调整缓存配置
       final is4KVideo = media.width != null && media.width! >= 3840;
       final isHEVC = media.uri.contains('hevc') ||
           media.uri.contains('h265') ||
-          (is4KVideo &&
-              media.bitrate != null &&
-              media.bitrate! > 20000000);
+          (is4KVideo && media.bitrate != null && media.bitrate! > 20000000);
       final needExtraCache = is4KVideo || isHEVC;
 
       final cacheConfig = _buildCacheConfig(
@@ -551,9 +561,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       // ✅ Seek 到之前的位置
       if (currentPosition > Duration.zero) {
-        _playerLogImportant('🎬 [Player] Seeking to previous position: ${currentPosition.inSeconds}s');
+        _playerLogImportant(
+            '🎬 [Player] Seeking to previous position: ${currentPosition.inSeconds}s');
         await _playerSeek(currentPosition, swallowErrors: false);
-        
+
         // ✅ 等待 seek 完成
         try {
           await _player.positionStream
@@ -609,7 +620,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _audioStreams = _getAudioStreams(itemDetails);
         _subtitleStreams = _getSubtitleStreams(itemDetails);
 
-        // ✅ 获取 PlaybackInfo 以获取正确的 MediaSourceId
+        // ✅ 获取 PlaybackInfo 以获取正确的 MediaSourceId 和分辨率选项
         if (_userId != null) {
           try {
             final playbackInfo = await api.getPlaybackInfo(
@@ -618,16 +629,93 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             );
             _playerLog('🎬 [Player] PlaybackInfo: $playbackInfo');
 
-            // ✅ 从 PlaybackInfo 中获取 MediaSourceId
+            // ✅ 从 PlaybackInfo 中获取 MediaSourceId 和视频信息
+            Map<String, dynamic>? playbackMediaSource;
             if (playbackInfo['MediaSources'] != null &&
                 playbackInfo['MediaSources'] is List &&
                 (playbackInfo['MediaSources'] as List).isNotEmpty) {
-              final mediaSource = (playbackInfo['MediaSources'] as List).first;
-              if (mediaSource is Map) {
-                _mediaSourceId = mediaSource['Id'] as String?;
+              final firstSource = (playbackInfo['MediaSources'] as List).first;
+              if (firstSource is Map) {
+                playbackMediaSource = Map<String, dynamic>.from(firstSource);
+                _mediaSourceId = playbackMediaSource['Id'] as String?;
                 _playerLog(
                     '🎬 [Player] MediaSourceId from PlaybackInfo: $_mediaSourceId');
               }
+            }
+
+            // ✅ 根据 PlaybackInfo 中的视频分辨率生成转码选项（优先使用 PlaybackInfo）
+            final generatedOptions = playbackMediaSource != null
+                ? _generateQualityOptionsFromMediaSource(playbackMediaSource)
+                : _generateQualityOptions(itemDetails);
+            _playerLog(
+                '🎬 [Player] Generated options count: ${generatedOptions.length}');
+
+            if (mounted) {
+              setState(() {
+                _qualityOptions = generatedOptions;
+              });
+            }
+
+            // ✅ 加载分辨率选择逻辑
+            final prefs = await SharedPreferences.getInstance();
+
+            // ✅ 检查该视频是否手动选择过画质
+            final hasManualSelection =
+                prefs.getBool('manual_quality_${widget.itemId}') ?? false;
+            final savedQuality =
+                prefs.getString('selected_quality_${widget.itemId}');
+
+            String? selectedQuality;
+
+            if (hasManualSelection &&
+                savedQuality != null &&
+                _qualityOptions.any((q) => q['label'] == savedQuality)) {
+              // ✅ 该视频手动选择过画质，使用手动选择的
+              selectedQuality = savedQuality;
+              _playerLog(
+                  '🎬 [Player] Using manual selection: $selectedQuality');
+            } else {
+              // ✅ 该视频没有手动选择过，根据播放质量策略自动选择
+              final qualityStrategy =
+                  prefs.getString('playback_quality_strategy') ?? 'quality';
+
+              if (qualityStrategy == 'quality') {
+                // ✅ 质量优先：选择最高分辨率（第一个选项）
+                if (_qualityOptions.isNotEmpty) {
+                  selectedQuality = _qualityOptions.first['label'] as String;
+                  _playerLog(
+                      '🎬 [Player] Quality priority: Using highest quality: $selectedQuality');
+                }
+              } else if (qualityStrategy == 'speed') {
+                // ✅ 速度优先：根据当前网络速度选择合适的画质
+                selectedQuality = _selectQualityByNetworkSpeed();
+                _playerLog(
+                    '🎬 [Player] Speed priority: Selected quality based on network: $selectedQuality');
+              } else {
+                // ✅ 自动：根据当前网络速度选择合适的画质（与速度优先相同）
+                selectedQuality = _selectQualityByNetworkSpeed();
+                _playerLog(
+                    '🎬 [Player] Auto: Selected quality based on network: $selectedQuality');
+              }
+
+              // ✅ 如果没有选中任何画质，使用原始分辨率作为后备
+              if (selectedQuality == null) {
+                final originalOption = _qualityOptions.firstWhere(
+                  (q) => q['isOriginal'] == true,
+                  orElse: () => <String, dynamic>{},
+                );
+                if (originalOption.isNotEmpty) {
+                  selectedQuality = originalOption['label'] as String;
+                  _playerLog(
+                      '🎬 [Player] Auto mode: Using original quality: $selectedQuality');
+                }
+              }
+            }
+
+            if (selectedQuality != null && mounted) {
+              setState(() {
+                _selectedQuality = selectedQuality;
+              });
             }
           } catch (e) {
             _playerLog('❌ [Player] Failed to get PlaybackInfo: $e');
@@ -652,8 +740,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // 只有在用户手动选择时才传递参数，否则让 Emby 自动选择
       final media = await api.buildHlsUrl(
         widget.itemId,
-        audioStreamIndex: _hasManuallySelectedAudio ? _selectedAudioStreamIndex : null,
-        subtitleStreamIndex: _hasManuallySelectedSubtitle ? _selectedSubtitleStreamIndex : null,
+        audioStreamIndex:
+            _hasManuallySelectedAudio ? _selectedAudioStreamIndex : null,
+        subtitleStreamIndex:
+            _hasManuallySelectedSubtitle ? _selectedSubtitleStreamIndex : null,
       );
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
       _playerLog('🎬 [Player] Video Title: $_videoTitle');
@@ -781,15 +871,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       if (resumeFromSavedPosition && _initialSeekPosition != null) {
         _playerLogImportant(
             '🎬 [Player] Seeking to initial position: ${_initialSeekPosition!.inSeconds}s');
-        
+
         // ✅ 先 seek 到目标位置（暂停状态）
         await _playerSeek(_initialSeekPosition!, swallowErrors: false);
-        
+
         // ✅ 1. 等待 position stream 确认已到达目标位置
         try {
           await _player.positionStream
               .firstWhere((pos) =>
-                  (pos - _initialSeekPosition!).abs() < const Duration(seconds: 1))
+                  (pos - _initialSeekPosition!).abs() <
+                  const Duration(seconds: 1))
               .timeout(const Duration(seconds: 3));
           _playerLogImportant('🎬 [Player] ✅ Position confirmed at target');
         } catch (e) {
@@ -837,7 +928,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // ✅ 开始播放（无论是否 seek，都确保播放）
       _playerLogImportant('🎬 [Player] Starting playback...');
       await _playerPlay();
-      
+
       // ✅ 等待播放状态确认（最多等待2秒）
       try {
         await _player.playingStream
@@ -899,6 +990,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _longPressTimer?.cancel(); // ✅ 取消长按定时器
     _speedAccelerationTimer?.cancel(); // ✅ 取消倍速加速定时器
     _speedListScrollController.dispose(); // ✅ 释放速度列表滚动控制器
+    _qualityListScrollController.dispose(); // ✅ 释放分辨率列表滚动控制器
     _controlsAnimationController.dispose();
     final markComplete =
         _duration > Duration.zero && _position >= _duration * 0.95;
@@ -1271,6 +1363,205 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
     );
+  }
+
+  // ✅ 滚动到选中的分辨率项
+  void _scrollToSelectedQuality() {
+    if (!_qualityListScrollController.hasClients) return;
+
+    // ✅ 找到选中项的索引（包括"自动"选项）
+    int selectedIndex = 0; // 默认是"自动"
+    if (_selectedQuality != null) {
+      selectedIndex = _qualityOptions.indexWhere(
+            (q) => q['label'] == _selectedQuality,
+          ) +
+          1; // +1 因为第一个是"自动"
+    }
+
+    // 每个按钮的高度约为 48（padding 12*2 + 文字行高约24）
+    const itemHeight = 48.0;
+    final targetOffset = selectedIndex * itemHeight;
+
+    // 滚动到目标位置，居中显示
+    final maxScrollExtent =
+        _qualityListScrollController.position.maxScrollExtent;
+    final viewportHeight =
+        _qualityListScrollController.position.viewportDimension;
+    final centeredOffset = (targetOffset - viewportHeight / 2 + itemHeight / 2)
+        .clamp(0.0, maxScrollExtent);
+
+    _qualityListScrollController.animateTo(
+      centeredOffset,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+    );
+  }
+
+  // ✅ 根据网络速度选择合适的画质
+  String? _selectQualityByNetworkSpeed() {
+    if (_qualityOptions.isEmpty) return null;
+
+    // ✅ 如果当前没有网络速度数据，使用原始分辨率
+    if (_currentSpeedKbps == null || _currentSpeedKbps! <= 0) {
+      final originalOption = _qualityOptions.firstWhere(
+        (q) => q['isOriginal'] == true,
+        orElse: () => <String, dynamic>{},
+      );
+      if (originalOption.isNotEmpty) {
+        _playerLog('🎬 [Player] No network speed data, using original quality');
+        return originalOption['label'] as String;
+      }
+      // 如果没有原始选项，使用中等画质
+      final middleIndex = _qualityOptions.length ~/ 2;
+      return _qualityOptions[middleIndex]['label'] as String;
+    }
+
+    // ✅ 将网络速度从 kbps 转换为 Mbps
+    final speedMbps = _currentSpeedKbps! / 1000;
+
+    _playerLog(
+        '🎬 [Player] Current network speed: ${speedMbps.toStringAsFixed(1)} Mbps');
+
+    // ✅ 根据网络速度选择合适的画质
+    // 策略：选择比特率不超过网络速度 70% 的最高画质（留 30% 余量保证流畅）
+    final targetBitrateMbps = speedMbps * 0.7;
+
+    String? selectedQuality;
+    for (final option in _qualityOptions) {
+      final maxBitrate = option['maxBitrate'] as int?;
+      if (maxBitrate != null) {
+        final bitrateMbps = maxBitrate / 1000000; // 转换为 Mbps
+        if (bitrateMbps <= targetBitrateMbps) {
+          selectedQuality = option['label'] as String;
+          _playerLog(
+              '🎬 [Player] Selected quality: $selectedQuality (${bitrateMbps.toStringAsFixed(1)} Mbps) for network speed ${speedMbps.toStringAsFixed(1)} Mbps');
+          break;
+        }
+      }
+    }
+
+    // ✅ 如果没有找到合适的画质（网络太慢），选择最低画质
+    if (selectedQuality == null && _qualityOptions.isNotEmpty) {
+      selectedQuality = _qualityOptions.last['label'] as String;
+      _playerLog(
+          '🎬 [Player] Network too slow, using lowest quality: $selectedQuality');
+    }
+
+    return selectedQuality;
+  }
+
+  // ✅ 分辨率选择回调
+  Future<void> _onQualitySelected(String? quality) async {
+    if (_api == null) return;
+
+    setState(() {
+      _selectedQuality = quality;
+    });
+
+    // ✅ 持久化分辨率选择（标记为手动选择）
+    final prefs = await SharedPreferences.getInstance();
+    if (quality != null) {
+      await prefs.setString('selected_quality_${widget.itemId}', quality);
+      // ✅ 标记该视频已手动选择过画质
+      await prefs.setBool('manual_quality_${widget.itemId}', true);
+      _playerLog('🎬 [Player] Quality manually changed to: $quality');
+    } else {
+      await prefs.remove('selected_quality_${widget.itemId}');
+      await prefs.remove('manual_quality_${widget.itemId}');
+      _playerLog('🎬 [Player] Quality reset to auto');
+    }
+
+    // ✅ 获取选中分辨率的参数
+    Map<String, dynamic>? selectedOption;
+    if (quality != null) {
+      selectedOption = _qualityOptions.firstWhere(
+        (q) => q['label'] == quality,
+        orElse: () => <String, dynamic>{},
+      );
+    }
+
+    // ✅ 重新加载播放器以应用新的分辨率
+    await _reloadPlayerWithQuality(selectedOption);
+  }
+
+  // ✅ 使用指定分辨率重新加载播放器
+  Future<void> _reloadPlayerWithQuality(
+      Map<String, dynamic>? qualityOption) async {
+    if (_api == null) return;
+
+    try {
+      _playerLogImportant(
+          '🔄 [Player] Reloading player with quality: ${qualityOption?['label'] ?? "自动"}');
+
+      // ✅ 保存当前播放位置
+      final currentPosition = _position;
+      final wasPlaying = _isPlaying;
+
+      // ✅ 暂停播放
+      if (wasPlaying) {
+        await _playerPause();
+      }
+
+      // ✅ 构建新的 HLS URL（带分辨率参数）
+      final media = await _api!.buildHlsUrl(
+        widget.itemId,
+        audioStreamIndex: _selectedAudioStreamIndex,
+        subtitleStreamIndex: _selectedSubtitleStreamIndex,
+        maxWidth: qualityOption?['width'] as int?,
+        maxHeight: qualityOption?['height'] as int?,
+        maxBitrate: qualityOption?['maxBitrate'] as int?,
+      );
+
+      _playerLog('🎬 [Player] New media URL with quality: ${media.uri}');
+
+      // ✅ 检测是否为 HLS 流
+      final isHlsStream =
+          media.uri.contains('.m3u8') || media.uri.contains('hls');
+
+      // ✅ 根据视频分辨率和格式动态调整缓存配置
+      final is4KVideo = media.width != null && media.width! >= 3840;
+      final isHEVC = media.uri.contains('hevc') ||
+          media.uri.contains('h265') ||
+          (is4KVideo && media.bitrate != null && media.bitrate! > 20000000);
+      final needExtraCache = is4KVideo || isHEVC;
+
+      final cacheConfig = _buildCacheConfig(
+        isHlsStream: isHlsStream,
+        needExtraCache: needExtraCache,
+      );
+
+      // ✅ 重新打开媒体
+      await _guardPlayerCommand(
+        'reload media with quality',
+        () => _player.open(
+          url: media.uri,
+          headers: media.headers,
+          isHls: isHlsStream,
+          autoPlay: false,
+          startPosition: null,
+          cacheConfig: cacheConfig,
+        ),
+      );
+
+      await _waitForPlayerReady();
+
+      // ✅ 禁用内置字幕
+      await _disableSubtitle();
+
+      // ✅ Seek 到之前的位置
+      if (currentPosition > Duration.zero) {
+        await _playerSeek(currentPosition);
+      }
+
+      // ✅ 恢复播放状态
+      if (wasPlaying) {
+        await _playerPlay();
+      }
+
+      _playerLogImportant('✅ [Player] Quality changed successfully');
+    } catch (e) {
+      _playerLog('❌ [Player] Failed to change quality: $e');
+    }
   }
 
   // ✅ 手动进入 PiP 模式
@@ -2088,6 +2379,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   isAdjustingVolume: _isAdjustingVolume,
                   currentBrightness: _currentBrightness,
                   currentVolume: _currentVolume,
+                  qualityOptions: _qualityOptions,
+                  selectedQuality: _selectedQuality,
+                  showQualityList: _showQualityList,
+                  onQualitySelected: _onQualitySelected,
+                  onShowQualityListChanged: (show) {
+                    setState(() {
+                      _showQualityList = show;
+                    });
+                  },
+                  qualityListScrollController: _qualityListScrollController,
+                  onScrollToSelectedQuality: _scrollToSelectedQuality,
                 ),
               ),
             ],
@@ -2095,6 +2397,261 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         ),
       ),
     );
+  }
+
+  // ✅ 从 PlaybackInfo 的 MediaSource 生成分辨率选项（推荐使用）
+  List<Map<String, dynamic>> _generateQualityOptionsFromMediaSource(
+      Map<String, dynamic> mediaSource) {
+    _playerLog('🎬 [Player] _generateQualityOptionsFromMediaSource called');
+
+    // ✅ 打印 MediaSource 的关键字段
+    _playerLog('🎬 [Player] MediaSource keys: ${mediaSource.keys.toList()}');
+    _playerLog('🎬 [Player] MediaSource Width: ${mediaSource['Width']}');
+    _playerLog('🎬 [Player] MediaSource Height: ${mediaSource['Height']}');
+    _playerLog('🎬 [Player] MediaSource Bitrate: ${mediaSource['Bitrate']}');
+    _playerLog(
+        '🎬 [Player] MediaSource Container: ${mediaSource['Container']}');
+    _playerLog(
+        '🎬 [Player] MediaSource VideoCodec: ${mediaSource['VideoCodec']}');
+
+    // ✅ 尝试多种方式获取视频分辨率
+    int? originalWidth;
+    int? originalHeight;
+    int? originalBitrate = (mediaSource['Bitrate'] as num?)?.toInt();
+
+    // ✅ 方式1: 直接从 MediaSource 获取（优先）
+    originalWidth = (mediaSource['Width'] as num?)?.toInt();
+    originalHeight = (mediaSource['Height'] as num?)?.toInt();
+
+    _playerLog(
+        '🎬 [Player] From MediaSource directly: ${originalWidth}x${originalHeight}');
+
+    // ✅ 方式2: 从 MediaStreams 中获取视频流信息（备用）
+    final mediaStreams = mediaSource['MediaStreams'];
+    if (mediaStreams is List) {
+      _playerLog('🎬 [Player] MediaStreams count: ${mediaStreams.length}');
+      for (int i = 0; i < mediaStreams.length; i++) {
+        final stream = mediaStreams[i];
+        if (stream is Map) {
+          _playerLog(
+              '🎬 [Player] Stream $i - Type: ${stream['Type']}, Width: ${stream['Width']}, Height: ${stream['Height']}, BitRate: ${stream['BitRate']}');
+
+          if (stream['Type'] == 'Video') {
+            // 如果方式1没获取到，使用方式2
+            if (originalWidth == null || originalHeight == null) {
+              originalWidth = (stream['Width'] as num?)?.toInt();
+              originalHeight = (stream['Height'] as num?)?.toInt();
+            }
+            // 如果视频流有比特率，使用视频流的比特率
+            if (stream['BitRate'] != null) {
+              originalBitrate = (stream['BitRate'] as num?)?.toInt();
+            }
+          }
+        }
+      }
+    }
+
+    _playerLog(
+        '🎬 [Player] Final dimensions: ${originalWidth}x${originalHeight}, bitrate: $originalBitrate');
+
+    if (originalHeight == null || originalHeight <= 0) {
+      _playerLog('⚠️ [Player] No valid video height found in MediaSource');
+      return const [];
+    }
+
+    _playerLog(
+        '🎬 [Player] Original video: ${originalWidth}x${originalHeight}, bitrate: ${originalBitrate != null ? (originalBitrate / 1000000).round() : "unknown"}Mbps');
+
+    return _buildQualityOptionsList(
+        originalWidth, originalHeight, originalBitrate);
+  }
+
+  // ✅ 从 ItemInfo 生成分辨率选项（备用方法）
+  List<Map<String, dynamic>> _generateQualityOptions(ItemInfo item) {
+    _playerLog('🎬 [Player] _generateQualityOptions called');
+    final media = _getPrimaryMediaSource(item);
+    if (media == null) {
+      _playerLog('❌ [Player] No media source found');
+      return const [];
+    }
+
+    _playerLog('🎬 [Player] Media source: $media');
+
+    // ✅ 获取原始视频的分辨率和比特率
+    final originalWidth = (media['Width'] as num?)?.toInt();
+    final originalHeight = (media['Height'] as num?)?.toInt();
+    final originalBitrate = (media['Bitrate'] as num?)?.toInt();
+
+    _playerLog(
+        '🎬 [Player] Original dimensions: ${originalWidth}x${originalHeight}, bitrate: $originalBitrate');
+
+    if (originalHeight == null || originalHeight <= 0) {
+      _playerLog('⚠️ [Player] No valid video height found');
+      return const [];
+    }
+
+    _playerLog(
+        '🎬 [Player] Original video: ${originalWidth}x${originalHeight}, bitrate: ${originalBitrate != null ? (originalBitrate / 1000000).round() : "unknown"}Mbps');
+
+    return _buildQualityOptionsList(
+        originalWidth, originalHeight, originalBitrate);
+  }
+
+  // ✅ 构建分辨率选项列表（公共逻辑）
+  List<Map<String, dynamic>> _buildQualityOptionsList(
+      int? originalWidth, int? originalHeight, int? originalBitrate) {
+    if (originalHeight == null || originalHeight <= 0) {
+      return const [];
+    }
+
+    final options = <Map<String, dynamic>>[];
+
+    // ✅ 判断视频级别（优先根据宽度判断，因为有超宽屏等特殊比例）
+    String videoLevel;
+    if (originalWidth != null && originalWidth >= 3840) {
+      videoLevel = '4K'; // 宽度 >= 3840 就是 4K
+    } else if (originalWidth != null && originalWidth >= 2560) {
+      videoLevel = '2K'; // 宽度 >= 2560 就是 2K
+    } else if (originalHeight >= 2160) {
+      videoLevel = '4K'; // 高度 >= 2160 也是 4K
+    } else if (originalHeight >= 1440) {
+      videoLevel = '2K'; // 高度 >= 1440 也是 2K
+    } else if (originalHeight >= 1080) {
+      videoLevel = '1080p';
+    } else if (originalHeight >= 720) {
+      videoLevel = '720p';
+    } else if (originalHeight >= 480) {
+      videoLevel = '480p';
+    } else {
+      videoLevel = '360p';
+    }
+
+    _playerLog(
+        '🎬 [Player] Video level detected: $videoLevel (${originalWidth}x${originalHeight})');
+
+    // ✅ 定义分辨率和对应的多档位比特率（模仿 Emby 官方客户端）
+    final resolutionOptions = {
+      2160: {
+        // 4K
+        'label': '4K',
+        'bitrates': [200, 160, 120, 100, 60, 40], // Mbps
+      },
+      1440: {
+        // 2K
+        'label': '2K',
+        'bitrates': [100, 80, 60, 40, 30], // Mbps
+      },
+      1080: {
+        // 1080p
+        'label': '1080p',
+        'bitrates': [60, 50, 40, 30, 25, 20], // Mbps
+      },
+      720: {
+        // 720p
+        'label': '720p',
+        'bitrates': [40, 30, 20], // Mbps
+      },
+      480: {
+        // 480p
+        'label': '480p',
+        'bitrates': [20, 15, 10], // Mbps
+      },
+      360: {
+        // 360p
+        'label': '360p',
+        'bitrates': [10, 8, 6], // Mbps
+      },
+    };
+
+    // ✅ 确定最大分辨率高度（根据视频级别）
+    int maxResolutionHeight;
+    if (videoLevel == '4K') {
+      maxResolutionHeight = 2160;
+    } else if (videoLevel == '2K') {
+      maxResolutionHeight = 1440;
+    } else if (videoLevel == '1080p') {
+      maxResolutionHeight = 1080;
+    } else if (videoLevel == '720p') {
+      maxResolutionHeight = 720;
+    } else if (videoLevel == '480p') {
+      maxResolutionHeight = 480;
+    } else {
+      maxResolutionHeight = 360;
+    }
+
+    // ✅ 遍历所有分辨率选项
+    for (final entry in resolutionOptions.entries) {
+      final height = entry.key;
+      final config = entry.value;
+      final label = config['label'] as String;
+      final bitrates = config['bitrates'] as List<int>;
+
+      // ✅ 只添加不超过最大分辨率的选项
+      if (height <= maxResolutionHeight) {
+        // ✅ 计算对应的宽度（保持原始宽高比）
+        final width = originalWidth != null && originalHeight > 0
+            ? ((originalWidth / originalHeight) * height).round()
+            : (height * 16 / 9).round(); // 默认使用 16:9 比例
+
+        // ✅ 为每个分辨率添加多个比特率档位
+        for (final bitrate in bitrates) {
+          options.add({
+            'label': '$label-${bitrate}Mbps',
+            'width': width,
+            'height': height,
+            'bitrate': bitrate * 1000000, // 转换为 bps
+            'maxBitrate': bitrate * 1000000,
+          });
+        }
+      }
+    }
+
+    // ✅ 如果有原始比特率且不在列表中，添加原始分辨率选项
+    if (originalBitrate != null) {
+      // ✅ 使用之前检测的视频级别作为标签
+      final originalLabel = videoLevel;
+
+      final mbps = (originalBitrate / 1000000).round();
+      final originalWidthCalculated =
+          originalWidth ?? (originalHeight * 16 / 9).round();
+
+      // ✅ 检查是否已经有相同的选项
+      final hasSameOption = options.any((o) =>
+          o['height'] == originalHeight &&
+          ((o['bitrate'] as int) / 1000000).round() == mbps);
+
+      if (!hasSameOption) {
+        final originalOption = {
+          'label': '$originalLabel-${mbps}Mbps (原始)',
+          'width': originalWidthCalculated,
+          'height': originalHeight,
+          'bitrate': originalBitrate,
+          'maxBitrate': originalBitrate,
+          'isOriginal': true,
+        };
+
+        // ✅ 找到合适的位置插入（按比特率从高到低排序）
+        int insertIndex = 0;
+        for (int i = 0; i < options.length; i++) {
+          final optionBitrate = options[i]['bitrate'] as int;
+          if (originalBitrate >= optionBitrate) {
+            insertIndex = i;
+            break;
+          }
+          insertIndex = i + 1;
+        }
+
+        options.insert(insertIndex, originalOption);
+        _playerLog(
+            '🎬 [Player] Inserted original quality at index $insertIndex: $originalLabel-${mbps}Mbps');
+      }
+    }
+
+    _playerLog(
+        '🎬 [Player] Generated ${options.length} quality options for ${originalHeight}p');
+    _playerLog(
+        '🎬 [Player] First 5 options: ${options.take(5).map((o) => o['label']).join(', ')}');
+    return options;
   }
 
   // ✅ 获取音频流
@@ -2512,10 +3069,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _hasManuallySelectedAudio = true;
       });
       await _saveStreamSelections();
-      
+
       // ✅ 如果音频流改变，重新加载播放器
       if (previousIndex != result) {
-        _playerLogImportant('🔄 [Player] Audio stream changed from $previousIndex to $result, reloading...');
+        _playerLogImportant(
+            '🔄 [Player] Audio stream changed from $previousIndex to $result, reloading...');
         await _reloadPlayer();
       }
     }
@@ -2758,16 +3316,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       });
       await _saveStreamSelections();
       _updateSubtitleUrl();
-      
+
       // ✅ 检查是否为内嵌字幕（需要重新加载播放器）
       // 外挂字幕通过 URL 加载，不需要重新加载播放器
-      if (previousIndex != result && result >= 0 && result < _subtitleStreams.length) {
+      if (previousIndex != result &&
+          result >= 0 &&
+          result < _subtitleStreams.length) {
         final subtitleStream = _subtitleStreams[result];
         final isExternal = (subtitleStream['IsExternal'] as bool?) == true;
-        
+
         // ✅ 如果是内嵌字幕，需要重新加载播放器
         if (!isExternal) {
-          _playerLogImportant('🔄 [Player] Embedded subtitle stream changed from $previousIndex to $result, reloading...');
+          _playerLogImportant(
+              '🔄 [Player] Embedded subtitle stream changed from $previousIndex to $result, reloading...');
           await _reloadPlayer();
         }
       }
@@ -2872,30 +3433,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
       _playerLog('❌ [Player] subtitleUrl cleared due to error');
     }
-  }
-
-  bool _isTextSubtitleCodec(String? codec) {
-    if (codec == null) return false;
-    const textCodecs = {
-      'srt',
-      'ass',
-      'ssa',
-      'webvtt',
-      'vtt',
-      'subrip',
-      'subriptext',
-      'subviewer',
-      'microdvd',
-      'substationalpha',
-      'advancedsubstationalpha',
-      'idx',
-      'smil',
-      'usf',
-      'ttml',
-      'dfxp',
-      'pgssub_text',
-    };
-    return textCodecs.contains(codec.toLowerCase());
   }
 
   Future<void> _guardPlayerCommand(
