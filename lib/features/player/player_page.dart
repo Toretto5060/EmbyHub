@@ -90,8 +90,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _progressSyncUnavailableLogged = false;
   // ✅ 移除 _refreshTicker，改为在页面生命周期时手动刷新
 
-  // ✅ 控制栏显示/隐藏（初始隐藏，点击屏幕显示）
-  bool _showControls = false;
+  // ✅ 控制栏显示/隐藏（初始显示，视频开始播放后自动隐藏）
+  bool _showControls = true;
 
   // ✅ 控制栏锁定状态（锁定后隐藏其他控件，只显示锁定按钮）
   bool _isLocked = false;
@@ -260,7 +260,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       parent: _controlsAnimationController,
       curve: Curves.easeInOut,
     );
-    // ✅ 初始状态是隐藏的，不执行forward
+    // ✅ 初始状态是显示的，立即执行forward
+    _controlsAnimationController.value = 1.0; // 立即设置为显示状态
 
     // ✅ 进入播放页面时默认横屏
     SystemChrome.setPreferredOrientations([
@@ -268,7 +269,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       DeviceOrientation.landscapeRight,
     ]);
 
-    // ✅ 初始隐藏状态栏（因为控制栏默认隐藏）
+    // ✅ 初始显示控制栏，但保持全屏沉浸式（不显示系统状态栏）
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
     // ✅ 添加应用生命周期监听
@@ -433,7 +434,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _syncProgress(_position, force: true);
         _cancelHideControlsTimer(); // 暂停时不自动隐藏控制栏
       } else {
-        _startHideControlsTimer(); // 播放时自动隐藏控制栏
+        // ✅ 播放时，如果控制栏显示则启动自动隐藏计时器
+        if (_showControls) {
+          _startHideControlsTimer();
+        }
 
         // ✅ 只在未汇报过播放开始时才汇报（防止重复汇报）
         if (!_hasReportedPlaybackStart &&
@@ -1940,7 +1944,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (_showSpeedList || _isLocked) return;
 
     _cancelHideControlsTimer();
-    _hideControlsTimer = Timer(const Duration(seconds: 5), () {
+    _hideControlsTimer = Timer(const Duration(seconds: 3), () {
       if (mounted &&
           _showControls &&
           _isPlaying &&
