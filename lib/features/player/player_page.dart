@@ -183,6 +183,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   String? _logoUrl; // Logo图片URL
   ItemInfo? _previousEpisode; // 上一集
   ItemInfo? _nextEpisode; // 下一集
+  bool _isSwitchingEpisode = false; // ✅ 是否正在切换剧集（防止重复点击）
+  String _currentItemId = ''; // ✅ 当前播放的itemId
+  bool _hasReportedPlaybackStart = false; // ✅ 是否已汇报播放开始（防止重复汇报）
+  bool _hasReportedPlaybackStopped = false; // ✅ 是否已汇报播放停止（防止重复汇报）
 
   // ✅ 是否正在执行初始seek（用于隐藏第一帧）
   // bool _isInitialSeeking = false;
@@ -230,6 +234,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   @override
   void initState() {
     super.initState();
+
+    // ✅ 保存当前itemId
+    _currentItemId = widget.itemId;
 
     // ✅ 在页面初始化时立即获取并保存原始亮度（在系统可能调整亮度之前）
     // 这样即使系统在进入全屏时自动调整了亮度，我们也能恢复正确的原始亮度
@@ -421,13 +428,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       } else {
         _startHideControlsTimer(); // 播放时自动隐藏控制栏
 
-        if (_api != null &&
+        // ✅ 只在未汇报过播放开始时才汇报（防止重复汇报）
+        if (!_hasReportedPlaybackStart &&
+            _api != null &&
             _userId != null &&
             _playSessionId != null &&
             _mediaSourceId != null) {
           try {
             await _api!.reportPlaybackStart(
-              itemId: widget.itemId,
+              itemId: _currentItemId,
               userId: _userId!,
               playSessionId: _playSessionId!,
               mediaSourceId: _mediaSourceId,
@@ -435,6 +444,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   ? (_initialSeekPosition!.inMicroseconds * 10).toInt()
                   : 0,
             );
+            _hasReportedPlaybackStart = true; // ✅ 标记已汇报
             _playerLog('✅ [Player] Reported playback start to Emby server');
           } catch (e) {
             _playerLog('⚠️ [Player] Failed to report playback start: $e');
@@ -585,7 +595,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _bufferPosition = Duration.zero; // 重置缓冲进度
         });
       }
-      _playerLog('🎬 [Player] Loading item: ${widget.itemId}');
+      _playerLog('🎬 [Player] Loading item: $_currentItemId');
       final api = await EmbyApi.create();
       _api = api;
       final authState = ref.read(authStateProvider);
@@ -593,7 +603,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       // ✅ 获取视频详细信息（用于显示和PiP）
       final itemDetails =
-          _userId != null ? await api.getItem(_userId!, widget.itemId) : null;
+          _userId != null ? await api.getItem(_userId!, _currentItemId) : null;
       _videoTitle = itemDetails?.name ?? 'Video';
       _itemDetails = itemDetails;
       _itemType = itemDetails?.type;
@@ -640,12 +650,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _previousEpisode = await api.getPreviousEpisode(
             userId: _userId!,
             seriesId: itemDetails.seriesId!,
-            currentEpisodeId: widget.itemId,
+            currentEpisodeId: _currentItemId,
           );
           _nextEpisode = await api.getNextEpisode(
             userId: _userId!,
             seriesId: itemDetails.seriesId!,
-            currentEpisodeId: widget.itemId,
+            currentEpisodeId: _currentItemId,
           );
           _playerLog(
               '🎬 [Player] Previous episode: ${_previousEpisode?.name}, Next episode: ${_nextEpisode?.name}');
@@ -663,7 +673,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         if (_userId != null) {
           try {
             final playbackInfo = await api.getPlaybackInfo(
-              itemId: widget.itemId,
+              itemId: _currentItemId,
               userId: _userId!,
             );
             _playerLog('🎬 [Player] PlaybackInfo: $playbackInfo');
@@ -767,7 +777,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // 注意：对于 HLS 流，Emby 会自动处理音频和字幕选择
       // 只有在用户手动选择时才传递参数，否则让 Emby 自动选择
       final media = await api.buildHlsUrl(
-        widget.itemId,
+        _currentItemId,
         audioStreamIndex:
             _hasManuallySelectedAudio ? _selectedAudioStreamIndex : null,
         subtitleStreamIndex:
@@ -946,7 +956,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _mediaSourceId != null) {
       final positionTicks = (_position.inMicroseconds * 10).toInt();
       unawaited(_api!.reportPlaybackStopped(
-        itemId: widget.itemId,
+        itemId: _currentItemId,
         userId: _userId!,
         playSessionId: _playSessionId!,
         mediaSourceId: _mediaSourceId,
@@ -1978,7 +1988,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (_playSessionId != null && _mediaSourceId != null) {
       final positionTicks = (pos.inMicroseconds * 10).toInt();
       unawaited(_api!.reportPlaybackProgress(
-        itemId: widget.itemId,
+        itemId: _currentItemId,
         userId: _userId!,
         playSessionId: _playSessionId!,
         mediaSourceId: _mediaSourceId,
@@ -1994,7 +2004,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _completedReported = true;
       unawaited(_api!.updateUserItemData(
         _userId!,
-        widget.itemId,
+        _currentItemId,
         position: Duration.zero,
         played: true,
       ));
@@ -2002,7 +2012,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _completedReported = false;
       unawaited(_api!.updateUserItemData(
         _userId!,
-        widget.itemId,
+        _currentItemId,
         position: pos,
       ));
     }
@@ -3558,39 +3568,191 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         () => _player.setVolume(volumePercent),
       );
 
-  // ✅ 播放上一集
-  Future<void> _playPreviousEpisode() async {
-    if (_previousEpisode != null && _previousEpisode!.id != null) {
-      _playerLogImportant(
-          '🎬 [Player] Playing previous episode: ${_previousEpisode!.name}');
+  // ✅ 切换到新剧集（直接切换URL，不重新创建播放器）
+  Future<void> _switchToNewEpisode(String newItemId) async {
+    _playerLogImportant('🎬 [Player] Switching to new episode: $newItemId');
+
+    try {
+      // ✅ 先向 Emby 汇报旧剧集的播放停止（只汇报一次）
+      if (!_hasReportedPlaybackStopped &&
+          _api != null &&
+          _userId != null &&
+          _playSessionId != null &&
+          _mediaSourceId != null) {
+        try {
+          final positionTicks = (_position.inMicroseconds * 10).toInt();
+          await _api!.reportPlaybackStopped(
+            itemId: _currentItemId, // 旧剧集的ID
+            userId: _userId!,
+            playSessionId: _playSessionId!,
+            mediaSourceId: _mediaSourceId,
+            positionTicks: positionTicks,
+          );
+          _hasReportedPlaybackStopped = true; // ✅ 标记已汇报
+          _playerLog('✅ [Player] Reported playback stopped for old episode');
+        } catch (e) {
+          _playerLog('⚠️ [Player] Failed to report playback stopped: $e');
+        }
+      }
+
+      // ✅ 更新当前itemId
+      _currentItemId = newItemId;
+
+      // ✅ 重置状态并更新UI
       if (mounted) {
-        await Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => PlayerPage(
-              itemId: _previousEpisode!.id!,
-              initialPositionTicks: null,
-            ),
-          ),
+        setState(() {
+          _hasHandledCompletion = false;
+          _completedReported = false;
+          _lastReportedPosition = Duration.zero;
+          _position = Duration.zero;
+          _duration = Duration.zero;
+          _bufferPosition = Duration.zero;
+          _isBuffering = true;
+          _ready = false;
+          _hasReportedPlaybackStart = false; // ✅ 重置播放开始汇报标志
+          _hasReportedPlaybackStopped = false; // ✅ 重置播放停止汇报标志
+        });
+      }
+
+      // ✅ 获取新剧集的信息
+      if (_api == null || _userId == null) {
+        _playerLog('⚠️ [Player] API or userId not available');
+        return;
+      }
+
+      final itemDetails = await _api!.getItem(_userId!, _currentItemId);
+      _videoTitle = itemDetails.name;
+      _itemDetails = itemDetails;
+      _itemType = itemDetails.type;
+
+      // ✅ 如果是Episode类型，获取上一集和下一集
+      if (itemDetails.type == 'Episode' && itemDetails.seriesId != null) {
+        _previousEpisode = await _api!.getPreviousEpisode(
+          userId: _userId!,
+          seriesId: itemDetails.seriesId!,
+          currentEpisodeId: _currentItemId,
+        );
+        _nextEpisode = await _api!.getNextEpisode(
+          userId: _userId!,
+          seriesId: itemDetails.seriesId!,
+          currentEpisodeId: _currentItemId,
         );
       }
+
+      // ✅ 获取PlaybackInfo和MediaSourceId
+      final playbackInfo = await _api!.getPlaybackInfo(
+        itemId: _currentItemId,
+        userId: _userId!,
+      );
+
+      if (playbackInfo['MediaSources'] != null &&
+          playbackInfo['MediaSources'] is List &&
+          (playbackInfo['MediaSources'] as List).isNotEmpty) {
+        final firstSource = (playbackInfo['MediaSources'] as List).first;
+        if (firstSource is Map) {
+          final playbackMediaSource = Map<String, dynamic>.from(firstSource);
+          _mediaSourceId = playbackMediaSource['Id'] as String?;
+          _playSessionId = playbackInfo['PlaySessionId'] as String?;
+        }
+      }
+
+      // ✅ 构建新的HLS URL
+      final media = await _api!.buildHlsUrl(
+        _currentItemId,
+        audioStreamIndex:
+            _hasManuallySelectedAudio ? _selectedAudioStreamIndex : null,
+        subtitleStreamIndex:
+            _hasManuallySelectedSubtitle ? _selectedSubtitleStreamIndex : null,
+      );
+
+      _playerLogImportant('🎬 [Player] New episode URL: ${media.uri}');
+
+      // ✅ 直接切换播放URL（不重新创建播放器）
+      await _guardPlayerCommand(
+        'switch episode',
+        () => _player.open(
+          url: media.uri,
+          headers: media.headers,
+          isHls: true,
+          autoPlay: true, // 自动播放新剧集
+          startPosition: Duration.zero, // 从头开始
+        ),
+      );
+
+      _playerLogImportant('✅ [Player] Successfully switched to new episode');
+
+      // ✅ 主动向 Emby 汇报新剧集的播放开始
+      if (_playSessionId != null && _mediaSourceId != null) {
+        try {
+          await _api!.reportPlaybackStart(
+            itemId: _currentItemId,
+            userId: _userId!,
+            playSessionId: _playSessionId!,
+            mediaSourceId: _mediaSourceId,
+            positionTicks: 0, // 从头开始
+          );
+          _hasReportedPlaybackStart = true; // ✅ 标记已汇报，防止重复
+          _playerLog('✅ [Player] Reported playback start for new episode');
+        } catch (e) {
+          _playerLog('⚠️ [Player] Failed to report playback start: $e');
+        }
+      }
+    } catch (e, stack) {
+      _playerLog('❌ [Player] Failed to switch episode: $e');
+      debugPrintStack(stackTrace: stack);
+    } finally {
+      // ✅ 重置切换标志
+      _isSwitchingEpisode = false;
     }
   }
 
-  // ✅ 播放下一集
-  Future<void> _playNextEpisode() async {
-    if (_nextEpisode != null && _nextEpisode!.id != null) {
-      _playerLogImportant(
-          '🎬 [Player] Playing next episode: ${_nextEpisode!.name}');
-      if (mounted) {
-        await Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => PlayerPage(
-              itemId: _nextEpisode!.id!,
-              initialPositionTicks: null,
-            ),
-          ),
-        );
-      }
+  // ✅ 播放上一集
+  void _playPreviousEpisode() {
+    // ✅ 防止重复点击
+    if (_isSwitchingEpisode) {
+      _playerLog('⚠️ [Player] Already switching episode, ignoring click');
+      return;
     }
+
+    if (_previousEpisode == null || _previousEpisode!.id == null) {
+      _playerLog('⚠️ [Player] No previous episode available');
+      return;
+    }
+
+    if (!mounted) return;
+
+    _isSwitchingEpisode = true;
+    final episodeId = _previousEpisode!.id!;
+    final episodeName = _previousEpisode!.name;
+
+    _playerLogImportant('🎬 [Player] Playing previous episode: $episodeName');
+
+    // ✅ 切换到新剧集（直接切换URL）
+    _switchToNewEpisode(episodeId);
+  }
+
+  // ✅ 播放下一集
+  void _playNextEpisode() {
+    // ✅ 防止重复点击
+    if (_isSwitchingEpisode) {
+      _playerLog('⚠️ [Player] Already switching episode, ignoring click');
+      return;
+    }
+
+    if (_nextEpisode == null || _nextEpisode!.id == null) {
+      _playerLog('⚠️ [Player] No next episode available');
+      return;
+    }
+
+    if (!mounted) return;
+
+    _isSwitchingEpisode = true;
+    final episodeId = _nextEpisode!.id!;
+    final episodeName = _nextEpisode!.name;
+
+    _playerLogImportant('🎬 [Player] Playing next episode: $episodeName');
+
+    // ✅ 切换到新剧集（直接切换URL）
+    _switchToNewEpisode(episodeId);
   }
 }

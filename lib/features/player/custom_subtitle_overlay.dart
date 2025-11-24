@@ -540,9 +540,8 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       final baseBottomOffset =
           (widget.showControls && !widget.isLocked) ? 85.0 : 20.0;
       // 电影和电视剧都需要额外上移（电影显示年份+名称，电视剧显示按钮+集数）
-      final extraOffset = (widget.showControls && !widget.isLocked)
-          ? (widget.isEpisode ? 30.0 : 26.0)
-          : 0.0;
+      final extraOffset =
+          (widget.showControls && !widget.isLocked) ? 26.0 : 0.0;
       final bottomOffset = baseBottomOffset + extraOffset;
 
       return AnimatedPositioned(
