@@ -188,6 +188,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _hasReportedPlaybackStart = false; // ✅ 是否已汇报播放开始（防止重复汇报）
   bool _hasReportedPlaybackStopped = false; // ✅ 是否已汇报播放停止（防止重复汇报）
   bool _hasStartedPlayback = false; // ✅ 是否已经开始过播放（用于控制背景图显示）
+  bool _isFirstTimeAutoPlay = true; // ✅ 是否是首次自动播放（用于延迟隐藏控制栏）
 
   // ✅ 是否正在执行初始seek（用于隐藏第一帧）
   // bool _isInitialSeeking = false;
@@ -408,14 +409,30 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
 
     _bufferingSub?.cancel();
-    _bufferingSub = _player.bufferingStream.listen((isBuffering) {
+    _bufferingSub = _player.bufferingStream.listen((isBuffering) async {
       final bufferSeconds = _bufferPosition.inSeconds;
       final positionSeconds = _position.inSeconds;
       final bufferedAhead = (_bufferPosition - _position).inSeconds;
       _playerLog(
           '🎬 [Player] Buffering状态变化: $isBuffering, buffer: ${bufferSeconds}s, position: ${positionSeconds}s, buffered ahead: ${bufferedAhead}s');
       if (!mounted) return;
+
+      // ✅ 记录之前的缓冲状态
+      final wasBuffering = _isBuffering;
+
       setState(() => _isBuffering = isBuffering);
+
+      // ✅ 如果从缓冲状态变为非缓冲状态，且播放器应该在播放但实际没有播放，则恢复播放
+      if (wasBuffering && !isBuffering && !_player.isPlaying) {
+        _playerLog(
+            '🎬 [Player] Buffering ended, checking if need to resume playback...');
+        // 延迟一小段时间，确保播放器状态稳定
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (mounted && !_player.isPlaying) {
+          _playerLog('🎬 [Player] Resuming playback after buffering');
+          await _playerPlay();
+        }
+      }
     });
 
     _playingSub?.cancel();
@@ -436,7 +453,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       } else {
         // ✅ 播放时，如果控制栏显示则启动自动隐藏计时器
         if (_showControls) {
-          _startHideControlsTimer();
+          // ✅ 如果是首次自动播放，立刻隐藏控制栏
+          if (_isFirstTimeAutoPlay) {
+            _isFirstTimeAutoPlay = false;
+            _playerLog(
+                '🎬 [Player] First time auto play, hide controls immediately');
+            _controlsAnimationController.reverse();
+            SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+            if (mounted) {
+              setState(() {
+                _showControls = false;
+              });
+            }
+          } else {
+            // ✅ 非首次播放（用户手动显示控制栏后），3秒后自动隐藏
+            _startHideControlsTimer();
+          }
         }
 
         // ✅ 只在未汇报过播放开始时才汇报（防止重复汇报）
@@ -2042,18 +2074,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Widget _buildBackgroundImage() {
     final itemId = _currentItemId;
     if (itemId.isEmpty) {
-      print('❌ [Background] itemId is empty');
       return Container(color: Colors.black);
     }
-
-    print('🎬 [Background] Building background for itemId: $itemId');
 
     // ✅ 使用 FutureBuilder 等待 API 初始化
     return FutureBuilder<EmbyApi>(
       future: EmbyApi.create(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          print('⏳ [Background] Waiting for API...');
           return Container(color: Colors.black);
         }
 
@@ -2075,8 +2103,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   maxWidth: 1920,
                   tag: _itemDetails!.parentBackdropImageTags!.first,
                 );
-                print(
-                    '🎬 [Background] Using parent backdrop URL: $backdropUrl');
               }
             }
 
@@ -2089,7 +2115,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 maxWidth: 1920,
                 tag: _itemDetails!.backdropImageTags!.first,
               );
-              print('🎬 [Background] Using episode backdrop URL: $backdropUrl');
             }
 
             // 3. 如果都没有背景图，尝试使用Series的Primary图片
@@ -2101,7 +2126,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   type: 'Primary',
                   maxWidth: 1920,
                 );
-                print('🎬 [Background] Using series primary URL: $backdropUrl');
               }
             }
           } else {
@@ -2113,7 +2137,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 maxWidth: 1920,
                 tag: _itemDetails!.backdropImageTags!.first,
               );
-              print('🎬 [Background] Using item backdrop URL: $backdropUrl');
             }
 
             // ✅ 如果没有 Backdrop，尝试使用 Primary 图片作为备用
@@ -2126,24 +2149,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   maxWidth: 1920,
                   tag: primaryTag,
                 );
-                print('🎬 [Background] Using item primary URL: $backdropUrl');
               }
             }
           }
-
-          print(
-              '🎬 [Background] itemType: ${_itemDetails!.type}, backdropImageTags: ${_itemDetails!.backdropImageTags}, parentBackdropImageTags: ${_itemDetails!.parentBackdropImageTags}, parentBackdropItemId: ${_itemDetails!.parentBackdropItemId}');
-        } else {
-          print('⚠️ [Background] _itemDetails is null, cannot check tags');
         }
 
         // ✅ 如果都没有，显示黑色背景
         if (backdropUrl == null || backdropUrl.isEmpty) {
-          print('❌ [Background] No backdrop URL available');
           return Container(color: Colors.black);
         }
-
-        print('✅ [Background] Displaying image: $backdropUrl');
 
         return Stack(
           fit: StackFit.expand,
@@ -2153,22 +2167,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               backdropUrl,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) {
-                print('❌ [Background] Failed to load image: $error');
                 return Container(color: Colors.black);
               },
               loadingBuilder: (context, child, loadingProgress) {
                 if (loadingProgress == null) {
-                  print('✅ [Background] Image loaded successfully');
                   return child;
                 }
-                print(
-                    '🔄 [Background] Loading: ${loadingProgress.cumulativeBytesLoaded}/${loadingProgress.expectedTotalBytes}');
                 return Container(color: Colors.black);
               },
             ),
-            // ✅ 半透明黑色遮罩，避免背景图太亮
+            // ✅ 半透明黑色遮罩，避免背景图太亮（增加透明度到0.6）
             Container(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withOpacity(0.6),
             ),
           ],
         );
@@ -2246,8 +2256,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   final shouldShow = !_hasStartedPlayback ||
                       !_ready ||
                       (_isBuffering && _position == Duration.zero);
-                  print(
-                      '🎬 [Background] shouldShow: $shouldShow (_hasStartedPlayback: $_hasStartedPlayback, _ready: $_ready, _isBuffering: $_isBuffering, _position: $_position)');
                   if (shouldShow) {
                     return Positioned.fill(
                       child: _buildBackgroundImage(),
@@ -3791,6 +3799,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _hasReportedPlaybackStart = false; // ✅ 重置播放开始汇报标志
           _hasReportedPlaybackStopped = false; // ✅ 重置播放停止汇报标志
           _hasStartedPlayback = false; // ✅ 重置播放标志，显示新剧集的背景图
+          _isFirstTimeAutoPlay = true; // ✅ 重置首次播放标志，新剧集延迟隐藏控制栏
         });
       }
 
