@@ -187,6 +187,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   String _currentItemId = ''; // ✅ 当前播放的itemId
   bool _hasReportedPlaybackStart = false; // ✅ 是否已汇报播放开始（防止重复汇报）
   bool _hasReportedPlaybackStopped = false; // ✅ 是否已汇报播放停止（防止重复汇报）
+  bool _hasStartedPlayback = false; // ✅ 是否已经开始过播放（用于控制背景图显示）
 
   // ✅ 是否正在执行初始seek（用于隐藏第一帧）
   // bool _isInitialSeeking = false;
@@ -420,7 +421,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _playingSub = _player.playingStream.listen((isPlaying) async {
       _playerLog('🎬 [Player] Playing: $isPlaying');
       if (mounted) {
-        setState(() => _isPlaying = isPlaying);
+        setState(() {
+          _isPlaying = isPlaying;
+          // ✅ 开始播放时，标记已开始播放（隐藏背景图）
+          if (isPlaying && !_hasStartedPlayback) {
+            _hasStartedPlayback = true;
+          }
+        });
       }
       if (!isPlaying) {
         _syncProgress(_position, force: true);
@@ -605,8 +612,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final itemDetails =
           _userId != null ? await api.getItem(_userId!, _currentItemId) : null;
       _videoTitle = itemDetails?.name ?? 'Video';
-      _itemDetails = itemDetails;
-      _itemType = itemDetails?.type;
+
+      // ✅ 更新 itemDetails 并触发 UI 刷新（显示背景图）
+      if (mounted) {
+        setState(() {
+          _itemDetails = itemDetails;
+          _itemType = itemDetails?.type;
+        });
+      } else {
+        _itemDetails = itemDetails;
+        _itemType = itemDetails?.type;
+      }
 
       // ✅ 获取Logo URL（优先使用Logo类型的图片）
       if (itemDetails != null && itemDetails.id != null) {
@@ -2018,6 +2034,144 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
   }
 
+  // ✅ 构建背景图（在没有画面时显示）
+  Widget _buildBackgroundImage() {
+    final itemId = _currentItemId;
+    if (itemId.isEmpty) {
+      print('❌ [Background] itemId is empty');
+      return Container(color: Colors.black);
+    }
+
+    print('🎬 [Background] Building background for itemId: $itemId');
+
+    // ✅ 使用 FutureBuilder 等待 API 初始化
+    return FutureBuilder<EmbyApi>(
+      future: EmbyApi.create(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          print('⏳ [Background] Waiting for API...');
+          return Container(color: Colors.black);
+        }
+
+        final api = snapshot.data!;
+        String? backdropUrl;
+
+        // ✅ 先检查是否有 Backdrop 标签，避免生成无效的 URL（404）
+        if (_itemDetails != null) {
+          // ✅ 对于Episode类型，优先使用父项（Series）的背景图
+          if (_itemDetails!.type == 'Episode') {
+            // 1. 尝试使用父项的背景图（Series的Backdrop）
+            if (_itemDetails!.parentBackdropImageTags?.isNotEmpty ?? false) {
+              final parentBackdropItemId = _itemDetails!.parentBackdropItemId;
+              if (parentBackdropItemId != null &&
+                  parentBackdropItemId.isNotEmpty) {
+                backdropUrl = api.buildImageUrl(
+                  itemId: parentBackdropItemId, // ✅ 使用父项ID
+                  type: 'Backdrop',
+                  maxWidth: 1920,
+                  tag: _itemDetails!.parentBackdropImageTags!.first,
+                );
+                print(
+                    '🎬 [Background] Using parent backdrop URL: $backdropUrl');
+              }
+            }
+
+            // 2. 如果父项没有背景图，尝试使用Episode自己的背景图
+            if (backdropUrl == null &&
+                (_itemDetails!.backdropImageTags?.isNotEmpty ?? false)) {
+              backdropUrl = api.buildImageUrl(
+                itemId: itemId,
+                type: 'Backdrop',
+                maxWidth: 1920,
+                tag: _itemDetails!.backdropImageTags!.first,
+              );
+              print('🎬 [Background] Using episode backdrop URL: $backdropUrl');
+            }
+
+            // 3. 如果都没有背景图，尝试使用Series的Primary图片
+            if (backdropUrl == null) {
+              final seriesId = _itemDetails!.seriesId;
+              if (seriesId != null && seriesId.isNotEmpty) {
+                backdropUrl = api.buildImageUrl(
+                  itemId: seriesId,
+                  type: 'Primary',
+                  maxWidth: 1920,
+                );
+                print('🎬 [Background] Using series primary URL: $backdropUrl');
+              }
+            }
+          } else {
+            // ✅ 对于非Episode类型（Movie等），使用自己的背景图
+            if (_itemDetails!.backdropImageTags?.isNotEmpty ?? false) {
+              backdropUrl = api.buildImageUrl(
+                itemId: itemId,
+                type: 'Backdrop',
+                maxWidth: 1920,
+                tag: _itemDetails!.backdropImageTags!.first,
+              );
+              print('🎬 [Background] Using item backdrop URL: $backdropUrl');
+            }
+
+            // ✅ 如果没有 Backdrop，尝试使用 Primary 图片作为备用
+            if (backdropUrl == null) {
+              final primaryTag = _itemDetails!.imageTags?['Primary'] ?? '';
+              if (primaryTag.isNotEmpty) {
+                backdropUrl = api.buildImageUrl(
+                  itemId: itemId,
+                  type: 'Primary',
+                  maxWidth: 1920,
+                  tag: primaryTag,
+                );
+                print('🎬 [Background] Using item primary URL: $backdropUrl');
+              }
+            }
+          }
+
+          print(
+              '🎬 [Background] itemType: ${_itemDetails!.type}, backdropImageTags: ${_itemDetails!.backdropImageTags}, parentBackdropImageTags: ${_itemDetails!.parentBackdropImageTags}, parentBackdropItemId: ${_itemDetails!.parentBackdropItemId}');
+        } else {
+          print('⚠️ [Background] _itemDetails is null, cannot check tags');
+        }
+
+        // ✅ 如果都没有，显示黑色背景
+        if (backdropUrl == null || backdropUrl.isEmpty) {
+          print('❌ [Background] No backdrop URL available');
+          return Container(color: Colors.black);
+        }
+
+        print('✅ [Background] Displaying image: $backdropUrl');
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            // ✅ 背景图
+            Image.network(
+              backdropUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                print('❌ [Background] Failed to load image: $error');
+                return Container(color: Colors.black);
+              },
+              loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) {
+                  print('✅ [Background] Image loaded successfully');
+                  return child;
+                }
+                print(
+                    '🔄 [Background] Loading: ${loadingProgress.cumulativeBytesLoaded}/${loadingProgress.expectedTotalBytes}');
+                return Container(color: Colors.black);
+              },
+            ),
+            // ✅ 半透明黑色遮罩，避免背景图太亮
+            Container(
+              color: Colors.black.withOpacity(0.3),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     const overlay = SystemUiOverlayStyle(
@@ -2046,7 +2200,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           backgroundColor: Colors.black,
           body: Stack(
             children: [
-              // ✅ 视频播放器（最底层，使用 IgnorePointer 让触摸事件穿透）
+              // ✅ 视频播放器（最底层）
               Positioned.fill(
                 child: _ready && _textureId != null
                     ? Opacity(
@@ -2076,6 +2230,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                         ),
                       )
                     : Container(color: Colors.black),
+              ),
+
+              // ✅ 背景图（在视频上方，作为占位图）
+              // 显示条件：
+              // 1. 还没开始播放过（初始化阶段）
+              // 2. 正在缓冲且没有画面（_isBuffering && _position == Duration.zero）
+              // 3. 未准备好（!_ready）
+              Builder(
+                builder: (context) {
+                  final shouldShow = !_hasStartedPlayback ||
+                      !_ready ||
+                      (_isBuffering && _position == Duration.zero);
+                  print(
+                      '🎬 [Background] shouldShow: $shouldShow (_hasStartedPlayback: $_hasStartedPlayback, _ready: $_ready, _isBuffering: $_isBuffering, _position: $_position)');
+                  if (shouldShow) {
+                    return Positioned.fill(
+                      child: _buildBackgroundImage(),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
               ),
 
               // ✅ 自定义字幕显示组件（中间层，在视频上方，UI控制层下方）
@@ -3611,6 +3786,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _ready = false;
           _hasReportedPlaybackStart = false; // ✅ 重置播放开始汇报标志
           _hasReportedPlaybackStopped = false; // ✅ 重置播放停止汇报标志
+          _hasStartedPlayback = false; // ✅ 重置播放标志，显示新剧集的背景图
         });
       }
 
@@ -3622,8 +3798,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       final itemDetails = await _api!.getItem(_userId!, _currentItemId);
       _videoTitle = itemDetails.name;
-      _itemDetails = itemDetails;
-      _itemType = itemDetails.type;
+
+      // ✅ 更新 itemDetails 并触发 UI 刷新（显示背景图）
+      if (mounted) {
+        setState(() {
+          _itemDetails = itemDetails;
+          _itemType = itemDetails.type;
+        });
+      } else {
+        _itemDetails = itemDetails;
+        _itemType = itemDetails.type;
+      }
 
       // ✅ 如果是Episode类型，获取上一集和下一集
       if (itemDetails.type == 'Episode' && itemDetails.seriesId != null) {

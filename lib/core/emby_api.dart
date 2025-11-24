@@ -1176,7 +1176,7 @@ class EmbyApi {
     final res =
         await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres,People,ExternalUrls,DateCreated,SeriesId,SeasonId,ParentIndexNumber,IndexNumber',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres,People,ExternalUrls,DateCreated,SeriesId,SeasonId,ParentIndexNumber,IndexNumber,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ImageTags',
     });
     return ItemInfo.fromJson(res.data as Map<String, dynamic>);
   }
