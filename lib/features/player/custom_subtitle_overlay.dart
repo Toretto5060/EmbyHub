@@ -8,7 +8,7 @@ import 'package:flutter_html/flutter_html.dart';
 import 'package:http/http.dart' as http;
 
 /// ✅ 自定义字幕覆盖层 - 优化版
-/// 
+///
 /// 主要优化：
 /// 1. 使用二分查找算法，提高字幕查找效率（O(log n) vs O(n)）
 /// 2. 添加50ms提前量，补偿渲染延迟，确保字幕与画面同步
@@ -44,6 +44,7 @@ class CustomSubtitleOverlay extends StatefulWidget {
     this.isVisible = true,
     this.showControls = false,
     this.isLocked = false,
+    this.isEpisode = false, // ✅ 是否为电视剧类型
     super.key,
   });
 
@@ -52,6 +53,7 @@ class CustomSubtitleOverlay extends StatefulWidget {
   final bool isVisible;
   final bool showControls; // ✅ 控制栏显示状态
   final bool isLocked; // ✅ 锁定状态
+  final bool isEpisode; // ✅ 是否为电视剧类型（用于字幕上移）
 
   @override
   State<CustomSubtitleOverlay> createState() => _CustomSubtitleOverlayState();
@@ -87,7 +89,7 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       _timeOffsetCalculated = false; // ✅ 重置时间偏移计算
       _timeOffset = Duration.zero;
     }
-    
+
     // ✅ 检测大幅度位置跳跃（seek），重置缓存和时间偏移
     final positionDiff = (widget.position - _lastPosition).abs();
     if (positionDiff > const Duration(seconds: 2)) {
@@ -334,8 +336,8 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     // ✅ HLS时间偏移自动检测和修正
     // 如果播放位置 > 30秒且还没有找到任何字幕，尝试自动检测时间偏移
     // 延迟检测时间，避免在片头无字幕时误判
-    if (!_timeOffsetCalculated && 
-        widget.position > const Duration(seconds: 30) && 
+    if (!_timeOffsetCalculated &&
+        widget.position > const Duration(seconds: 30) &&
         _subtitles.isNotEmpty) {
       _calculateTimeOffset(adjustedPos);
     }
@@ -403,12 +405,12 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
   }
 
   /// ✅ 智能计算HLS时间偏移（保守策略）
-  /// 
+  ///
   /// HLS流常见的时间戳问题：
   /// 1. ExoPlayer的currentPosition从0开始，但字幕时间戳可能从视频的实际时间开始
   /// 2. 转码后的HLS流可能重置时间戳，导致字幕与视频不同步
   /// 3. 部分HLS流使用PTS（Presentation Time Stamp），可能有偏移
-  /// 
+  ///
   /// 检测策略（保守）：
   /// 1. 只在明确检测到大偏移时才应用（>1分钟）
   /// 2. 优先假设时间轴一致，避免误判
@@ -489,12 +491,12 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
           // ✅ 使用最接近的字幕计算偏移
           final offsetFromBefore = closestBefore.start - currentPosition;
           final offsetFromAfter = closestAfter.start - currentPosition;
-          
+
           // ✅ 选择绝对值较小的偏移
           _timeOffset = offsetFromBefore.abs() < offsetFromAfter.abs()
               ? offsetFromBefore
               : offsetFromAfter;
-          
+
           debugPrint(
               '⚠️ [Subtitle] Detected offset from gap analysis: ${_timeOffset.inSeconds}s');
           _timeOffsetCalculated = true;
@@ -509,7 +511,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     _timeOffsetCalculated = true;
   }
 
-
   @override
   Widget build(BuildContext context) {
     if (!widget.isVisible ||
@@ -523,8 +524,8 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     final currentSubtitle = _getCurrentSubtitle();
 
     // ✅ 调试信息：每30秒输出一次时间同步状态
-    if (kDebugMode && 
-        _timeOffsetCalculated && 
+    if (kDebugMode &&
+        _timeOffsetCalculated &&
         widget.position.inSeconds % 30 == 0 &&
         widget.position.inSeconds > 0) {
       final adjustedPos = widget.position + _timeOffset;
@@ -535,8 +536,14 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
 
     // ✅ 图片字幕显示
     if (_isImageSubtitle && currentSubtitle?.imageData != null) {
-      final bottomOffset =
+      // ✅ 控制栏显示时额外上移（为电影名/剧集信息留空间）
+      final baseBottomOffset =
           (widget.showControls && !widget.isLocked) ? 85.0 : 20.0;
+      // 电影和电视剧都需要额外上移（电影显示年份+名称，电视剧显示按钮+集数）
+      final extraOffset = (widget.showControls && !widget.isLocked)
+          ? (widget.isEpisode ? 30.0 : 26.0)
+          : 0.0;
+      final bottomOffset = baseBottomOffset + extraOffset;
 
       return AnimatedPositioned(
         key: const ValueKey('subtitle-overlay-image'),
@@ -570,8 +577,12 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       return const SizedBox.shrink();
     }
 
-    final bottomOffset =
+    // ✅ 控制栏显示时额外上移（为电影名/剧集信息留空间）
+    final baseBottomOffset =
         (widget.showControls && !widget.isLocked) ? 85.0 : 20.0;
+    // 电影和电视剧都需要额外上移（电影显示年份+名称，电视剧显示按钮+集数）
+    final extraOffset = (widget.showControls && !widget.isLocked) ? 26.0 : 0.0;
+    final bottomOffset = baseBottomOffset + extraOffset;
 
     return AnimatedPositioned(
       key: const ValueKey('subtitle-overlay-text'),

@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/emby_api.dart';
 import '../../utils/theme_utils.dart';
 
 /// ✅ 播放器控制状态数据类
@@ -77,6 +78,13 @@ class PlayerControlsState {
   final ValueChanged<bool> onShowQualityListChanged; // ✅ 显示/隐藏分辨率列表
   final ScrollController qualityListScrollController; // ✅ 分辨率列表滚动控制器
   final VoidCallback onScrollToSelectedQuality; // ✅ 滚动到选中的分辨率
+  final String? itemType; // ✅ 影片类型（Movie, Episode等）
+  final String? logoUrl; // ✅ Logo图片URL
+  final ItemInfo? itemDetails; // ✅ 影片详细信息
+  final ItemInfo? previousEpisode; // ✅ 上一集
+  final ItemInfo? nextEpisode; // ✅ 下一集
+  final VoidCallback? onPlayPreviousEpisode; // ✅ 播放上一集
+  final VoidCallback? onPlayNextEpisode; // ✅ 播放下一集
 
   const PlayerControlsState({
     required this.isInPipMode,
@@ -147,6 +155,13 @@ class PlayerControlsState {
     required this.onShowQualityListChanged,
     required this.qualityListScrollController,
     required this.onScrollToSelectedQuality,
+    this.itemType,
+    this.logoUrl,
+    this.itemDetails,
+    this.previousEpisode,
+    this.nextEpisode,
+    this.onPlayPreviousEpisode,
+    this.onPlayNextEpisode,
   });
 }
 
@@ -350,24 +365,51 @@ class _TopControlsBar extends ConsumerWidget {
                         size: 24,
                       ),
                       const SizedBox(width: 8),
-                      // ✅ 显示视频标题
+                      // ✅ 显示Logo或视频标题
                       Expanded(
-                        child: Text(
-                          state.videoTitle,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black45,
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        child:
+                            state.logoUrl != null && state.logoUrl!.isNotEmpty
+                                ? Image.network(
+                                    state.logoUrl!,
+                                    height: 40,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.centerLeft,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      // Logo加载失败时显示文字标题
+                                      return Text(
+                                        state.videoTitle,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          shadows: [
+                                            Shadow(
+                                              color: Colors.black45,
+                                              blurRadius: 4,
+                                            ),
+                                          ],
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      );
+                                    },
+                                  )
+                                : Text(
+                                    state.videoTitle,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      shadows: [
+                                        Shadow(
+                                          color: Colors.black45,
+                                          blurRadius: 4,
+                                        ),
+                                      ],
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                       ),
                       const SizedBox(width: 12),
                       // ✅ 右侧按钮组（带毛玻璃背景）
@@ -1383,6 +1425,12 @@ class _BottomControlsBar extends StatelessWidget {
                   bufferPosition: state.bufferPosition,
                   isPlaying: state.isPlaying,
                   isDragging: state.isDraggingProgress,
+                  itemType: state.itemType,
+                  itemDetails: state.itemDetails,
+                  previousEpisode: state.previousEpisode,
+                  nextEpisode: state.nextEpisode,
+                  onPlayPreviousEpisode: state.onPlayPreviousEpisode,
+                  onPlayNextEpisode: state.onPlayNextEpisode,
                   draggingPosition: state.draggingPosition,
                   audioStreams: state.audioStreams,
                   subtitleStreams: state.subtitleStreams,
@@ -1662,6 +1710,12 @@ class _Controls extends ConsumerStatefulWidget {
     required this.onDragStart,
     required this.onDragging,
     required this.onDragEnd,
+    this.itemType,
+    this.itemDetails,
+    this.previousEpisode,
+    this.nextEpisode,
+    this.onPlayPreviousEpisode,
+    this.onPlayNextEpisode,
   });
   final Duration position;
   final Duration duration;
@@ -1678,6 +1732,12 @@ class _Controls extends ConsumerStatefulWidget {
   final VoidCallback onDragStart;
   final ValueChanged<Duration> onDragging;
   final ValueChanged<Duration> onDragEnd;
+  final String? itemType;
+  final ItemInfo? itemDetails;
+  final ItemInfo? previousEpisode;
+  final ItemInfo? nextEpisode;
+  final VoidCallback? onPlayPreviousEpisode;
+  final VoidCallback? onPlayNextEpisode;
 
   @override
   ConsumerState<_Controls> createState() => _ControlsState();
@@ -1737,196 +1797,367 @@ class _ControlsState extends ConsumerState<_Controls>
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(40),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: isDarkMode
-                    ? [
-                        Colors.grey.shade900.withValues(alpha: 0.6),
-                        Colors.grey.shade800.withValues(alpha: 0.4),
-                      ]
-                    : [
-                        Colors.white.withValues(alpha: 0.2),
-                        Colors.white.withValues(alpha: 0.1),
-                      ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ✅ 电影/电视剧信息显示（在进度条上方）
+          if (widget.itemType != null && widget.itemDetails != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4, left: 8, right: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _buildMediaInfo(context, isDarkMode),
               ),
-              borderRadius: BorderRadius.circular(40),
             ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 65,
-                  child: Text(
-                    _fmt(widget.position),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
+          // ✅ 原有的进度条控制栏
+          ClipRRect(
+            borderRadius: BorderRadius.circular(40),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isDarkMode
+                        ? [
+                            Colors.grey.shade900.withValues(alpha: 0.6),
+                            Colors.grey.shade800.withValues(alpha: 0.4),
+                          ]
+                        : [
+                            Colors.white.withValues(alpha: 0.2),
+                            Colors.white.withValues(alpha: 0.1),
+                          ],
+                  ),
+                  borderRadius: BorderRadius.circular(40),
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 65,
+                      child: Text(
+                        _fmt(widget.position),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        textAlign: TextAlign.right,
+                      ),
                     ),
-                    textAlign: TextAlign.right,
-                  ),
-                ),
-                const Text(
-                  ' · ',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                SizedBox(
-                  width: 65,
-                  child: Text(
-                    _fmt(widget.duration),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
+                    const Text(
+                      ' · ',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                    textAlign: TextAlign.left,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: AnimatedBuilder(
-                    animation: _thumbAnimation,
-                    builder: (context, child) {
-                      final bufferValue =
-                          widget.bufferPosition.inSeconds / totalSeconds;
-                      final bufferSliderValue = bufferValue.isNaN
-                          ? 0.0
-                          : bufferValue.clamp(0.0, 1.0).toDouble();
+                    SizedBox(
+                      width: 65,
+                      child: Text(
+                        _fmt(widget.duration),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        textAlign: TextAlign.left,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: AnimatedBuilder(
+                        animation: _thumbAnimation,
+                        builder: (context, child) {
+                          final bufferValue =
+                              widget.bufferPosition.inSeconds / totalSeconds;
+                          final bufferSliderValue = bufferValue.isNaN
+                              ? 0.0
+                              : bufferValue.clamp(0.0, 1.0).toDouble();
 
-                      return LayoutBuilder(
-                        builder: (context, constraints) {
-                          final width = constraints.maxWidth;
-                          final playedWidth = width * sliderValue;
-                          final bufferedWidth = width * bufferSliderValue;
+                          return LayoutBuilder(
+                            builder: (context, constraints) {
+                              final width = constraints.maxWidth;
+                              final playedWidth = width * sliderValue;
+                              final bufferedWidth = width * bufferSliderValue;
 
-                          return Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              if (bufferedWidth > playedWidth)
-                                Positioned.fill(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 24),
-                                    child: Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: Container(
-                                        margin: EdgeInsets.only(
-                                            left: (width - 48) * sliderValue),
-                                        width: (width - 48) *
-                                            (bufferSliderValue - sliderValue),
-                                        height: 3,
-                                        decoration: BoxDecoration(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.5),
-                                          borderRadius: const BorderRadius.only(
-                                            topRight: Radius.circular(1.5),
-                                            bottomRight: Radius.circular(1.5),
+                              return Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  if (bufferedWidth > playedWidth)
+                                    Positioned.fill(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 24),
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Container(
+                                            margin: EdgeInsets.only(
+                                                left:
+                                                    (width - 48) * sliderValue),
+                                            width: (width - 48) *
+                                                (bufferSliderValue -
+                                                    sliderValue),
+                                            height: 3,
+                                            decoration: BoxDecoration(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.5),
+                                              borderRadius:
+                                                  const BorderRadius.only(
+                                                topRight: Radius.circular(1.5),
+                                                bottomRight:
+                                                    Radius.circular(1.5),
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
+                                  SliderTheme(
+                                    data: SliderThemeData(
+                                      trackHeight: 3,
+                                      thumbShape: RoundSliderThumbShape(
+                                        enabledThumbRadius:
+                                            _thumbAnimation.value,
+                                      ),
+                                      overlayShape:
+                                          const RoundSliderOverlayShape(
+                                        overlayRadius: 16,
+                                      ),
+                                      activeTrackColor: Colors.white,
+                                      inactiveTrackColor:
+                                          Colors.white.withValues(alpha: 0.3),
+                                      thumbColor: Colors.white,
+                                      overlayColor:
+                                          Colors.white.withValues(alpha: 0.15),
+                                    ),
+                                    child: Slider(
+                                      value: sliderValue,
+                                      onChangeStart: (v) {
+                                        widget.onDragStart();
+                                      },
+                                      onChanged: (v) {
+                                        final target = Duration(
+                                            seconds:
+                                                (v * totalSeconds).round());
+                                        widget.onDragging(target);
+                                      },
+                                      onChangeEnd: (v) {
+                                        final target = Duration(
+                                            seconds:
+                                                (v * totalSeconds).round());
+                                        widget.onDragEnd(target);
+                                      },
+                                    ),
                                   ),
-                                ),
-                              SliderTheme(
-                                data: SliderThemeData(
-                                  trackHeight: 3,
-                                  thumbShape: RoundSliderThumbShape(
-                                    enabledThumbRadius: _thumbAnimation.value,
-                                  ),
-                                  overlayShape: const RoundSliderOverlayShape(
-                                    overlayRadius: 16,
-                                  ),
-                                  activeTrackColor: Colors.white,
-                                  inactiveTrackColor:
-                                      Colors.white.withValues(alpha: 0.3),
-                                  thumbColor: Colors.white,
-                                  overlayColor:
-                                      Colors.white.withValues(alpha: 0.15),
-                                ),
-                                child: Slider(
-                                  value: sliderValue,
-                                  onChangeStart: (v) {
-                                    widget.onDragStart();
-                                  },
-                                  onChanged: (v) {
-                                    final target = Duration(
-                                        seconds: (v * totalSeconds).round());
-                                    widget.onDragging(target);
-                                  },
-                                  onChangeEnd: (v) {
-                                    final target = Duration(
-                                        seconds: (v * totalSeconds).round());
-                                    widget.onDragEnd(target);
-                                  },
-                                ),
-                              ),
-                            ],
+                                ],
+                              );
+                            },
                           );
                         },
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // ✅ 字幕图标：始终显示，无字幕时灰掉且不可点击
-                Builder(
-                  builder: (btnContext) {
-                    _subtitleAnchorContext = btnContext;
-                    final hasSubtitles = widget.subtitleStreams.isNotEmpty;
-                    return CupertinoButton(
-                      padding: const EdgeInsets.all(8),
-                      minSize: 0,
-                      onPressed: hasSubtitles
-                          ? () => widget.onSubtitleTap(btnContext)
-                          : null, // ✅ 无字幕时点击无响应
-                      child: Icon(
-                        Icons.subtitles_rounded,
-                        color: hasSubtitles
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.3), // ✅ 无字幕时灰掉
-                        size: 24,
                       ),
-                    );
-                  },
+                    ),
+                    const SizedBox(width: 12),
+                    // ✅ 字幕图标：始终显示，无字幕时灰掉且不可点击
+                    Builder(
+                      builder: (btnContext) {
+                        _subtitleAnchorContext = btnContext;
+                        final hasSubtitles = widget.subtitleStreams.isNotEmpty;
+                        return CupertinoButton(
+                          padding: const EdgeInsets.all(8),
+                          minSize: 0,
+                          onPressed: hasSubtitles
+                              ? () => widget.onSubtitleTap(btnContext)
+                              : null, // ✅ 无字幕时点击无响应
+                          child: Icon(
+                            Icons.subtitles_rounded,
+                            color: hasSubtitles
+                                ? Colors.white
+                                : Colors.white
+                                    .withValues(alpha: 0.3), // ✅ 无字幕时灰掉
+                            size: 24,
+                          ),
+                        );
+                      },
+                    ),
+                    // ✅ 音频图标：始终显示，无音频时灰掉且不可点击
+                    Builder(
+                      builder: (btnContext) {
+                        final hasAudio = widget.audioStreams.isNotEmpty;
+                        return CupertinoButton(
+                          padding: const EdgeInsets.all(8),
+                          minSize: 0,
+                          onPressed: hasAudio
+                              ? () => widget.onAudioTap(
+                                  _subtitleAnchorContext ?? btnContext)
+                              : null, // ✅ 无音频时点击无响应
+                          child: Icon(
+                            Icons.audiotrack_rounded,
+                            color: hasAudio
+                                ? Colors.white
+                                : Colors.white
+                                    .withValues(alpha: 0.3), // ✅ 无音频时灰掉
+                            size: 24,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
-                // ✅ 音频图标：始终显示，无音频时灰掉且不可点击
-                Builder(
-                  builder: (btnContext) {
-                    final hasAudio = widget.audioStreams.isNotEmpty;
-                    return CupertinoButton(
-                      padding: const EdgeInsets.all(8),
-                      minSize: 0,
-                      onPressed: hasAudio
-                          ? () => widget
-                              .onAudioTap(_subtitleAnchorContext ?? btnContext)
-                          : null, // ✅ 无音频时点击无响应
-                      child: Icon(
-                        Icons.audiotrack_rounded,
-                        color: hasAudio
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.3), // ✅ 无音频时灰掉
-                        size: 24,
-                      ),
-                    );
-                  },
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
+  }
+
+  // ✅ 构建电影/电视剧信息显示
+  Widget _buildMediaInfo(BuildContext context, bool isDarkMode) {
+    if (widget.itemType == 'Movie') {
+      // ✅ 电影：显示（年份）电影名称
+      final year = widget.itemDetails?.productionYear;
+      final movieName = widget.itemDetails?.name ?? '';
+      return Text(
+        year != null ? '($year) $movieName' : movieName,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          shadows: [
+            Shadow(
+              color: Colors.black,
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+            Shadow(
+              color: Colors.black,
+              blurRadius: 4,
+              offset: Offset(0, 1),
+            ),
+          ],
+        ),
+        textAlign: TextAlign.left,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    } else if (widget.itemType == 'Episode') {
+      // ✅ 电视剧：上一集/下一集按钮 + 剧集信息文本
+      final seasonNumber = widget.itemDetails?.parentIndexNumber;
+      final episodeNumber = widget.itemDetails?.indexNumber;
+      final episodeName = widget.itemDetails?.name ?? '';
+
+      // ✅ 构建剧集信息文本
+      String infoText = '';
+      if (seasonNumber != null && episodeNumber != null) {
+        final episodeInfo = '第${seasonNumber}季 第${episodeNumber}集';
+
+        // ✅ 检查集名是否只是重复了集数信息（忽略空格和全角空格）
+        final normalizedEpisodeName =
+            episodeName.replaceAll(' ', '').replaceAll('　', '').toLowerCase();
+        final normalizedEpisodeInfo =
+            episodeInfo.replaceAll(' ', '').toLowerCase();
+
+        // ✅ 检查集名是否包含在剧集信息中，或者只是重复了"第X集"
+        final episodeOnlyPattern = '第${episodeNumber}集'.replaceAll(' ', '');
+        final isDuplicate = normalizedEpisodeName == normalizedEpisodeInfo ||
+            normalizedEpisodeName == episodeOnlyPattern.toLowerCase() ||
+            normalizedEpisodeName.isEmpty;
+
+        if (!isDuplicate) {
+          infoText = '$episodeInfo $episodeName';
+        } else {
+          infoText = episodeInfo;
+        }
+      } else if (episodeName.isNotEmpty) {
+        infoText = episodeName;
+      }
+
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ✅ 上一集按钮（只显示图标）
+          if (widget.previousEpisode != null &&
+              widget.onPlayPreviousEpisode != null)
+            CupertinoButton(
+              padding: const EdgeInsets.all(2),
+              minSize: 0,
+              onPressed: widget.onPlayPreviousEpisode,
+              child: const Icon(
+                Icons.skip_previous_rounded,
+                color: Colors.white,
+                size: 24,
+                shadows: [
+                  Shadow(
+                    color: Colors.black,
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                  Shadow(
+                    color: Colors.black,
+                    blurRadius: 4,
+                    offset: Offset(0, 1),
+                  ),
+                ],
+              ),
+            ),
+          // ✅ 下一集按钮（只显示图标）
+          if (widget.nextEpisode != null && widget.onPlayNextEpisode != null)
+            CupertinoButton(
+              padding: const EdgeInsets.all(2),
+              minSize: 0,
+              onPressed: widget.onPlayNextEpisode,
+              child: const Icon(
+                Icons.skip_next_rounded,
+                color: Colors.white,
+                size: 24,
+                shadows: [
+                  Shadow(
+                    color: Colors.black,
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                  Shadow(
+                    color: Colors.black,
+                    blurRadius: 4,
+                    offset: Offset(0, 1),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(width: 12),
+          // ✅ 剧集信息文本
+          Flexible(
+            child: Text(
+              infoText,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                shadows: [
+                  Shadow(
+                    color: Colors.black,
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                  Shadow(
+                    color: Colors.black,
+                    blurRadius: 4,
+                    offset: Offset(0, 1),
+                  ),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+    }
+    return const SizedBox.shrink();
   }
 
   String _fmt(Duration d) {

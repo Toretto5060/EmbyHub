@@ -1176,9 +1176,173 @@ class EmbyApi {
     final res =
         await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres,People,ExternalUrls,DateCreated',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,Genres,People,ExternalUrls,DateCreated,SeriesId,SeasonId,ParentIndexNumber,IndexNumber',
     });
     return ItemInfo.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  // ✅ 获取剧集的上一集
+  Future<ItemInfo?> getPreviousEpisode({
+    required String userId,
+    required String seriesId,
+    required String currentEpisodeId,
+  }) async {
+    try {
+      // 先获取当前集的信息
+      final currentEpisode = await getItem(userId, currentEpisodeId);
+      final currentSeasonIndex = currentEpisode.parentIndexNumber;
+      final currentEpisodeIndex = currentEpisode.indexNumber;
+
+      if (currentSeasonIndex == null || currentEpisodeIndex == null) {
+        return null;
+      }
+
+      // 获取所有季
+      final seasons = await getSeasons(userId: userId, seriesId: seriesId);
+      if (seasons.isEmpty) return null;
+
+      // 按季号排序
+      seasons.sort((a, b) {
+        final aIndex = a.indexNumber ?? 0;
+        final bIndex = b.indexNumber ?? 0;
+        return aIndex.compareTo(bIndex);
+      });
+
+      // 查找当前季
+      final currentSeasonItem = seasons.firstWhere(
+        (s) => s.indexNumber == currentSeasonIndex,
+        orElse: () => seasons.first,
+      );
+
+      // 获取当前季的所有集
+      final episodes = await getEpisodes(
+        userId: userId,
+        seriesId: seriesId,
+        seasonId: currentSeasonItem.id!,
+      );
+
+      // 按集号排序
+      episodes.sort((a, b) {
+        final aIndex = a.indexNumber ?? 0;
+        final bIndex = b.indexNumber ?? 0;
+        return aIndex.compareTo(bIndex);
+      });
+
+      // 查找上一集
+      final currentIndex =
+          episodes.indexWhere((e) => e.indexNumber == currentEpisodeIndex);
+      if (currentIndex > 0) {
+        // 同一季的上一集
+        return episodes[currentIndex - 1];
+      } else if (currentIndex == 0) {
+        // 当前是本季第一集，查找上一季的最后一集
+        final currentSeasonIdx =
+            seasons.indexWhere((s) => s.indexNumber == currentSeasonIndex);
+        if (currentSeasonIdx > 0) {
+          final previousSeason = seasons[currentSeasonIdx - 1];
+          final previousSeasonEpisodes = await getEpisodes(
+            userId: userId,
+            seriesId: seriesId,
+            seasonId: previousSeason.id!,
+          );
+          if (previousSeasonEpisodes.isNotEmpty) {
+            previousSeasonEpisodes.sort((a, b) {
+              final aIndex = a.indexNumber ?? 0;
+              final bIndex = b.indexNumber ?? 0;
+              return aIndex.compareTo(bIndex);
+            });
+            return previousSeasonEpisodes.last;
+          }
+        }
+      }
+
+      return null;
+    } catch (e) {
+      _apiLog('getPreviousEpisode error: $e');
+      return null;
+    }
+  }
+
+  // ✅ 获取剧集的下一集
+  Future<ItemInfo?> getNextEpisode({
+    required String userId,
+    required String seriesId,
+    required String currentEpisodeId,
+  }) async {
+    try {
+      // 先获取当前集的信息
+      final currentEpisode = await getItem(userId, currentEpisodeId);
+      final currentSeasonIndex = currentEpisode.parentIndexNumber;
+      final currentEpisodeIndex = currentEpisode.indexNumber;
+
+      if (currentSeasonIndex == null || currentEpisodeIndex == null) {
+        return null;
+      }
+
+      // 获取所有季
+      final seasons = await getSeasons(userId: userId, seriesId: seriesId);
+      if (seasons.isEmpty) return null;
+
+      // 按季号排序
+      seasons.sort((a, b) {
+        final aIndex = a.indexNumber ?? 0;
+        final bIndex = b.indexNumber ?? 0;
+        return aIndex.compareTo(bIndex);
+      });
+
+      // 查找当前季
+      final currentSeasonItem = seasons.firstWhere(
+        (s) => s.indexNumber == currentSeasonIndex,
+        orElse: () => seasons.first,
+      );
+
+      // 获取当前季的所有集
+      final episodes = await getEpisodes(
+        userId: userId,
+        seriesId: seriesId,
+        seasonId: currentSeasonItem.id!,
+      );
+
+      // 按集号排序
+      episodes.sort((a, b) {
+        final aIndex = a.indexNumber ?? 0;
+        final bIndex = b.indexNumber ?? 0;
+        return aIndex.compareTo(bIndex);
+      });
+
+      // 查找下一集
+      final currentIndex =
+          episodes.indexWhere((e) => e.indexNumber == currentEpisodeIndex);
+      if (currentIndex >= 0 && currentIndex < episodes.length - 1) {
+        // 同一季的下一集
+        return episodes[currentIndex + 1];
+      } else if (currentIndex == episodes.length - 1) {
+        // 当前是本季最后一集，查找下一季的第一集
+        final currentSeasonIdx =
+            seasons.indexWhere((s) => s.indexNumber == currentSeasonIndex);
+        if (currentSeasonIdx >= 0 && currentSeasonIdx < seasons.length - 1) {
+          final nextSeason = seasons[currentSeasonIdx + 1];
+          final nextSeasonEpisodes = await getEpisodes(
+            userId: userId,
+            seriesId: seriesId,
+            seasonId: nextSeason.id!,
+          );
+          if (nextSeasonEpisodes.isNotEmpty) {
+            nextSeasonEpisodes.sort((a, b) {
+              final aIndex = a.indexNumber ?? 0;
+              final bIndex = b.indexNumber ?? 0;
+              return aIndex.compareTo(bIndex);
+            });
+            return nextSeasonEpisodes.first;
+          }
+        }
+      }
+
+      return null;
+    } catch (e) {
+      _apiLog('getNextEpisode error: $e');
+      return null;
+    }
   }
 
   String buildImageUrl({

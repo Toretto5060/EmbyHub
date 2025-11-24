@@ -177,6 +177,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   // ✅ PiP 模式状态（用于UI显示）
   bool _isInPipMode = false;
 
+  // ✅ 影片详细信息
+  ItemInfo? _itemDetails;
+  String? _itemType; // Movie, Episode, etc.
+  String? _logoUrl; // Logo图片URL
+  ItemInfo? _previousEpisode; // 上一集
+  ItemInfo? _nextEpisode; // 下一集
+
   // ✅ 是否正在执行初始seek（用于隐藏第一帧）
   // bool _isInitialSeeking = false;
 
@@ -588,6 +595,64 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final itemDetails =
           _userId != null ? await api.getItem(_userId!, widget.itemId) : null;
       _videoTitle = itemDetails?.name ?? 'Video';
+      _itemDetails = itemDetails;
+      _itemType = itemDetails?.type;
+
+      // ✅ 获取Logo URL（优先使用Logo类型的图片）
+      if (itemDetails != null && itemDetails.id != null) {
+        // 对于Episode类型，尝试获取Series的Logo
+        if (itemDetails.type == 'Episode' && itemDetails.seriesId != null) {
+          try {
+            final seriesInfo =
+                await api.getItem(_userId!, itemDetails.seriesId!);
+            if (seriesInfo.imageTags != null &&
+                seriesInfo.imageTags!.containsKey('Logo')) {
+              _logoUrl = api.buildImageUrl(
+                itemId: itemDetails.seriesId!,
+                type: 'Logo',
+                maxWidth: 400,
+                tag: seriesInfo.imageTags!['Logo'],
+              );
+            }
+          } catch (e) {
+            _playerLog('⚠️ [Player] Failed to get series logo: $e');
+          }
+        } else {
+          // 对于Movie等类型，直接获取Logo
+          if (itemDetails.imageTags != null &&
+              itemDetails.imageTags!.containsKey('Logo')) {
+            _logoUrl = api.buildImageUrl(
+              itemId: itemDetails.id!,
+              type: 'Logo',
+              maxWidth: 400,
+              tag: itemDetails.imageTags!['Logo'],
+            );
+          }
+        }
+      }
+
+      // ✅ 如果是Episode类型，获取上一集和下一集
+      if (itemDetails != null &&
+          itemDetails.type == 'Episode' &&
+          itemDetails.seriesId != null &&
+          _userId != null) {
+        try {
+          _previousEpisode = await api.getPreviousEpisode(
+            userId: _userId!,
+            seriesId: itemDetails.seriesId!,
+            currentEpisodeId: widget.itemId,
+          );
+          _nextEpisode = await api.getNextEpisode(
+            userId: _userId!,
+            seriesId: itemDetails.seriesId!,
+            currentEpisodeId: widget.itemId,
+          );
+          _playerLog(
+              '🎬 [Player] Previous episode: ${_previousEpisode?.name}, Next episode: ${_nextEpisode?.name}');
+        } catch (e) {
+          _playerLog('⚠️ [Player] Failed to get previous/next episode: $e');
+        }
+      }
 
       // ✅ 提取音频和字幕流
       if (itemDetails != null) {
@@ -1758,6 +1823,57 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       });
     }
     _syncProgress(pos);
+
+    // ✅ 检查是否播放完毕（播放进度 >= 98%）
+    if (_duration > Duration.zero && pos >= _duration * 0.98) {
+      _handlePlaybackCompleted();
+    }
+  }
+
+  // ✅ 处理播放完毕
+  bool _hasHandledCompletion = false;
+  void _handlePlaybackCompleted() {
+    if (_hasHandledCompletion) return;
+    _hasHandledCompletion = true;
+
+    _playerLogImportant('🎬 [Player] Playback completed');
+
+    if (_itemType == 'Episode') {
+      // ✅ 电视剧：自动播放下一集（如果有）
+      if (_nextEpisode != null && _nextEpisode!.id != null) {
+        _playerLogImportant(
+            '🎬 [Player] Auto-playing next episode: ${_nextEpisode!.name}');
+        // 延迟1秒后播放下一集
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (context) => PlayerPage(
+                  itemId: _nextEpisode!.id!,
+                  initialPositionTicks: null,
+                ),
+              ),
+            );
+          }
+        });
+      } else {
+        // ✅ 最后一集，退出播放页面
+        _playerLogImportant('🎬 [Player] Last episode, exiting player');
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+        });
+      }
+    } else if (_itemType == 'Movie') {
+      // ✅ 电影：自动退出播放页面
+      _playerLogImportant('🎬 [Player] Movie completed, exiting player');
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      });
+    }
   }
 
   // ✅ 切换控制栏显示/隐藏
@@ -1960,6 +2076,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   isVisible: _ready,
                   showControls: _showControls, // ✅ 传递控制栏显示状态
                   isLocked: _isLocked, // ✅ 传递锁定状态
+                  isEpisode: _itemType == 'Episode', // ✅ 传递是否为电视剧类型
                 ),
 
               // ✅ 触摸检测层（当控制层隐藏时，用于显示控制层；长按快进/快退）
@@ -2312,6 +2429,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   },
                   qualityListScrollController: _qualityListScrollController,
                   onScrollToSelectedQuality: _scrollToSelectedQuality,
+                  itemType: _itemType,
+                  logoUrl: _logoUrl,
+                  itemDetails: _itemDetails,
+                  previousEpisode: _previousEpisode,
+                  nextEpisode: _nextEpisode,
+                  onPlayPreviousEpisode: _playPreviousEpisode,
+                  onPlayNextEpisode: _playNextEpisode,
                 ),
               ),
             ],
@@ -3433,4 +3557,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         'set volume',
         () => _player.setVolume(volumePercent),
       );
+
+  // ✅ 播放上一集
+  Future<void> _playPreviousEpisode() async {
+    if (_previousEpisode != null && _previousEpisode!.id != null) {
+      _playerLogImportant(
+          '🎬 [Player] Playing previous episode: ${_previousEpisode!.name}');
+      if (mounted) {
+        await Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => PlayerPage(
+              itemId: _previousEpisode!.id!,
+              initialPositionTicks: null,
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  // ✅ 播放下一集
+  Future<void> _playNextEpisode() async {
+    if (_nextEpisode != null && _nextEpisode!.id != null) {
+      _playerLogImportant(
+          '🎬 [Player] Playing next episode: ${_nextEpisode!.name}');
+      if (mounted) {
+        await Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => PlayerPage(
+              itemId: _nextEpisode!.id!,
+              initialPositionTicks: null,
+            ),
+          ),
+        );
+      }
+    }
+  }
 }
