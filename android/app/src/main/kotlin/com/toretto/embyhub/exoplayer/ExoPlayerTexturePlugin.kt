@@ -186,6 +186,11 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
             "dispose" -> {
                 disposePlayer()
+                // 清理texture和surface，避免下次进入时显示残留画面
+                surface?.release()
+                surface = null
+                textureEntry?.release()
+                textureEntry = null
                 result.success(null)
             }
 
@@ -211,8 +216,13 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun rebuildPlayer(loadControl: LoadControl?) {
         val ctx = context ?: return
 
-        player?.removeListener(playerListener)
-        player?.release()
+        // 释放旧播放器
+        player?.let { oldPlayer ->
+            oldPlayer.removeListener(playerListener)
+            // 先清除surface，避免残留画面
+            oldPlayer.clearVideoSurface()
+            oldPlayer.release()
+        }
         player = null
 
         if (trackSelector == null) {
@@ -229,10 +239,13 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             builder.setLoadControl(loadControl)
         }
         val exoPlayer = builder.build()
+        
+        // 重新绑定surface
         val surface = this.surface
         if (surface != null) {
             exoPlayer.setVideoSurface(surface)
         }
+        
         exoPlayer.setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -269,15 +282,14 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     ) {
         initializeTextureIfNeeded()
 
+        // 每次打开新媒体都重建播放器，确保清除旧状态
         val loadControl = cacheConfig?.let { buildLoadControl(it) }
-        if (loadControl != null || player == null) {
-            rebuildPlayer(loadControl)
-        }
+        rebuildPlayer(loadControl)
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(30000)
+            .setConnectTimeoutMs(30000)
+            .setReadTimeoutMs(60000)
             .apply {
                 if (headers.isNotEmpty()) {
                     setDefaultRequestProperties(headers)
@@ -293,17 +305,33 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         val mediaItem = mediaItemBuilder.build()
 
-        player?.setMediaSource(mediaSourceFactory.createMediaSource(mediaItem))
-        player?.prepare()
+        val p = player ?: return
+        
+        // 使用setMediaSource的重载方法，直接指定起始位置
         if (startPositionMs != null && startPositionMs > 0) {
-            player?.seekTo(startPositionMs)
+            p.setMediaSource(mediaSourceFactory.createMediaSource(mediaItem), startPositionMs)
         } else {
-            player?.seekTo(0)
+            p.setMediaSource(mediaSourceFactory.createMediaSource(mediaItem))
         }
-        player?.playWhenReady = autoPlay
-        if (!autoPlay) {
-            player?.pause()
+        
+        // 准备播放器
+        p.prepare()
+        
+        // 在prepare之后设置playWhenReady，并使用Handler延迟确保状态生效
+        p.playWhenReady = autoPlay
+        if (autoPlay) {
+            // 延迟100ms再次确认，确保播放真的开始
+            handler.postDelayed({
+                val player = this.player
+                if (player != null && player.playbackState != Player.STATE_IDLE) {
+                    player.playWhenReady = true
+                    if (!player.isPlaying && player.playbackState == Player.STATE_READY) {
+                        player.play()
+                    }
+                }
+            }, 100)
         }
+        
         sendStateUpdate()
     }
 

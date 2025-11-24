@@ -529,63 +529,37 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final isHlsStream =
           media.uri.contains('.m3u8') || media.uri.contains('hls');
 
-      // ✅ 根据视频分辨率和格式动态调整缓存配置
-      final is4KVideo = media.width != null && media.width! >= 3840;
-      final isHEVC = media.uri.contains('hevc') ||
-          media.uri.contains('h265') ||
-          (is4KVideo && media.bitrate != null && media.bitrate! > 20000000);
-      final needExtraCache = is4KVideo || isHEVC;
+      // ✅ 使用激进的缓冲策略
+      final cacheConfig = {
+        'minBufferMs': 15000,
+        'maxBufferMs': 60000,
+        'bufferForPlaybackMs': 1500,
+        'bufferForPlaybackAfterRebufferMs': 3000,
+      };
 
-      final cacheConfig = _buildCacheConfig(
-        isHlsStream: isHlsStream,
-        needExtraCache: needExtraCache,
-      );
-
-      // ✅ 重新打开媒体
+      // ✅ 重新打开媒体（使用快速启动逻辑）
       await _guardPlayerCommand(
         'reload media',
         () => _player.open(
           url: media.uri,
           headers: media.headers,
           isHls: isHlsStream,
-          autoPlay: false,
-          startPosition: null,
-          cacheConfig: cacheConfig,
+          autoPlay: wasPlaying, // ✅ 根据之前的播放状态决定是否自动播放
+          startPosition: currentPosition > Duration.zero
+              ? currentPosition
+              : null, // ✅ 直接传入位置
+          cacheConfig: cacheConfig, // ✅ 使用优化的缓冲配置
         ),
       );
-
-      await _waitForPlayerReady();
 
       // ✅ 禁用内置字幕
       await _disableSubtitle();
 
-      // ✅ Seek 到之前的位置
-      if (currentPosition > Duration.zero) {
-        _playerLogImportant(
-            '🎬 [Player] Seeking to previous position: ${currentPosition.inSeconds}s');
-        await _playerSeek(currentPosition, swallowErrors: false);
-
-        // ✅ 等待 seek 完成
-        try {
-          await _player.positionStream
-              .firstWhere((pos) =>
-                  (pos - currentPosition).abs() < const Duration(seconds: 1))
-              .timeout(const Duration(seconds: 3));
-        } catch (e) {
-          _playerLog('⚠️ [Player] Position confirmation timeout: $e');
-        }
-
-        // ✅ 更新 UI 位置
-        if (mounted) {
-          setState(() {
-            _position = currentPosition;
-          });
-        }
-      }
-
-      // ✅ 如果之前在播放，继续播放
-      if (wasPlaying) {
-        await _playerPlay();
+      // ✅ 更新 UI 位置
+      if (currentPosition > Duration.zero && mounted) {
+        setState(() {
+          _position = currentPosition;
+        });
       }
 
       _playerLogImportant('✅ [Player] Player reloaded successfully');
@@ -670,45 +644,34 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             if (hasManualSelection &&
                 savedQuality != null &&
                 _qualityOptions.any((q) => q['label'] == savedQuality)) {
-              // ✅ 该视频手动选择过画质，使用手动选择的
+              // 该视频手动选择过画质，使用手动选择的
               selectedQuality = savedQuality;
               _playerLog(
                   '🎬 [Player] Using manual selection: $selectedQuality');
             } else {
-              // ✅ 该视频没有手动选择过，根据播放质量策略自动选择
+              // 该视频没有手动选择过，根据播放质量策略自动选择
               final qualityStrategy =
                   prefs.getString('playback_quality_strategy') ?? 'quality';
 
               if (qualityStrategy == 'quality') {
-                // ✅ 质量优先：选择最高分辨率（第一个选项）
-                if (_qualityOptions.isNotEmpty) {
-                  selectedQuality = _qualityOptions.first['label'] as String;
-                  _playerLog(
-                      '🎬 [Player] Quality priority: Using highest quality: $selectedQuality');
-                }
+                // 质量优先：选择原始分辨率
+                selectedQuality = _selectQualityForQualityMode();
+                _playerLog('🎬 [Player] Quality priority: $selectedQuality');
               } else if (qualityStrategy == 'speed') {
-                // ✅ 速度优先：根据当前网络速度选择合适的画质
-                selectedQuality = _selectQualityByNetworkSpeed();
-                _playerLog(
-                    '🎬 [Player] Speed priority: Selected quality based on network: $selectedQuality');
+                // 速度优先：网络允许时走自动，否则使用1080p最低画质
+                selectedQuality = _selectQualityForSpeedMode();
+                _playerLog('🎬 [Player] Speed priority: $selectedQuality');
               } else {
-                // ✅ 自动：根据当前网络速度选择合适的画质（与速度优先相同）
-                selectedQuality = _selectQualityByNetworkSpeed();
-                _playerLog(
-                    '🎬 [Player] Auto: Selected quality based on network: $selectedQuality');
+                // 自动：根据网络速度自动切换
+                selectedQuality = _selectQualityForAutoMode();
+                _playerLog('🎬 [Player] Auto mode: $selectedQuality');
               }
 
-              // ✅ 如果没有选中任何画质，使用原始分辨率作为后备
+              // 如果没有选中任何画质，使用原始分辨率作为后备
               if (selectedQuality == null) {
-                final originalOption = _qualityOptions.firstWhere(
-                  (q) => q['isOriginal'] == true,
-                  orElse: () => <String, dynamic>{},
-                );
-                if (originalOption.isNotEmpty) {
-                  selectedQuality = originalOption['label'] as String;
-                  _playerLog(
-                      '🎬 [Player] Auto mode: Using original quality: $selectedQuality');
-                }
+                selectedQuality = _getOriginalQuality();
+                _playerLog(
+                    '🎬 [Player] Fallback to original quality: $selectedQuality');
               }
             }
 
@@ -810,43 +773,28 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           '🎬 [Player] Video resolution: ${media.width}x${media.height}');
       _playerLog('🎬 [Player] Video bitrate: ${media.bitrate} bps');
 
-      // ✅ 根据视频分辨率和格式动态调整缓存配置
-      // 检测4K视频：分辨率 >= 3840x2160
-      final is4KVideo = media.width != null && media.width! >= 3840;
-      // 检测HEVC：通过URL或高码率推断（4K视频通常使用HEVC编码）
-      // HLS URL可能不包含codec信息，所以通过分辨率和码率推断
-      final isHEVC = media.uri.contains('hevc') ||
-          media.uri.contains('h265') ||
-          (is4KVideo &&
-              media.bitrate != null &&
-              media.bitrate! > 20000000); // 4K + 高码率 (>20Mbps) 通常为HEVC
-      // 需要额外缓存：4K视频或HEVC编码
-      final needExtraCache = is4KVideo || isHEVC;
+      // ✅ 优化：使用 autoPlay 立即开始播放，提升响应速度
+      // ✅ 使用激进的缓冲策略，适合高速网络
+      final cacheConfig = {
+        'minBufferMs': 15000, // 最小缓冲15秒（默认50秒太多）
+        'maxBufferMs': 60000, // 最大缓冲60秒（默认50秒）
+        'bufferForPlaybackMs': 1500, // 开始播放需要1.5秒缓冲（默认2.5秒）
+        'bufferForPlaybackAfterRebufferMs': 3000, // 重新缓冲后需要3秒（默认5秒）
+      };
 
-      _playerLog(
-          '🎬 [Player] Is 4K video: $is4KVideo, Is HEVC: $isHEVC, Need extra cache: $needExtraCache');
-
-      final cacheConfig = _buildCacheConfig(
-        isHlsStream: isHlsStream,
-        needExtraCache: needExtraCache,
-      );
-      _playerLog('🎬 [Player] Cache config (ms): $cacheConfig');
-
-      // ✅ 修复：不传入 startPosition，改为播放器完全准备好后手动 seek
-      // 这样可以确保视频解码器有足够的缓冲数据，避免画面卡顿
       await _guardPlayerCommand(
         'open media',
         () => _player.open(
           url: media.uri,
           headers: media.headers,
           isHls: isHlsStream,
-          autoPlay: false, // ✅ 总是先不自动播放，等待初始化完成
-          startPosition: null, // ✅ 不在这里 seek，改为手动 seek
-          cacheConfig: cacheConfig,
+          autoPlay: true, // ✅ 立即自动播放，加快启动速度
+          startPosition: resumeFromSavedPosition
+              ? _initialSeekPosition
+              : null, // ✅ 直接传入起始位置
+          cacheConfig: cacheConfig, // ✅ 使用优化的缓冲配置
         ),
       );
-
-      await _waitForPlayerReady();
 
       // ✅ 在 open 之后再次确保字幕被禁用
       await _disableSubtitle();
@@ -859,87 +807,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerLog('🎬 [Player] ✅ Media opened successfully');
       _showMediaNotification();
 
-      // ✅ 立即读取一次当前播放状态，确保初始状态正确
-      if (mounted) {
-        final currentPlaying = _player.isPlaying;
-        _playerLog('🎬 [Player] Initial playing state: $currentPlaying');
-        setState(() => _isPlaying = currentPlaying);
-      }
+      // ✅ 播放器已通过原生层的 playWhenReady 自动开始播放
+      _playerLogImportant('🎬 [Player] Playback started with autoPlay');
 
-      // ✅ 修复：如果需要 seek 到初始位置，先 seek 再播放
-      // 等待视频解码器缓冲足够的数据后再开始播放，避免画面卡顿
+      // ✅ 更新初始位置（如果有）
       if (resumeFromSavedPosition && _initialSeekPosition != null) {
-        _playerLogImportant(
-            '🎬 [Player] Seeking to initial position: ${_initialSeekPosition!.inSeconds}s');
-
-        // ✅ 先 seek 到目标位置（暂停状态）
-        await _playerSeek(_initialSeekPosition!, swallowErrors: false);
-
-        // ✅ 1. 等待 position stream 确认已到达目标位置
-        try {
-          await _player.positionStream
-              .firstWhere((pos) =>
-                  (pos - _initialSeekPosition!).abs() <
-                  const Duration(seconds: 1))
-              .timeout(const Duration(seconds: 3));
-          _playerLogImportant('🎬 [Player] ✅ Position confirmed at target');
-        } catch (e) {
-          _playerLog('⚠️ [Player] Position confirmation timeout: $e');
-        }
-
-        // ✅ 2. 等待视频尺寸就绪（确保视频解码器已启动）
-        if (_videoSize.width <= 1 || _videoSize.height <= 1) {
-          try {
-            await _player.videoSizeStream
-                .firstWhere((size) => size.width > 1 && size.height > 1)
-                .timeout(const Duration(seconds: 3));
-            _playerLogImportant('🎬 [Player] ✅ Video decoder ready');
-          } catch (e) {
-            _playerLog('⚠️ [Player] Video size wait timeout: $e');
-          }
-        }
-
-        // ✅ 3. 等待缓冲足够的数据（至少3秒，给视频解码器足够时间）
-        try {
-          await _player.bufferStream
-              .firstWhere((buffer) =>
-                  buffer >= _initialSeekPosition! + const Duration(seconds: 3))
-              .timeout(const Duration(seconds: 8));
-          _playerLogImportant('🎬 [Player] ✅ Buffer ready after seek');
-        } catch (e) {
-          _playerLog('⚠️ [Player] Buffer wait timeout (continuing): $e');
-          // ✅ 超时也继续，避免无限等待
-        }
-
-        // ✅ 4. 额外等待一小段时间，让视频解码器完成第一帧解码
-        await Future.delayed(const Duration(milliseconds: 300));
-
-        // ✅ 更新 UI 位置
         if (mounted) {
           setState(() {
             _position = _initialSeekPosition!;
           });
-        } else {
-          _position = _initialSeekPosition!;
         }
         _lastReportedPosition = _initialSeekPosition!;
-      }
-
-      // ✅ 开始播放（无论是否 seek，都确保播放）
-      _playerLogImportant('🎬 [Player] Starting playback...');
-      await _playerPlay();
-
-      // ✅ 等待播放状态确认（最多等待2秒）
-      try {
-        await _player.playingStream
-            .firstWhere((playing) => playing)
-            .timeout(const Duration(seconds: 2));
-        _playerLogImportant('✅ [Player] Playback started successfully');
-      } catch (e) {
-        _playerLog('⚠️ [Player] Playback start confirmation timeout: $e');
-        // ✅ 超时后再次尝试播放
-        _playerLogImportant('🔄 [Player] Retrying playback...');
-        await _playerPlay();
       }
 
       if (mounted) {
@@ -1397,57 +1275,136 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     );
   }
 
-  // ✅ 根据网络速度选择合适的画质
-  String? _selectQualityByNetworkSpeed() {
+  // 获取原始分辨率
+  String? _getOriginalQuality() {
     if (_qualityOptions.isEmpty) return null;
 
-    // ✅ 如果当前没有网络速度数据，使用原始分辨率
-    if (_currentSpeedKbps == null || _currentSpeedKbps! <= 0) {
-      final originalOption = _qualityOptions.firstWhere(
-        (q) => q['isOriginal'] == true,
-        orElse: () => <String, dynamic>{},
-      );
-      if (originalOption.isNotEmpty) {
-        _playerLog('🎬 [Player] No network speed data, using original quality');
-        return originalOption['label'] as String;
-      }
-      // 如果没有原始选项，使用中等画质
-      final middleIndex = _qualityOptions.length ~/ 2;
-      return _qualityOptions[middleIndex]['label'] as String;
+    // 查找标记为原始的选项
+    final originalOption = _qualityOptions.firstWhere(
+      (q) => q['isOriginal'] == true,
+      orElse: () => <String, dynamic>{},
+    );
+
+    if (originalOption.isNotEmpty) {
+      return originalOption['label'] as String;
     }
 
-    // ✅ 将网络速度从 kbps 转换为 Mbps
-    final speedMbps = _currentSpeedKbps! / 1000;
+    // 如果没有标记原始的，返回第一个（最高画质）
+    return _qualityOptions.first['label'] as String;
+  }
 
-    _playerLog(
-        '🎬 [Player] Current network speed: ${speedMbps.toStringAsFixed(1)} Mbps');
+  // 质量优先模式：默认选择视频原始分辨率
+  String? _selectQualityForQualityMode() {
+    return _getOriginalQuality();
+  }
 
-    // ✅ 根据网络速度选择合适的画质
-    // 策略：选择比特率不超过网络速度 70% 的最高画质（留 30% 余量保证流畅）
+  // 自动模式：根据网络环境自动切换到合适的分辨率
+  // 速度好则最高使用原始分辨率，其他网络状态则根据原始分辨率依次往下
+  String? _selectQualityForAutoMode() {
+    if (_qualityOptions.isEmpty) return null;
+
+    final speedMbps = (_currentSpeedKbps ?? 0) / 1000;
+
+    // 没有网络速度数据，使用原始分辨率
+    if (speedMbps <= 0) {
+      return _getOriginalQuality();
+    }
+
+    // 根据网络速度选择合适的画质
+    // 策略：选择比特率不超过网络速度 70% 的最高画质
     final targetBitrateMbps = speedMbps * 0.7;
 
-    String? selectedQuality;
     for (final option in _qualityOptions) {
       final maxBitrate = option['maxBitrate'] as int?;
       if (maxBitrate != null) {
-        final bitrateMbps = maxBitrate / 1000000; // 转换为 Mbps
+        final bitrateMbps = maxBitrate / 1000000;
         if (bitrateMbps <= targetBitrateMbps) {
-          selectedQuality = option['label'] as String;
-          _playerLog(
-              '🎬 [Player] Selected quality: $selectedQuality (${bitrateMbps.toStringAsFixed(1)} Mbps) for network speed ${speedMbps.toStringAsFixed(1)} Mbps');
-          break;
+          return option['label'] as String;
         }
       }
     }
 
-    // ✅ 如果没有找到合适的画质（网络太慢），选择最低画质
-    if (selectedQuality == null && _qualityOptions.isNotEmpty) {
-      selectedQuality = _qualityOptions.last['label'] as String;
-      _playerLog(
-          '🎬 [Player] Network too slow, using lowest quality: $selectedQuality');
+    // 网络太慢，选择最低画质
+    return _qualityOptions.last['label'] as String;
+  }
+
+  // 速度优先模式：
+  // 网络允许的情况下走自动
+  // 网络状态不允许的情况下使用1080p的最低画质
+  // 如果最高画质只有720p则使用最高画质
+  String? _selectQualityForSpeedMode() {
+    if (_qualityOptions.isEmpty) return null;
+
+    final speedMbps = (_currentSpeedKbps ?? 0) / 1000;
+
+    // 没有网络速度数据，使用保守策略
+    if (speedMbps <= 0) {
+      return _selectFallbackQualityForSpeedMode();
     }
 
-    return selectedQuality;
+    // 网络允许的情况下，走自动模式
+    final autoQuality = _selectQualityForAutoMode();
+    if (autoQuality != null) {
+      // 检查自动选择的画质是否合理
+      // 如果网络速度足够（>= 20Mbps），使用自动选择
+      if (speedMbps >= 20) {
+        return autoQuality;
+      }
+    }
+
+    // 网络不够好，使用保守策略
+    return _selectFallbackQualityForSpeedMode();
+  }
+
+  // 速度优先模式的保守策略
+  String? _selectFallbackQualityForSpeedMode() {
+    if (_qualityOptions.isEmpty) return null;
+
+    // 查找最高分辨率
+    int maxHeight = 0;
+    for (final option in _qualityOptions) {
+      final height = option['height'] as int? ?? 0;
+      if (height > maxHeight) {
+        maxHeight = height;
+      }
+    }
+
+    // 如果最高画质只有720p或更低，使用最高画质
+    if (maxHeight <= 720) {
+      return _qualityOptions.first['label'] as String;
+    }
+
+    // 最高画质超过720p，查找1080p的最低比特率选项
+    String? lowest1080p;
+    int lowestBitrate = 999999999;
+
+    for (final option in _qualityOptions) {
+      final label = option['label'] as String;
+      final height = option['height'] as int? ?? 0;
+      final bitrate = option['maxBitrate'] as int? ?? 0;
+
+      if (height == 1080 && bitrate > 0 && bitrate < lowestBitrate) {
+        lowestBitrate = bitrate;
+        lowest1080p = label;
+      }
+    }
+
+    // 如果找到1080p选项，返回最低比特率的1080p
+    if (lowest1080p != null) {
+      return lowest1080p;
+    }
+
+    // 没有1080p，查找最接近1080p的选项（往下找）
+    for (final option in _qualityOptions) {
+      final height = option['height'] as int? ?? 0;
+      if (height < 1080 && height >= 720) {
+        return option['label'] as String;
+      }
+    }
+
+    // 都没有，返回中等画质
+    final middleIndex = _qualityOptions.length ~/ 2;
+    return _qualityOptions[middleIndex]['label'] as String;
   }
 
   // ✅ 分辨率选择回调
@@ -1464,11 +1421,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       await prefs.setString('selected_quality_${widget.itemId}', quality);
       // ✅ 标记该视频已手动选择过画质
       await prefs.setBool('manual_quality_${widget.itemId}', true);
-      _playerLog('🎬 [Player] Quality manually changed to: $quality');
+      _playerLogImportant('🎬 [Player] Quality manually changed to: $quality');
     } else {
       await prefs.remove('selected_quality_${widget.itemId}');
       await prefs.remove('manual_quality_${widget.itemId}');
-      _playerLog('🎬 [Player] Quality reset to auto');
+      _playerLogImportant('🎬 [Player] Quality reset to auto');
     }
 
     // ✅ 获取选中分辨率的参数
@@ -1478,6 +1435,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         (q) => q['label'] == quality,
         orElse: () => <String, dynamic>{},
       );
+      if (selectedOption.isNotEmpty) {
+        _playerLogImportant(
+            '🎬 [Player] Selected quality params: width=${selectedOption['width']}, '
+            'height=${selectedOption['height']}, maxBitrate=${selectedOption['maxBitrate']}');
+      }
     }
 
     // ✅ 重新加载播放器以应用新的分辨率
@@ -1518,44 +1480,37 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final isHlsStream =
           media.uri.contains('.m3u8') || media.uri.contains('hls');
 
-      // ✅ 根据视频分辨率和格式动态调整缓存配置
-      final is4KVideo = media.width != null && media.width! >= 3840;
-      final isHEVC = media.uri.contains('hevc') ||
-          media.uri.contains('h265') ||
-          (is4KVideo && media.bitrate != null && media.bitrate! > 20000000);
-      final needExtraCache = is4KVideo || isHEVC;
+      // ✅ 使用激进的缓冲策略
+      final cacheConfig = {
+        'minBufferMs': 15000,
+        'maxBufferMs': 60000,
+        'bufferForPlaybackMs': 1500,
+        'bufferForPlaybackAfterRebufferMs': 3000,
+      };
 
-      final cacheConfig = _buildCacheConfig(
-        isHlsStream: isHlsStream,
-        needExtraCache: needExtraCache,
-      );
-
-      // ✅ 重新打开媒体
+      // ✅ 重新打开媒体（使用快速启动逻辑）
       await _guardPlayerCommand(
         'reload media with quality',
         () => _player.open(
           url: media.uri,
           headers: media.headers,
           isHls: isHlsStream,
-          autoPlay: false,
-          startPosition: null,
-          cacheConfig: cacheConfig,
+          autoPlay: wasPlaying, // ✅ 根据之前的播放状态决定是否自动播放
+          startPosition: currentPosition > Duration.zero
+              ? currentPosition
+              : null, // ✅ 直接传入位置
+          cacheConfig: cacheConfig, // ✅ 使用优化的缓冲配置
         ),
       );
-
-      await _waitForPlayerReady();
 
       // ✅ 禁用内置字幕
       await _disableSubtitle();
 
-      // ✅ Seek 到之前的位置
-      if (currentPosition > Duration.zero) {
-        await _playerSeek(currentPosition);
-      }
-
-      // ✅ 恢复播放状态
-      if (wasPlaying) {
-        await _playerPlay();
+      // ✅ 更新 UI 位置
+      if (currentPosition > Duration.zero && mounted) {
+        setState(() {
+          _position = currentPosition;
+        });
       }
 
       _playerLogImportant('✅ [Player] Quality changed successfully');
@@ -1782,39 +1737,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // B/s
       return '${bytesPerSecond.toStringAsFixed(0)} B/s';
     }
-  }
-
-  Map<String, int> _buildCacheConfig({
-    required bool isHlsStream,
-    required bool needExtraCache,
-  }) {
-    // ✅ 优化缓冲配置，确保 seek 后有足够的缓冲时间避免画面卡顿：
-    // - bufferForPlaybackAfterRebufferMs 提高到 8-10 秒，确保 seek 后视频解码器有足够时间
-    // - needExtraCache：允许最多缓存 30~60 分钟，起播缓冲保持 2 分钟
-    // - HLS：允许最多缓存 20~40 分钟，起播缓冲保持 90 秒
-    // - 普通流：允许最多缓存 15~30 分钟，起播缓冲保持 60 秒
-    if (needExtraCache) {
-      return {
-        'minBufferMs': 120000, // 2 分钟，避免 seek 后等待过长
-        'maxBufferMs': 3600000, // 60 分钟
-        'bufferForPlaybackMs': 1500, // 起播前最小缓冲
-        'bufferForPlaybackAfterRebufferMs': 10000, // ✅ seek后缓冲10秒，确保视频解码器准备好
-      };
-    }
-    if (isHlsStream) {
-      return {
-        'minBufferMs': 90000, // 1.5 分钟
-        'maxBufferMs': 2400000, // 40 分钟
-        'bufferForPlaybackMs': 1200, // 起播前最小缓冲
-        'bufferForPlaybackAfterRebufferMs': 8000, // ✅ seek后缓冲8秒
-      };
-    }
-    return {
-      'minBufferMs': 60000, // 1 分钟
-      'maxBufferMs': 1800000, // 30 分钟
-      'bufferForPlaybackMs': 800, // 起播前最小缓冲
-      'bufferForPlaybackAfterRebufferMs': 8000, // ✅ seek后缓冲8秒
-    };
   }
 
   // ✅ 格式化时间（用于显示）

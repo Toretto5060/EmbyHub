@@ -1418,10 +1418,14 @@ class EmbyApi {
       'MediaSourceId': mediaSourceId,
       'PlaySessionId': playSessionId,
       'api_key': token,
-      // ✅ 强制音频转码参数，确保 AC3/DTS/TrueHD 等格式能正常播放
-      'AudioCodec': 'aac', // 转码为 AAC（所有设备都支持）
-      'TranscodingMaxAudioChannels': '2', // 转为立体声（避免多声道问题）
-      'EnableAutoStreamCopy': 'false', // 禁用直接复制，强制转码
+      // ✅ 优化：优先使用直接播放（DirectPlay），只在必要时转码
+      // 这样可以减少服务器负担，提高播放流畅度
+      'EnableAutoStreamCopy': 'true', // ✅ 允许直接复制，减少转码
+      'AllowVideoStreamCopy': 'true', // ✅ 允许视频流直接复制
+      'AllowAudioStreamCopy': 'true', // ✅ 允许音频流直接复制
+      // ✅ 只在需要转码时才使用以下参数
+      'AudioCodec': 'aac,mp3', // 支持 AAC 和 MP3
+      'TranscodingMaxAudioChannels': '6', // ✅ 支持5.1声道（之前限制为2太保守）
     };
 
     // ✅ 添加音频流索引（如果指定）
