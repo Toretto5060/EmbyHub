@@ -239,8 +239,20 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
   }
 
   void _handleScroll() {
+    if (!mounted) return;
     final offset =
         _scrollController.hasClients ? _scrollController.offset : 0.0;
+    // ✅ 使用节流，避免频繁更新状态栏
+    _syncStatusBarWithNavigationThrottled(offset);
+  }
+
+  double? _lastSyncOffset;
+  void _syncStatusBarWithNavigationThrottled(double offset) {
+    // ✅ 如果偏移量变化小于10像素，跳过更新
+    if (_lastSyncOffset != null && (offset - _lastSyncOffset!).abs() < 10) {
+      return;
+    }
+    _lastSyncOffset = offset;
     _syncStatusBarWithNavigation(offset);
   }
 
@@ -274,10 +286,8 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
     _navSyncedStyle = targetStyle;
     if (mounted) {
       _statusBarController?.update(targetStyle);
-      setState(() {
-        _navSyncedStyle = targetStyle;
-        _appliedStatusStyle = targetStyle;
-      });
+      // ✅ 移除 setState，避免整页重建
+      _appliedStatusStyle = targetStyle;
     } else {
       SystemChrome.setSystemUIOverlayStyle(targetStyle);
       _appliedStatusStyle = targetStyle;
@@ -415,7 +425,6 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
   }
 
   Widget _buildContentArea(ItemInfo season) {
-    final isDark = isDarkModeFromContext(context, ref);
     final episodes = ref.watch(
       episodesProvider((widget.seriesId, widget.seasonId)),
     );
@@ -424,6 +433,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
       children: [
         CustomScrollView(
           controller: _scrollController,
+          cacheExtent: 500,
           slivers: [
             SliverToBoxAdapter(
               child: SizedBox(
@@ -442,7 +452,12 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                       left: 0,
                       right: 0,
                       top: _headerTopOffset,
-                      child: _buildHeaderCard(context, season, isDark),
+                      child: Builder(
+                        builder: (context) {
+                          final isDark = isDarkModeFromContext(context, ref);
+                          return _buildHeaderCard(context, season, isDark);
+                        },
+                      ),
                     ),
                   ],
                 ),
@@ -458,25 +473,40 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 12),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Text(
-                          '共${list.length}集',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
+                      // ✅ 使用 Builder 延迟计算 isDark，避免在 _buildContentArea 顶层计算
+                      Builder(
+                        builder: (context) {
+                          final isDark = isDarkModeFromContext(context, ref);
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 20),
+                                child: Text(
+                                  '共${list.length}集',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    color:
+                                        isDark ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              ...list
+                                  .map((episode) => _EpisodeTile(
+                                        key: ValueKey('episode_${episode.id}'),
+                                        episode: episode,
+                                        isDark: isDark,
+                                        seriesId: widget.seriesId,
+                                        seasonId: widget.seasonId,
+                                      ))
+                                  .toList(),
+                            ],
+                          );
+                        },
                       ),
-                      const SizedBox(height: 12),
-                      ...list.map((episode) => _EpisodeTile(
-                            key: ValueKey('episode_${episode.id}'),
-                            episode: episode,
-                            isDark: isDark,
-                            seriesId: widget.seriesId,
-                            seasonId: widget.seasonId,
-                          )),
                       const SizedBox(height: 20),
                     ],
                   );
@@ -597,113 +627,130 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
   }
 
   Widget _buildBackdropBackground(BuildContext context, ItemInfo season) {
-    final isDark = isDarkModeFromContext(context, ref);
-    final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+    // ✅ 使用 RepaintBoundary 隔离背景图的重绘
+    return RepaintBoundary(
+      child: Builder(
+        builder: (context) {
+          final isDark = isDarkModeFromContext(context, ref);
+          final bgColor =
+              isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (season.id != null)
-          FutureBuilder<EmbyApi>(
-            future: EmbyApi.create(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return Container(color: CupertinoColors.systemGrey5);
-              }
-              final api = snapshot.data!;
-              String? backdropUrl;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              if (season.id != null)
+                FutureBuilder<EmbyApi>(
+                  future: EmbyApi.create(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return Container(color: CupertinoColors.systemGrey5);
+                    }
+                    final api = snapshot.data!;
+                    String? backdropUrl;
 
-              // ✅ 优先使用季的背景图
-              if ((season.backdropImageTags?.isNotEmpty ?? false)) {
-                backdropUrl = api.buildImageUrl(
-                  itemId: season.id!,
-                  type: 'Backdrop',
-                  maxWidth: 1920,
-                );
-              }
-
-              // ✅ 如果没有季的背景图，使用系列的背景图
-              if (backdropUrl == null || backdropUrl.isEmpty) {
-                final seriesAsync = ref.read(seriesProvider(widget.seriesId));
-                return seriesAsync.when(
-                  data: (series) {
-                    if ((series.backdropImageTags?.isNotEmpty ?? false) ||
-                        (series.parentBackdropImageTags?.isNotEmpty ?? false)) {
+                    // ✅ 优先使用季的背景图
+                    if ((season.backdropImageTags?.isNotEmpty ?? false)) {
                       backdropUrl = api.buildImageUrl(
-                        itemId: widget.seriesId,
+                        itemId: season.id!,
                         type: 'Backdrop',
                         maxWidth: 1920,
                       );
                     }
-                    if (backdropUrl == null || (backdropUrl?.isEmpty ?? true)) {
-                      final primaryTag = series.imageTags?['Primary'] ?? '';
-                      if (primaryTag.isNotEmpty) {
-                        backdropUrl = api.buildImageUrl(
-                          itemId: widget.seriesId,
-                          type: 'Primary',
-                          maxWidth: 800,
-                        );
-                      }
+
+                    // ✅ 如果没有季的背景图，使用系列的背景图
+                    if (backdropUrl == null || backdropUrl.isEmpty) {
+                      final seriesAsync =
+                          ref.read(seriesProvider(widget.seriesId));
+                      return seriesAsync.when(
+                        data: (series) {
+                          if ((series.backdropImageTags?.isNotEmpty ?? false) ||
+                              (series.parentBackdropImageTags?.isNotEmpty ??
+                                  false)) {
+                            backdropUrl = api.buildImageUrl(
+                              itemId: widget.seriesId,
+                              type: 'Backdrop',
+                              maxWidth: 1920,
+                            );
+                          }
+                          if (backdropUrl == null ||
+                              (backdropUrl?.isEmpty ?? true)) {
+                            final primaryTag =
+                                series.imageTags?['Primary'] ?? '';
+                            if (primaryTag.isNotEmpty) {
+                              backdropUrl = api.buildImageUrl(
+                                itemId: widget.seriesId,
+                                type: 'Primary',
+                                maxWidth: 800,
+                              );
+                            }
+                          }
+                          if (backdropUrl == null ||
+                              (backdropUrl?.isEmpty ?? true)) {
+                            final seasonPrimaryTag =
+                                season.imageTags?['Primary'] ?? '';
+                            if (seasonPrimaryTag.isNotEmpty) {
+                              backdropUrl = api.buildImageUrl(
+                                itemId: season.id!,
+                                type: 'Primary',
+                                maxWidth: 800,
+                              );
+                            }
+                          }
+                          if (backdropUrl == null ||
+                              (backdropUrl?.isEmpty ?? true)) {
+                            return Container(
+                                color: CupertinoColors.systemGrey5);
+                          }
+                          final finalBackdropUrl = backdropUrl!;
+                          return EmbyFadeInImage(
+                            key: ValueKey(
+                                'backdrop_${season.id}_$finalBackdropUrl'),
+                            imageUrl: finalBackdropUrl,
+                            fit: BoxFit.cover,
+                            onImageReady: (image) => _handleBackdropImage(
+                                image, season.id ?? finalBackdropUrl),
+                          );
+                        },
+                        loading: () =>
+                            Container(color: CupertinoColors.systemGrey5),
+                        error: (_, __) =>
+                            Container(color: CupertinoColors.systemGrey5),
+                      );
                     }
-                    if (backdropUrl == null || (backdropUrl?.isEmpty ?? true)) {
-                      final seasonPrimaryTag =
-                          season.imageTags?['Primary'] ?? '';
-                      if (seasonPrimaryTag.isNotEmpty) {
-                        backdropUrl = api.buildImageUrl(
-                          itemId: season.id!,
-                          type: 'Primary',
-                          maxWidth: 800,
-                        );
-                      }
-                    }
-                    if (backdropUrl == null || (backdropUrl?.isEmpty ?? true)) {
-                      return Container(color: CupertinoColors.systemGrey5);
-                    }
-                    final finalBackdropUrl = backdropUrl!;
+
                     return EmbyFadeInImage(
-                      key: ValueKey('backdrop_${season.id}_$finalBackdropUrl'),
-                      imageUrl: finalBackdropUrl,
+                      key: ValueKey('backdrop_${season.id}_$backdropUrl'),
+                      imageUrl: backdropUrl,
                       fit: BoxFit.cover,
                       onImageReady: (image) => _handleBackdropImage(
-                          image, season.id ?? finalBackdropUrl),
+                          image, season.id ?? backdropUrl!),
                     );
                   },
-                  loading: () => Container(color: CupertinoColors.systemGrey5),
-                  error: (_, __) =>
-                      Container(color: CupertinoColors.systemGrey5),
-                );
-              }
-
-              return EmbyFadeInImage(
-                key: ValueKey('backdrop_${season.id}_$backdropUrl'),
-                imageUrl: backdropUrl,
-                fit: BoxFit.cover,
-                onImageReady: (image) =>
-                    _handleBackdropImage(image, season.id ?? backdropUrl!),
-              );
-            },
-          ),
-        Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 160,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  bgColor.withOpacity(0.65),
-                  bgColor,
-                ],
-                stops: const [0.0, 0.6, 1.0],
+                ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 160,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        bgColor.withOpacity(0.65),
+                        bgColor,
+                      ],
+                      stops: const [0.0, 0.6, 1.0],
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ),
-      ],
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -789,14 +836,15 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
   }
 
   Widget _buildHeaderCard(BuildContext context, ItemInfo season, bool isDark) {
+    // ✅ 使用 RepaintBoundary 隔离头部卡片的重绘
+    return RepaintBoundary(
+      child: _buildHeaderCardContent(context, season, isDark),
+    );
+  }
+
+  Widget _buildHeaderCardContent(
+      BuildContext context, ItemInfo season, bool isDark) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
-    final episodes = ref.watch(
-      episodesProvider((widget.seriesId, widget.seasonId)),
-    );
-    final episodeCount = episodes.maybeWhen(
-      data: (list) => list.length,
-      orElse: () => 0,
-    );
 
     return _MeasureSize(
       onChange: (size) {
@@ -1082,19 +1130,20 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
       path: '/player/$itemId',
       queryParameters: params.isEmpty ? null : params,
     ).toString();
-    
+
     // ✅ 获取季和剧集信息并传递给播放器页面，避免重复请求背景图
-    final seasonAsync = ref.read(seasonProvider((widget.seriesId, widget.seasonId)));
+    final seasonAsync =
+        ref.read(seasonProvider((widget.seriesId, widget.seasonId)));
     final season = seasonAsync.value;
     final seriesAsync = ref.read(seriesProvider(widget.seriesId));
     final series = seriesAsync.value;
-    
+
     // ✅ 构建背景图 URL 并尝试从缓存获取图片对象（逻辑必须与 _buildBackdropBackground 一致）
     String? backdropUrl;
     ui.Image? backdropImage;
     if (season != null) {
       final api = await EmbyApi.create();
-      
+
       // 1. 优先使用季的背景图
       if (season.backdropImageTags?.isNotEmpty ?? false) {
         backdropUrl = api.buildImageUrl(
@@ -1103,7 +1152,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
           maxWidth: 1920,
         );
       }
-      
+
       // 2. 使用系列的背景图
       if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
         if ((series.backdropImageTags?.isNotEmpty ?? false) ||
@@ -1115,7 +1164,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
           );
         }
       }
-      
+
       // 3. Fallback 到系列的 Primary
       if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
         final primaryTag = series.imageTags?['Primary'] ?? '';
@@ -1127,7 +1176,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
           );
         }
       }
-      
+
       // 4. Fallback 到季的 Primary
       if (backdropUrl == null || backdropUrl.isEmpty) {
         final seasonPrimaryTag = season.imageTags?['Primary'] ?? '';
@@ -1139,13 +1188,13 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
           );
         }
       }
-      
+
       // ✅ 尝试从缓存获取图片对象（立即显示，无需等待）
       if (backdropUrl != null && backdropUrl.isNotEmpty) {
         backdropImage = getCachedImage(backdropUrl);
       }
     }
-    
+
     // ✅ 传递 extra 参数
     context.push(
       route,
@@ -1508,19 +1557,19 @@ class _EpisodeTile extends ConsumerWidget {
   Future<void> _handleEpisodePlay(
       BuildContext context, WidgetRef ref, ItemInfo episode) async {
     if (episode.id == null || episode.id!.isEmpty) return;
-    
+
     // ✅ 获取季和剧集信息并传递给播放器页面，避免重复请求背景图
     final seasonAsync = ref.read(seasonProvider((seriesId, seasonId)));
     final season = seasonAsync.value;
     final seriesAsync = ref.read(seriesProvider(seriesId));
     final series = seriesAsync.value;
-    
+
     // ✅ 构建背景图 URL 并尝试从缓存获取图片对象（逻辑必须与 _buildBackdropBackground 一致）
     String? backdropUrl;
     ui.Image? backdropImage;
     if (season != null) {
       final api = await EmbyApi.create();
-      
+
       // 1. 优先使用季的背景图
       if (season.backdropImageTags?.isNotEmpty ?? false) {
         backdropUrl = api.buildImageUrl(
@@ -1529,7 +1578,7 @@ class _EpisodeTile extends ConsumerWidget {
           maxWidth: 1920,
         );
       }
-      
+
       // 2. 使用系列的背景图
       if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
         if ((series.backdropImageTags?.isNotEmpty ?? false) ||
@@ -1541,7 +1590,7 @@ class _EpisodeTile extends ConsumerWidget {
           );
         }
       }
-      
+
       // 3. Fallback 到系列的 Primary
       if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
         final primaryTag = series.imageTags?['Primary'] ?? '';
@@ -1553,7 +1602,7 @@ class _EpisodeTile extends ConsumerWidget {
           );
         }
       }
-      
+
       // 4. Fallback 到季的 Primary
       if (backdropUrl == null || backdropUrl.isEmpty) {
         final seasonPrimaryTag = season.imageTags?['Primary'] ?? '';
@@ -1565,13 +1614,13 @@ class _EpisodeTile extends ConsumerWidget {
           );
         }
       }
-      
+
       // ✅ 尝试从缓存获取图片对象（立即显示，无需等待）
       if (backdropUrl != null && backdropUrl.isNotEmpty) {
         backdropImage = getCachedImage(backdropUrl);
       }
     }
-    
+
     // ✅ 传递 extra 参数
     context.push(
       '/player/${episode.id}',

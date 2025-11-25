@@ -362,7 +362,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     // ✅ 使用节流，避免频繁更新状态栏
     _syncStatusBarWithNavigationThrottled(offset);
   }
-  
+
   double? _lastSyncOffset;
   void _syncStatusBarWithNavigationThrottled(double offset) {
     // ✅ 如果偏移量变化小于10像素，跳过更新
@@ -524,7 +524,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
               slivers: [
                 SliverToBoxAdapter(
                   child: SizedBox(
-                    height: _heroBaseHeight + (_headerHeight - _headerBaseHeight),
+                    height:
+                        _heroBaseHeight + (_headerHeight - _headerBaseHeight),
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
@@ -578,7 +579,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                                 isDark: isDark,
                               );
                               final bool isFirst = index == 0;
-                              final bool isLast = index == performers.length - 1;
+                              final bool isLast =
+                                  index == performers.length - 1;
                               return Padding(
                                 padding: EdgeInsets.only(
                                   left: isFirst ? 20 : 12,
@@ -629,7 +631,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                                       isDark: isDark,
                                     );
                                     final bool isFirst = index == 0;
-                                    final bool isLast = index == items.length - 1;
+                                    final bool isLast =
+                                        index == items.length - 1;
                                     return Padding(
                                       padding: EdgeInsets.only(
                                         left: isFirst ? 20 : 12,
@@ -686,65 +689,75 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     BuildContext context,
     ItemInfo? data,
   ) {
-    final brightness = getCurrentBrightnessFromContext(context, ref);
-    final SystemUiOverlayStyle baseStyle = _appliedStatusStyle;
-    final SystemUiOverlayStyle targetStyle =
-        _navSyncedStyle ?? _appliedStatusStyle;
+    // ✅ 使用 RepaintBoundary 隔离导航栏的重绘
+    return RepaintBoundary(
+      child: Builder(
+        builder: (context) {
+          final brightness = getCurrentBrightnessFromContext(context, ref);
+          final SystemUiOverlayStyle baseStyle = _appliedStatusStyle;
+          final SystemUiOverlayStyle targetStyle =
+              _navSyncedStyle ?? _appliedStatusStyle;
 
-    final Color expandedColor = _colorForStatusStyle(baseStyle, brightness);
-    final Color collapsedColor = _colorForStatusStyle(targetStyle, brightness);
-    final Color currentColor = Color.lerp(
-        expandedColor, collapsedColor, _showCollapsedNav ? 1.0 : 0.0)!;
+          final Color expandedColor =
+              _colorForStatusStyle(baseStyle, brightness);
+          final Color collapsedColor =
+              _colorForStatusStyle(targetStyle, brightness);
+          final Color currentColor = Color.lerp(
+              expandedColor, collapsedColor, _showCollapsedNav ? 1.0 : 0.0)!;
 
-    final actions =
-        data != null ? _buildTopActions(data, currentColor) : const <Widget>[];
+          final actions = data != null
+              ? _buildTopActions(data, currentColor)
+              : const <Widget>[];
 
-    final Widget leadingContent = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        buildBlurBackButton(context, color: currentColor),
-        if (data != null)
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            switchInCurve: Curves.easeIn,
-            switchOutCurve: Curves.easeOut,
-            child: _showCollapsedNav
-                ? Transform.translate(
-                    key: const ValueKey('title-visible'),
-                    offset: const Offset(-12, 0),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxWidth: 220,
-                          minHeight: 24,
-                        ),
-                        child: _CollapsedTitle(item: data),
-                      ),
-                    ),
-                  )
-                : const SizedBox.shrink(key: ValueKey('title-hidden')),
-          ),
-      ],
-    );
+          final Widget leadingContent = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              buildBlurBackButton(context, color: currentColor),
+              if (data != null)
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeIn,
+                  switchOutCurve: Curves.easeOut,
+                  child: _showCollapsedNav
+                      ? Transform.translate(
+                          key: const ValueKey('title-visible'),
+                          offset: const Offset(-12, 0),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                maxWidth: 220,
+                                minHeight: 24,
+                              ),
+                              child: _CollapsedTitle(item: data),
+                            ),
+                          ),
+                        )
+                      : const SizedBox.shrink(key: ValueKey('title-hidden')),
+                ),
+            ],
+          );
 
-    return BlurNavigationBar(
-      forceBlur: false,
-      scrollController: _scrollController,
-      leading: leadingContent,
-      middle: null,
-      trailing: actions.isEmpty
-          ? null
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: actions,
-            ),
-      expandedForegroundColor: expandedColor,
-      collapsedForegroundColor: collapsedColor,
-      enableTransition: false,
-      useDynamicOpacity: true,
-      blurStart: 10.0,
-      blurEnd: _headerTopOffset,
+          return BlurNavigationBar(
+            forceBlur: false,
+            scrollController: _scrollController,
+            leading: leadingContent,
+            middle: null,
+            trailing: actions.isEmpty
+                ? null
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: actions,
+                  ),
+            expandedForegroundColor: expandedColor,
+            collapsedForegroundColor: collapsedColor,
+            enableTransition: false,
+            useDynamicOpacity: true,
+            blurStart: 10.0,
+            blurEnd: _headerTopOffset,
+          );
+        },
+      ),
     );
   }
 
@@ -763,77 +776,85 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   }
 
   Widget _buildBackdropBackground(BuildContext context, ItemInfo item) {
-    final isDark = isDarkModeFromContext(context, ref);
-    final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+    // ✅ 使用 RepaintBoundary 隔离背景图的重绘
+    return RepaintBoundary(
+      child: Builder(
+        builder: (context) {
+          final isDark = isDarkModeFromContext(context, ref);
+          final bgColor =
+              isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (item.id != null)
-          FutureBuilder<EmbyApi>(
-            future: EmbyApi.create(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return Container(color: CupertinoColors.systemGrey5);
-              }
-              final api = snapshot.data!;
-              String? backdropUrl;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              if (item.id != null)
+                FutureBuilder<EmbyApi>(
+                  future: EmbyApi.create(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return Container(color: CupertinoColors.systemGrey5);
+                    }
+                    final api = snapshot.data!;
+                    String? backdropUrl;
 
-              if ((item.backdropImageTags?.isNotEmpty ?? false) ||
-                  (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
-                backdropUrl = api.buildImageUrl(
-                  itemId: item.id!,
-                  type: 'Backdrop',
-                  maxWidth: 1920,
-                );
-              }
+                    if ((item.backdropImageTags?.isNotEmpty ?? false) ||
+                        (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+                      backdropUrl = api.buildImageUrl(
+                        itemId: item.id!,
+                        type: 'Backdrop',
+                        maxWidth: 1920,
+                      );
+                    }
 
-              if (backdropUrl == null || backdropUrl.isEmpty) {
-                final primaryTag = item.imageTags?['Primary'] ?? '';
-                if (primaryTag.isNotEmpty) {
-                  backdropUrl = api.buildImageUrl(
-                    itemId: item.id!,
-                    type: 'Primary',
-                    maxWidth: 800,
-                  );
-                }
-              }
+                    if (backdropUrl == null || backdropUrl.isEmpty) {
+                      final primaryTag = item.imageTags?['Primary'] ?? '';
+                      if (primaryTag.isNotEmpty) {
+                        backdropUrl = api.buildImageUrl(
+                          itemId: item.id!,
+                          type: 'Primary',
+                          maxWidth: 800,
+                        );
+                      }
+                    }
 
-              if (backdropUrl == null || backdropUrl.isEmpty) {
-                return Container(color: CupertinoColors.systemGrey5);
-              }
+                    if (backdropUrl == null || backdropUrl.isEmpty) {
+                      return Container(color: CupertinoColors.systemGrey5);
+                    }
 
-              // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
-              return EmbyFadeInImage(
-                key: ValueKey('backdrop_${item.id}_$backdropUrl'),
-                imageUrl: backdropUrl,
-                fit: BoxFit.cover,
-                onImageReady: (image) =>
-                    _handleBackdropImage(image, item.id ?? backdropUrl!),
-              );
-            },
-          ),
-        Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 160,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  bgColor.withOpacity(0.65),
-                  bgColor,
-                ],
-                stops: const [0.0, 0.6, 1.0],
+                    // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
+                    return EmbyFadeInImage(
+                      key: ValueKey('backdrop_${item.id}_$backdropUrl'),
+                      imageUrl: backdropUrl,
+                      fit: BoxFit.cover,
+                      onImageReady: (image) =>
+                          _handleBackdropImage(image, item.id ?? backdropUrl!),
+                    );
+                  },
+                ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 160,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        bgColor.withOpacity(0.65),
+                        bgColor,
+                      ],
+                      stops: const [0.0, 0.6, 1.0],
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ),
-      ],
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -2036,17 +2057,17 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       path: '/player/$itemId',
       queryParameters: params.isEmpty ? null : params,
     ).toString();
-    
+
     // ✅ 获取当前 item 信息并传递给播放器页面
     final itemAsync = ref.read(itemProvider(widget.itemId));
     final item = itemAsync.value;
-    
+
     // ✅ 构建背景图 URL 并尝试从缓存获取图片对象（逻辑必须与 _buildBackdropBackground 一致）
     String? backdropUrl;
     ui.Image? backdropImage;
     if (item != null) {
       final api = await EmbyApi.create();
-      
+
       // 优先使用 Backdrop
       if ((item.backdropImageTags?.isNotEmpty ?? false) ||
           (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
@@ -2056,7 +2077,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
           maxWidth: 1920,
         );
       }
-      
+
       // Fallback 到 Primary（与详情页显示逻辑一致）
       if (backdropUrl == null || backdropUrl.isEmpty) {
         final primaryTag = item.imageTags?['Primary'] ?? '';
@@ -2068,13 +2089,13 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
           );
         }
       }
-      
+
       // ✅ 尝试从缓存获取图片对象（立即显示，无需等待）
       if (backdropUrl != null && backdropUrl.isNotEmpty) {
         backdropImage = getCachedImage(backdropUrl);
       }
     }
-    
+
     // ✅ 传递 extra 参数
     context.push(
       route,
@@ -2757,6 +2778,13 @@ class _CollectionMovieCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // ✅ 使用 RepaintBoundary 隔离每个合集影片卡片的重绘
+    return RepaintBoundary(
+      child: _buildCard(context, ref),
+    );
+  }
+
+  Widget _buildCard(BuildContext context, WidgetRef ref) {
     final textColor = isDark ? Colors.white : Colors.black87;
     const double cardWidth = 120.0;
     const double aspectRatio = 2 / 3;
@@ -2993,46 +3021,49 @@ class _PerformerCard extends StatelessWidget {
     const double cardWidth = 95;
     const double cardHeight = 143;
 
-    return SizedBox(
-      width: cardWidth,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: SizedBox(
-              height: cardHeight,
-              width: cardWidth,
-              child: AspectRatio(
-                aspectRatio: 2 / 3,
-                child: _buildPerformerImage(context),
+    // ✅ 使用 RepaintBoundary 隔离每个演员卡片的重绘
+    return RepaintBoundary(
+      child: SizedBox(
+        width: cardWidth,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                height: cardHeight,
+                width: cardWidth,
+                child: AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: _buildPerformerImage(context),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _extractChineseName(),
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: textColor,
-              fontWeight: FontWeight.w600,
+            const SizedBox(height: 8),
+            Text(
+              _extractChineseName(),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: textColor,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _extractEnglishName(),
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: textColor.withOpacity(0.7),
+            const SizedBox(height: 4),
+            Text(
+              _extractEnglishName(),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: textColor.withOpacity(0.7),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -3178,54 +3209,57 @@ class _SimilarCard extends StatelessWidget {
     final double aspectRatio = hasHorizontalArtwork ? 2 / 3 : 16 / 9;
     final double imageHeight = cardWidth / aspectRatio;
 
-    return SizedBox(
-      width: cardWidth,
-      child: CupertinoButton(
-        padding: EdgeInsets.zero,
-        onPressed: item.id != null && item.id!.isNotEmpty
-            ? () => _handleTap(context)
-            : null,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: SizedBox(
-                height: imageHeight,
-                width: cardWidth,
-                child: AspectRatio(
-                  aspectRatio: aspectRatio,
-                  child:
-                      _buildPoster(hasHorizontalArtwork: hasHorizontalArtwork),
+    // ✅ 使用 RepaintBoundary 隔离每个类似影片卡片的重绘
+    return RepaintBoundary(
+      child: SizedBox(
+        width: cardWidth,
+        child: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: item.id != null && item.id!.isNotEmpty
+              ? () => _handleTap(context)
+              : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  height: imageHeight,
+                  width: cardWidth,
+                  child: AspectRatio(
+                    aspectRatio: aspectRatio,
+                    child: _buildPoster(
+                        hasHorizontalArtwork: hasHorizontalArtwork),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              item.name,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-                color: textColor,
+              const SizedBox(height: 8),
+              Text(
+                item.name,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: textColor,
+                ),
               ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              _buildSubtitle(),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 10,
-                color: isDark ? Colors.grey : Colors.grey.shade600,
+              const SizedBox(height: 2),
+              Text(
+                _buildSubtitle(),
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isDark ? Colors.grey : Colors.grey.shade600,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

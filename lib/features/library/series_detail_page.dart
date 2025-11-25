@@ -334,6 +334,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
   }
 
   void _handleScroll() {
+    if (!mounted) return;
     final offset =
         _scrollController.hasClients ? _scrollController.offset : 0.0;
     final shouldShow = offset > 200;
@@ -342,6 +343,17 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
         _showCollapsedNav = shouldShow;
       });
     }
+    // ✅ 使用节流，避免频繁更新状态栏
+    _syncStatusBarWithNavigationThrottled(offset);
+  }
+
+  double? _lastSyncOffset;
+  void _syncStatusBarWithNavigationThrottled(double offset) {
+    // ✅ 如果偏移量变化小于10像素，跳过更新
+    if (_lastSyncOffset != null && (offset - _lastSyncOffset!).abs() < 10) {
+      return;
+    }
+    _lastSyncOffset = offset;
     _syncStatusBarWithNavigation(offset);
   }
 
@@ -477,7 +489,6 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
 
   /// ✅ 构建内容区域（避免在loading和orElse中重复代码）
   Widget _buildContentArea(ItemInfo data) {
-    final isDark = isDarkModeFromContext(context, ref);
     final performers = data.performers ?? const <PerformerInfo>[];
     final externalLinks = _composeExternalLinks(data);
     // ✅ 使用 ref.read 而不是 ref.watch，避免因为 libraryRefreshTickerProvider 变化而重新构建
@@ -489,6 +500,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
       children: [
         CustomScrollView(
           controller: _scrollController,
+          cacheExtent: 500,
           slivers: [
             SliverToBoxAdapter(
               child: SizedBox(
@@ -507,13 +519,18 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                       left: 0,
                       right: 0,
                       top: _headerTopOffset,
-                      child: seasons.when(
-                        data: (seasonsList) => _buildHeaderCard(
-                            context, data, isDark, seasonsList.length),
-                        loading: () =>
-                            _buildHeaderCard(context, data, isDark, null),
-                        error: (_, __) =>
-                            _buildHeaderCard(context, data, isDark, null),
+                      child: Builder(
+                        builder: (context) {
+                          final isDark = isDarkModeFromContext(context, ref);
+                          return seasons.when(
+                            data: (seasonsList) => _buildHeaderCard(
+                                context, data, isDark, seasonsList.length),
+                            loading: () =>
+                                _buildHeaderCard(context, data, isDark, null),
+                            error: (_, __) =>
+                                _buildHeaderCard(context, data, isDark, null),
+                          );
+                        },
                       ),
                     ),
                   ],
@@ -542,41 +559,47 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                       const SizedBox(height: 12),
                       SizedBox(
                         height: 175,
-                        child: seasons.when(
-                          data: (seasonsList) {
-                            if (seasonsList.isEmpty) {
-                              // 空状态：显示占位内容
-                              return const SizedBox.shrink();
-                            }
-                            return ListView.builder(
-                              padding: EdgeInsets.zero,
-                              scrollDirection: Axis.horizontal,
-                              itemCount: seasonsList.length,
-                              itemBuilder: (context, index) {
-                                final season = seasonsList[index];
-                                final bool isFirst = index == 0;
-                                final bool isLast =
-                                    index == seasonsList.length - 1;
-                                return Padding(
-                                  key: ValueKey(
-                                      'season_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
-                                  padding: EdgeInsets.only(
-                                    left: isFirst ? 20 : 12,
-                                    right: isLast ? 20 : 0,
-                                  ),
-                                  child: _SeasonCard(
-                                    key: ValueKey(
-                                        'season_card_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
-                                    season: season,
-                                    seriesId: widget.seriesId,
-                                    isDark: isDark,
-                                  ),
+                        child: Builder(
+                          builder: (context) {
+                            final isDark = isDarkModeFromContext(context, ref);
+                            return seasons.when(
+                              data: (seasonsList) {
+                                if (seasonsList.isEmpty) {
+                                  // 空状态：显示占位内容
+                                  return const SizedBox.shrink();
+                                }
+                                return ListView.builder(
+                                  padding: EdgeInsets.zero,
+                                  scrollDirection: Axis.horizontal,
+                                  cacheExtent: 300,
+                                  itemCount: seasonsList.length,
+                                  itemBuilder: (context, index) {
+                                    final season = seasonsList[index];
+                                    final bool isFirst = index == 0;
+                                    final bool isLast =
+                                        index == seasonsList.length - 1;
+                                    return Padding(
+                                      key: ValueKey(
+                                          'season_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
+                                      padding: EdgeInsets.only(
+                                        left: isFirst ? 20 : 12,
+                                        right: isLast ? 20 : 0,
+                                      ),
+                                      child: _SeasonCard(
+                                        key: ValueKey(
+                                            'season_card_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
+                                        season: season,
+                                        seriesId: widget.seriesId,
+                                        isDark: isDark,
+                                      ),
+                                    );
+                                  },
                                 );
                               },
+                              loading: () => const SizedBox.shrink(),
+                              error: (_, __) => const SizedBox.shrink(),
                             );
                           },
-                          loading: () => const SizedBox.shrink(),
-                          error: (_, __) => const SizedBox.shrink(),
                         ),
                       ),
                     ],
@@ -596,23 +619,30 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                     const SizedBox(height: 12),
                     SizedBox(
                       height: 190,
-                      child: ListView.builder(
-                        padding: EdgeInsets.zero,
-                        scrollDirection: Axis.horizontal,
-                        itemCount: performers.length,
-                        itemBuilder: (context, index) {
-                          final card = _PerformerCard(
-                            performer: performers[index],
-                            isDark: isDark,
-                          );
-                          final bool isFirst = index == 0;
-                          final bool isLast = index == performers.length - 1;
-                          return Padding(
-                            padding: EdgeInsets.only(
-                              left: isFirst ? 20 : 12,
-                              right: isLast ? 20 : 0,
-                            ),
-                            child: card,
+                      child: Builder(
+                        builder: (context) {
+                          final isDark = isDarkModeFromContext(context, ref);
+                          return ListView.builder(
+                            padding: EdgeInsets.zero,
+                            scrollDirection: Axis.horizontal,
+                            cacheExtent: 300,
+                            itemCount: performers.length,
+                            itemBuilder: (context, index) {
+                              final card = _PerformerCard(
+                                performer: performers[index],
+                                isDark: isDark,
+                              );
+                              final bool isFirst = index == 0;
+                              final bool isLast =
+                                  index == performers.length - 1;
+                              return Padding(
+                                padding: EdgeInsets.only(
+                                  left: isFirst ? 20 : 12,
+                                  right: isLast ? 20 : 0,
+                                ),
+                                child: card,
+                              );
+                            },
                           );
                         },
                       ),
@@ -642,23 +672,31 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                           const SizedBox(height: 12),
                           SizedBox(
                             height: listHeight,
-                            child: ListView.builder(
-                              padding: EdgeInsets.zero,
-                              scrollDirection: Axis.horizontal,
-                              itemCount: items.length,
-                              itemBuilder: (context, index) {
-                                final card = _SimilarCard(
-                                  item: items[index],
-                                  isDark: isDark,
-                                );
-                                final bool isFirst = index == 0;
-                                final bool isLast = index == items.length - 1;
-                                return Padding(
-                                  padding: EdgeInsets.only(
-                                    left: isFirst ? 20 : 12,
-                                    right: isLast ? 20 : 0,
-                                  ),
-                                  child: card,
+                            child: Builder(
+                              builder: (context) {
+                                final isDark =
+                                    isDarkModeFromContext(context, ref);
+                                return ListView.builder(
+                                  padding: EdgeInsets.zero,
+                                  scrollDirection: Axis.horizontal,
+                                  cacheExtent: 300,
+                                  itemCount: items.length,
+                                  itemBuilder: (context, index) {
+                                    final card = _SimilarCard(
+                                      item: items[index],
+                                      isDark: isDark,
+                                    );
+                                    final bool isFirst = index == 0;
+                                    final bool isLast =
+                                        index == items.length - 1;
+                                    return Padding(
+                                      padding: EdgeInsets.only(
+                                        left: isFirst ? 20 : 12,
+                                        right: isLast ? 20 : 0,
+                                      ),
+                                      child: card,
+                                    );
+                                  },
                                 );
                               },
                             ),
@@ -671,9 +709,14 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                   ),
                   if (externalLinks.isNotEmpty) ...[
                     const SizedBox(height: 24),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: _buildExternalLinks(externalLinks, isDark),
+                    Builder(
+                      builder: (context) {
+                        final isDark = isDarkModeFromContext(context, ref);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: _buildExternalLinks(externalLinks, isDark),
+                        );
+                      },
                     ),
                   ],
                 ],
@@ -693,6 +736,16 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
   }
 
   Widget _buildBlurNavigationBar(
+    BuildContext context,
+    ItemInfo? data,
+  ) {
+    // ✅ 使用 RepaintBoundary 隔离导航栏的重绘
+    return RepaintBoundary(
+      child: _buildBlurNavigationBarContent(context, data),
+    );
+  }
+
+  Widget _buildBlurNavigationBarContent(
     BuildContext context,
     ItemInfo? data,
   ) {
@@ -773,75 +826,83 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
   }
 
   Widget _buildBackdropBackground(BuildContext context, ItemInfo item) {
-    final isDark = isDarkModeFromContext(context, ref);
-    final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+    // ✅ 使用 RepaintBoundary 隔离背景图的重绘
+    return RepaintBoundary(
+      child: Builder(
+        builder: (context) {
+          final isDark = isDarkModeFromContext(context, ref);
+          final bgColor =
+              isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (item.id != null)
-          FutureBuilder<EmbyApi>(
-            future: EmbyApi.create(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return Container(color: CupertinoColors.systemGrey5);
-              }
-              final api = snapshot.data!;
-              String? backdropUrl;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              if (item.id != null)
+                FutureBuilder<EmbyApi>(
+                  future: EmbyApi.create(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return Container(color: CupertinoColors.systemGrey5);
+                    }
+                    final api = snapshot.data!;
+                    String? backdropUrl;
 
-              if ((item.backdropImageTags?.isNotEmpty ?? false) ||
-                  (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
-                backdropUrl = api.buildImageUrl(
-                  itemId: item.id!,
-                  type: 'Backdrop',
-                  maxWidth: 1920,
-                );
-              }
+                    if ((item.backdropImageTags?.isNotEmpty ?? false) ||
+                        (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+                      backdropUrl = api.buildImageUrl(
+                        itemId: item.id!,
+                        type: 'Backdrop',
+                        maxWidth: 1920,
+                      );
+                    }
 
-              if (backdropUrl == null || backdropUrl.isEmpty) {
-                final primaryTag = item.imageTags?['Primary'] ?? '';
-                if (primaryTag.isNotEmpty) {
-                  backdropUrl = api.buildImageUrl(
-                    itemId: item.id!,
-                    type: 'Primary',
-                    maxWidth: 800,
-                  );
-                }
-              }
+                    if (backdropUrl == null || backdropUrl.isEmpty) {
+                      final primaryTag = item.imageTags?['Primary'] ?? '';
+                      if (primaryTag.isNotEmpty) {
+                        backdropUrl = api.buildImageUrl(
+                          itemId: item.id!,
+                          type: 'Primary',
+                          maxWidth: 800,
+                        );
+                      }
+                    }
 
-              if (backdropUrl == null || backdropUrl.isEmpty) {
-                return Container(color: CupertinoColors.systemGrey5);
-              }
+                    if (backdropUrl == null || backdropUrl.isEmpty) {
+                      return Container(color: CupertinoColors.systemGrey5);
+                    }
 
-              return EmbyFadeInImage(
-                imageUrl: backdropUrl,
-                fit: BoxFit.cover,
-                onImageReady: (image) =>
-                    _handleBackdropImage(image, item.id ?? backdropUrl!),
-              );
-            },
-          ),
-        Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 160,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  bgColor.withOpacity(0.65),
-                  bgColor,
-                ],
-                stops: const [0.0, 0.6, 1.0],
+                    return EmbyFadeInImage(
+                      imageUrl: backdropUrl,
+                      fit: BoxFit.cover,
+                      onImageReady: (image) =>
+                          _handleBackdropImage(image, item.id ?? backdropUrl!),
+                    );
+                  },
+                ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 160,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        bgColor.withOpacity(0.65),
+                        bgColor,
+                      ],
+                      stops: const [0.0, 0.6, 1.0],
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ),
-      ],
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -904,6 +965,14 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
   }
 
   Widget _buildHeaderCard(
+      BuildContext context, ItemInfo item, bool isDark, int? seasonsCount) {
+    // ✅ 使用 RepaintBoundary 隔离头部卡片的重绘
+    return RepaintBoundary(
+      child: _buildHeaderCardContent(context, item, isDark, seasonsCount),
+    );
+  }
+
+  Widget _buildHeaderCardContent(
       BuildContext context, ItemInfo item, bool isDark, int? seasonsCount) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
     return _MeasureSize(
@@ -1572,10 +1641,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     _navSyncedStyle = targetStyle;
     if (mounted) {
       _statusBarController?.update(targetStyle);
-      setState(() {
-        _navSyncedStyle = targetStyle;
-        _appliedStatusStyle = targetStyle;
-      });
+      // ✅ 移除 setState，避免整页重建
+      _appliedStatusStyle = targetStyle;
     } else {
       SystemChrome.setSystemUIOverlayStyle(targetStyle);
       _appliedStatusStyle = targetStyle;
@@ -1616,17 +1683,17 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
       path: '/player/$itemId',
       queryParameters: params.isEmpty ? null : params,
     ).toString();
-    
+
     // ✅ 获取当前剧集信息并传递给播放器页面，避免重复请求背景图
     final seriesAsync = ref.read(seriesProvider(widget.seriesId));
     final series = seriesAsync.value;
-    
+
     // ✅ 构建背景图 URL 并尝试从缓存获取图片对象（逻辑必须与 _buildBackdropBackground 一致）
     String? backdropUrl;
     ui.Image? backdropImage;
     if (series != null) {
       final api = await EmbyApi.create();
-      
+
       // 优先使用 Backdrop
       if (series.backdropImageTags?.isNotEmpty ?? false) {
         backdropUrl = api.buildImageUrl(
@@ -1642,7 +1709,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
           maxWidth: 1920,
         );
       }
-      
+
       // Fallback 到 Primary（与详情页显示逻辑一致）
       if (backdropUrl == null || backdropUrl.isEmpty) {
         final primaryTag = series.imageTags?['Primary'] ?? '';
@@ -1654,13 +1721,13 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
           );
         }
       }
-      
+
       // ✅ 尝试从缓存获取图片对象（立即显示，无需等待）
       if (backdropUrl != null) {
         backdropImage = getCachedImage(backdropUrl);
       }
     }
-    
+
     // ✅ 传递 extra 参数
     context.push(
       route,
@@ -2097,6 +2164,13 @@ class _PerformerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ 使用 RepaintBoundary 隔离每个演员卡片的重绘
+    return RepaintBoundary(
+      child: _buildCard(context),
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
     final theme = Theme.of(context);
     const double cardWidth = 95;
@@ -2279,6 +2353,13 @@ class _SimilarCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ 使用 RepaintBoundary 隔离每个类似影片卡片的重绘
+    return RepaintBoundary(
+      child: _buildCard(context),
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
     const double cardWidth = 95;
     const double cardHeight = 143;
