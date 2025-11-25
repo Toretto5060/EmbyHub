@@ -350,6 +350,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   }
 
   void _handleScroll() {
+    if (!mounted) return;
     final offset =
         _scrollController.hasClients ? _scrollController.offset : 0.0;
     final shouldShow = offset > 200;
@@ -358,6 +359,17 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         _showCollapsedNav = shouldShow;
       });
     }
+    // ✅ 使用节流，避免频繁更新状态栏
+    _syncStatusBarWithNavigationThrottled(offset);
+  }
+  
+  double? _lastSyncOffset;
+  void _syncStatusBarWithNavigationThrottled(double offset) {
+    // ✅ 如果偏移量变化小于10像素，跳过更新
+    if (_lastSyncOffset != null && (offset - _lastSyncOffset!).abs() < 10) {
+      return;
+    }
+    _lastSyncOffset = offset;
     _syncStatusBarWithNavigation(offset);
   }
 
@@ -495,167 +507,178 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
 
   /// ✅ 构建内容区域（避免在loading和orElse中重复代码）
   Widget _buildContentArea(ItemInfo data) {
-    final isDark = isDarkModeFromContext(context, ref);
     final performers = data.performers ?? const <PerformerInfo>[];
     final externalLinks = _composeExternalLinks(data);
     final similarItems = ref.watch(similarItemsProvider(widget.itemId));
 
-    return Stack(
-      children: [
-        CustomScrollView(
-          controller: _scrollController,
-          slivers: [
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: _heroBaseHeight + (_headerHeight - _headerBaseHeight),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: _backdropHeight,
-                      child: _buildBackdropBackground(context, data),
-                    ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: _headerTopOffset,
-                      child: _buildHeaderCard(context, data, isDark),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (performers.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 20),
-                      child: Text(
-                        '演员',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w600,
+    // ✅ 使用 Builder 获取 isDark，避免在每次滚动时重新计算
+    return Builder(
+      builder: (context) {
+        final isDark = isDarkModeFromContext(context, ref);
+        return Stack(
+          children: [
+            CustomScrollView(
+              controller: _scrollController,
+              // ✅ 添加 cacheExtent 提升滚动性能
+              cacheExtent: 500,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: _heroBaseHeight + (_headerHeight - _headerBaseHeight),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: _backdropHeight,
+                          child: _buildBackdropBackground(context, data),
                         ),
-                      ),
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          top: _headerTopOffset,
+                          child: _buildHeaderCard(context, data, isDark),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      height: 190,
-                      child: ListView.builder(
-                        padding: EdgeInsets.zero,
-                        scrollDirection: Axis.horizontal,
-                        itemCount: performers.length,
-                        itemBuilder: (context, index) {
-                          final card = _PerformerCard(
-                            key: ValueKey(
-                                'performer_card_${performers[index].id}'),
-                            performer: performers[index],
-                            isDark: isDark,
-                          );
-                          final bool isFirst = index == 0;
-                          final bool isLast = index == performers.length - 1;
-                          return Padding(
-                            padding: EdgeInsets.only(
-                              left: isFirst ? 20 : 12,
-                              right: isLast ? 20 : 0,
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (performers.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 20),
+                          child: Text(
+                            '演员',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
                             ),
-                            child: card,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 190,
+                          child: ListView.builder(
+                            padding: EdgeInsets.zero,
+                            scrollDirection: Axis.horizontal,
+                            itemCount: performers.length,
+                            // ✅ 添加 cacheExtent 提升横向列表性能
+                            cacheExtent: 300,
+                            itemBuilder: (context, index) {
+                              final card = _PerformerCard(
+                                key: ValueKey(
+                                    'performer_card_${performers[index].id}'),
+                                performer: performers[index],
+                                isDark: isDark,
+                              );
+                              final bool isFirst = index == 0;
+                              final bool isLast = index == performers.length - 1;
+                              return Padding(
+                                padding: EdgeInsets.only(
+                                  left: isFirst ? 20 : 12,
+                                  right: isLast ? 20 : 0,
+                                ),
+                                child: card,
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                      similarItems.when(
+                        data: (items) {
+                          if (items.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+                          final allAre16x9 = items.every(
+                              (item) => !_hasHorizontalArtworkForSimilar(item));
+                          final listHeight = allAre16x9 ? 130.0 : 190.0;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 24),
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 20),
+                                child: Text(
+                                  '其他类似影片',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                height: listHeight,
+                                child: ListView.builder(
+                                  padding: EdgeInsets.zero,
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: items.length,
+                                  // ✅ 添加 cacheExtent 提升横向列表性能
+                                  cacheExtent: 300,
+                                  itemBuilder: (context, index) {
+                                    final card = _SimilarCard(
+                                      key: ValueKey(
+                                          'similar_card_${items[index].id}'),
+                                      item: items[index],
+                                      isDark: isDark,
+                                    );
+                                    final bool isFirst = index == 0;
+                                    final bool isLast = index == items.length - 1;
+                                    return Padding(
+                                      padding: EdgeInsets.only(
+                                        left: isFirst ? 20 : 12,
+                                        right: isLast ? 20 : 0,
+                                      ),
+                                      child: card,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
                           );
                         },
-                      ),
-                    ),
-                  ],
-                  similarItems.when(
-                    data: (items) {
-                      if (items.isEmpty) {
-                        return const SizedBox.shrink();
-                      }
-                      final allAre16x9 = items.every(
-                          (item) => !_hasHorizontalArtworkForSimilar(item));
-                      final listHeight = allAre16x9 ? 130.0 : 190.0;
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 24),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 20),
-                            child: Text(
-                              '其他类似影片',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                        loading: () => const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(
+                            child: CupertinoActivityIndicator(),
                           ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            height: listHeight,
-                            child: ListView.builder(
-                              padding: EdgeInsets.zero,
-                              scrollDirection: Axis.horizontal,
-                              itemCount: items.length,
-                              itemBuilder: (context, index) {
-                                final card = _SimilarCard(
-                                  key: ValueKey(
-                                      'similar_card_${items[index].id}'),
-                                  item: items[index],
-                                  isDark: isDark,
-                                );
-                                final bool isFirst = index == 0;
-                                final bool isLast = index == items.length - 1;
-                                return Padding(
-                                  padding: EdgeInsets.only(
-                                    left: isFirst ? 20 : 12,
-                                    right: isLast ? 20 : 0,
-                                  ),
-                                  child: card,
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: CupertinoActivityIndicator(),
+                        ),
+                        error: (_, __) => const SizedBox.shrink(),
                       ),
-                    ),
-                    error: (_, __) => const SizedBox.shrink(),
+                      if (externalLinks.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: _buildExternalLinks(externalLinks, isDark),
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      _buildDetailedMediaModules(
+                        data,
+                        isDark,
+                        horizontalPadding: 20,
+                      ),
+                    ],
                   ),
-                  if (externalLinks.isNotEmpty) ...[
-                    const SizedBox(height: 24),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: _buildExternalLinks(externalLinks, isDark),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                  _buildDetailedMediaModules(
-                    data,
-                    isDark,
-                    horizontalPadding: 20,
-                  ),
-                ],
-              ),
+                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 20)),
+              ],
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 20)),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _buildBlurNavigationBar(context, data),
+            ),
           ],
-        ),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: _buildBlurNavigationBar(context, data),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -1505,16 +1528,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       return;
     }
     _navSyncedStyle = targetStyle;
-    if (mounted) {
-      _statusBarController?.update(targetStyle);
-      setState(() {
-        _navSyncedStyle = targetStyle;
-        _appliedStatusStyle = targetStyle;
-      });
-    } else {
-      SystemChrome.setSystemUIOverlayStyle(targetStyle);
-      _appliedStatusStyle = targetStyle;
-    }
+    // ✅ 只更新状态栏控制器，不调用 setState，避免整个页面重建
+    _statusBarController?.update(targetStyle);
+    _appliedStatusStyle = targetStyle;
   }
 
   void _handleRouteAnimationStatus(AnimationStatus status) {

@@ -612,12 +612,12 @@ class _ShimmerPlaceholderState extends ConsumerState<_ShimmerPlaceholder>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
-        // 深色模式：接近黑色的呼吸动画
+        // 深色模式：使用更明显的灰色渐变
         // 浅色模式：浅灰色的呼吸动画
         final Color color1 =
-            isDark ? const Color(0xFF0A0A0A) : const Color(0xFFE8E8E8);
+            isDark ? const Color(0xFF1A1A1A) : const Color(0xFFE8E8E8);
         final Color color2 =
-            isDark ? const Color(0xFF1A1A1A) : const Color(0xFFF5F5F5);
+            isDark ? const Color(0xFF2D2D2D) : const Color(0xFFF5F5F5);
 
         return Container(
           color: Color.lerp(color1, color2, _controller.value),
