@@ -524,7 +524,6 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                   ],
                   // ✅ 添加毛玻璃效果（刚开始滑动就显示）
                   flexibleSpace: Stack(
-                    key: const ValueKey('flexible_space_stack'),
                     fit: StackFit.expand,
                     children: [
                       // ✅ 底层：FlexibleSpaceBar（只有背景图）
@@ -565,14 +564,12 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                           final totalHeight = statusBarHeight + navBarHeight;
 
                           return Positioned(
-                            key: const ValueKey('blur_layer'),
                             top: 0,
                             left: 0,
                             right: 0,
                             height: totalHeight,
                             child: ClipRect(
                               child: BackdropFilter(
-                                key: const ValueKey('backdrop_filter'),
                                 filter: ui.ImageFilter.blur(
                                   sigmaX: blurSigma,
                                   sigmaY: blurSigma,

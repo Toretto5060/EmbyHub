@@ -582,7 +582,6 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                   ],
                   // ✅ 添加毛玻璃效果（刚开始滑动就显示）
                   flexibleSpace: Stack(
-                    key: const ValueKey('flexible_space_stack'),
                     fit: StackFit.expand,
                     children: [
                       // ✅ 底层：FlexibleSpaceBar（只有背景图）
@@ -623,14 +622,12 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                           final totalHeight = statusBarHeight + navBarHeight;
 
                           return Positioned(
-                            key: const ValueKey('blur_layer'),
                             top: 0,
                             left: 0,
                             right: 0,
                             height: totalHeight,
                             child: ClipRect(
                               child: BackdropFilter(
-                                key: const ValueKey('backdrop_filter'),
                                 filter: ui.ImageFilter.blur(
                                   sigmaX: blurSigma,
                                   sigmaY: blurSigma,
@@ -749,51 +746,48 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                         const SizedBox(height: 12),
                         SizedBox(
                           height: 175,
-                          child: RepaintBoundary(
-                            // ✅ 隔离季模块的渲染，避免影响顶部毛玻璃
-                            child: Builder(
-                              builder: (context) {
-                                final isDark =
-                                    isDarkModeFromContext(context, ref);
-                                return seasons.when(
-                                  data: (seasonsList) {
-                                    if (seasonsList.isEmpty) {
-                                      // 空状态：显示占位内容
-                                      return const SizedBox.shrink();
-                                    }
-                                    return ListView.builder(
-                                      padding: EdgeInsets.zero,
-                                      scrollDirection: Axis.horizontal,
-                                      cacheExtent: 300,
-                                      itemCount: seasonsList.length,
-                                      itemBuilder: (context, index) {
-                                        final season = seasonsList[index];
-                                        final bool isFirst = index == 0;
-                                        final bool isLast =
-                                            index == seasonsList.length - 1;
-                                        return Padding(
+                          child: Builder(
+                            builder: (context) {
+                              final isDark =
+                                  isDarkModeFromContext(context, ref);
+                              return seasons.when(
+                                data: (seasonsList) {
+                                  if (seasonsList.isEmpty) {
+                                    // 空状态：显示占位内容
+                                    return const SizedBox.shrink();
+                                  }
+                                  return ListView.builder(
+                                    padding: EdgeInsets.zero,
+                                    scrollDirection: Axis.horizontal,
+                                    cacheExtent: 300,
+                                    itemCount: seasonsList.length,
+                                    itemBuilder: (context, index) {
+                                      final season = seasonsList[index];
+                                      final bool isFirst = index == 0;
+                                      final bool isLast =
+                                          index == seasonsList.length - 1;
+                                      return Padding(
+                                        key: ValueKey(
+                                            'season_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
+                                        padding: EdgeInsets.only(
+                                          left: isFirst ? 20 : 12,
+                                          right: isLast ? 20 : 0,
+                                        ),
+                                        child: _SeasonCard(
                                           key: ValueKey(
-                                              'season_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
-                                          padding: EdgeInsets.only(
-                                            left: isFirst ? 20 : 12,
-                                            right: isLast ? 20 : 0,
-                                          ),
-                                          child: _SeasonCard(
-                                            key: ValueKey(
-                                                'season_card_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
-                                            season: season,
-                                            seriesId: widget.seriesId,
-                                            isDark: isDark,
-                                          ),
-                                        );
-                                      },
-                                    );
-                                  },
-                                  loading: () => const SizedBox.shrink(),
-                                  error: (_, __) => const SizedBox.shrink(),
-                                );
-                              },
-                            ),
+                                              'season_card_${season.id}'), // ✅ 使用稳定的 key，避免卡片重新创建
+                                          season: season,
+                                          seriesId: widget.seriesId,
+                                          isDark: isDark,
+                                        ),
+                                      );
+                                    },
+                                  );
+                                },
+                                loading: () => const SizedBox.shrink(),
+                                error: (_, __) => const SizedBox.shrink(),
+                              );
+                            },
                           ),
                         ),
                       ],
