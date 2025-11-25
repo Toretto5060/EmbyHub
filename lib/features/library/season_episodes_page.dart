@@ -445,8 +445,8 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
 
         return CustomScrollView(
           controller: _scrollController,
+          // ✅ 添加 cacheExtent 提升滚动性能
           cacheExtent: 500,
-          physics: const ClampingScrollPhysics(), // ✅ 防止 over-scroll 导致毛玻璃透明
           slivers: [
             // ✅ 使用 SliverAppBar 实现标题滚动动画
             ValueListenableBuilder<SystemUiOverlayStyle?>(
@@ -524,6 +524,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                   ],
                   // ✅ 添加毛玻璃效果（刚开始滑动就显示）
                   flexibleSpace: Stack(
+                    key: const ValueKey('flexible_space_stack'),
                     fit: StackFit.expand,
                     children: [
                       // ✅ 底层：FlexibleSpaceBar（只有背景图）
@@ -564,12 +565,14 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                           final totalHeight = statusBarHeight + navBarHeight;
 
                           return Positioned(
+                            key: const ValueKey('blur_layer'),
                             top: 0,
                             left: 0,
                             right: 0,
                             height: totalHeight,
                             child: ClipRect(
                               child: BackdropFilter(
+                                key: const ValueKey('backdrop_filter'),
                                 filter: ui.ImageFilter.blur(
                                   sigmaX: blurSigma,
                                   sigmaY: blurSigma,
@@ -673,58 +676,71 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
               ),
             ),
             SliverToBoxAdapter(
-              child: episodes.when(
-                data: (list) {
-                  if (list.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 12),
-                      // ✅ 使用 Builder 延迟计算 isDark，避免在 _buildContentArea 顶层计算
-                      Builder(
-                        builder: (context) {
-                          final isDark = isDarkModeFromContext(context, ref);
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 20),
-                                child: Text(
-                                  '共${list.length}集',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                    color:
-                                        isDark ? Colors.white : Colors.black87,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              ...list
-                                  .map((episode) => _EpisodeTile(
-                                        key: ValueKey('episode_${episode.id}'),
-                                        episode: episode,
-                                        isDark: isDark,
-                                        seriesId: widget.seriesId,
-                                        seasonId: widget.seasonId,
-                                      ))
-                                  .toList(),
-                            ],
-                          );
-                        },
+              child: Builder(
+                builder: (context) {
+                  final isDark = isDarkModeFromContext(context, ref);
+                  return Container(
+                    color: isDark
+                        ? const Color(0xFF000000)
+                        : const Color(0xFFFFFFFF),
+                    child: episodes.when(
+                      data: (list) {
+                        if (list.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 12),
+                            // ✅ 使用 Builder 延迟计算 isDark，避免在 _buildContentArea 顶层计算
+                            Builder(
+                              builder: (context) {
+                                final isDark =
+                                    isDarkModeFromContext(context, ref);
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 20),
+                                      child: Text(
+                                        '共${list.length}集',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w600,
+                                          color: isDark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    ...list
+                                        .map((episode) => _EpisodeTile(
+                                              key: ValueKey(
+                                                  'episode_${episode.id}'),
+                                              episode: episode,
+                                              isDark: isDark,
+                                              seriesId: widget.seriesId,
+                                              seasonId: widget.seasonId,
+                                            ))
+                                        .toList(),
+                                  ],
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 20),
+                          ],
+                        );
+                      },
+                      loading: () => const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(child: CupertinoActivityIndicator()),
                       ),
-                      const SizedBox(height: 20),
-                    ],
+                      error: (_, __) => const SizedBox.shrink(),
+                    ),
                   );
                 },
-                loading: () => const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: CupertinoActivityIndicator()),
-                ),
-                error: (_, __) => const SizedBox.shrink(),
               ),
             ),
           ],
