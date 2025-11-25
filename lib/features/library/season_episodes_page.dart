@@ -1321,6 +1321,13 @@ class _EpisodeTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // ✅ 使用 RepaintBoundary 隔离每个剧集卡片的重绘
+    return RepaintBoundary(
+      child: _buildTile(context, ref),
+    );
+  }
+
+  Widget _buildTile(BuildContext context, WidgetRef ref) {
     final episodeNumber = episode.indexNumber ?? 0;
     final episodeName = episode.name;
     final userData = episode.userData ?? {};

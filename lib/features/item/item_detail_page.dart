@@ -917,6 +917,14 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   }
 
   Widget _buildHeaderCard(BuildContext context, ItemInfo item, bool isDark) {
+    // ✅ 使用 RepaintBoundary 隔离头部卡片的重绘
+    return RepaintBoundary(
+      child: _buildHeaderCardContent(context, item, isDark),
+    );
+  }
+
+  Widget _buildHeaderCardContent(
+      BuildContext context, ItemInfo item, bool isDark) {
     final Color textColor = isDark ? Colors.white : Colors.black87;
     return _MeasureSize(
       onChange: (size) {
@@ -2384,48 +2392,53 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.only(right: 12),
             itemCount: links.length,
+            // ✅ 添加 cacheExtent 提升横向列表性能
+            cacheExtent: 200,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, index) {
               final link = links[index];
-              return DecoratedBox(
-                decoration: BoxDecoration(
-                  color: bgColor,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: borderColor),
-                  // boxShadow: [
-                  //   BoxShadow(
-                  //     color:
-                  //         Colors.black.withValues(alpha: isDark ? 0.25 : 0.08),
-                  //     blurRadius: 12,
-                  //     offset: const Offset(0, 6),
-                  //   ),
-                  // ],
-                ),
-                child: CupertinoButton(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 11,
-                    vertical: 6,
+              // ✅ 使用 RepaintBoundary 隔离每个链接按钮的重绘
+              return RepaintBoundary(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: borderColor),
+                    // boxShadow: [
+                    //   BoxShadow(
+                    //     color:
+                    //         Colors.black.withValues(alpha: isDark ? 0.25 : 0.08),
+                    //     blurRadius: 12,
+                    //     offset: const Offset(0, 6),
+                    //   ),
+                    // ],
                   ),
-                  minSize: 0,
-                  onPressed: () => _openExternalLink(link.url),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        CupertinoIcons.link,
-                        size: 14,
-                        color: textColor.withValues(alpha: 0.7),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        link.name,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: textColor,
+                  child: CupertinoButton(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 6,
+                    ),
+                    minSize: 0,
+                    onPressed: () => _openExternalLink(link.url),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          CupertinoIcons.link,
+                          size: 14,
+                          color: textColor.withValues(alpha: 0.7),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        Text(
+                          link.name,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: textColor,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -2659,12 +2672,15 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                             ? edgePadding
                             : 0,
                       ),
-                      child: _MediaModuleCard(
-                        module: modules[i],
-                        bgColor: bgColor,
-                        borderColor: borderColor,
-                        textColor: textColor,
-                        isDark: isDark,
+                      // ✅ 使用 RepaintBoundary 隔离每个媒体卡片的重绘
+                      child: RepaintBoundary(
+                        child: _MediaModuleCard(
+                          module: modules[i],
+                          bgColor: bgColor,
+                          borderColor: borderColor,
+                          textColor: textColor,
+                          isDark: isDark,
+                        ),
                       ),
                     ),
               ],
@@ -2737,6 +2753,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                 scrollDirection: Axis.horizontal,
                 padding: EdgeInsets.zero,
                 itemCount: items.length,
+                // ✅ 添加 cacheExtent 提升横向列表性能
+                cacheExtent: 300,
                 itemBuilder: (context, index) {
                   final item = items[index];
                   final bool isFirst = index == 0;
