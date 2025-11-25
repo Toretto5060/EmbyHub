@@ -442,8 +442,13 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       child: Builder(
         builder: (context) {
           _statusBarController = StatusBarStyleScope.of(context);
+          // ✅ 使用 addPostFrameCallback 延迟更新，避免在 build 期间调用 setState
           final styleToApply = _navSyncedStyleNotifier.value ?? _statusBarStyle;
-          _statusBarController?.update(styleToApply);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _statusBarController?.update(styleToApply);
+            }
+          });
           return CupertinoPageScaffold(
             backgroundColor: CupertinoColors.systemBackground,
             child: item.maybeWhen(
@@ -502,6 +507,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                   expandedHeight: _backdropHeight - 40, // 背景图高度减小，让标题和评分信息更接近
                   pinned: true,
                   stretch: true,
+                  backgroundColor: Colors.transparent, // ✅ 设置为透明，避免与毛玻璃效果叠加
+                  surfaceTintColor: Colors.transparent, // ✅ 移除 Material 3 的表面色调
                   systemOverlayStyle: navSyncedStyle ?? _statusBarStyle,
                   leading: LayoutBuilder(
                     builder: (context, constraints) {
@@ -568,8 +575,6 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                       },
                     ),
                   ],
-                  backgroundColor: Colors.transparent,
-                  surfaceTintColor: Colors.transparent,
                   // ✅ 添加毛玻璃效果（刚开始滑动就显示）
                   flexibleSpace: Stack(
                     fit: StackFit.expand,
@@ -584,57 +589,54 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                         background: _buildBackdropBackground(context, data),
                       ),
                       // ✅ 中层：毛玻璃效果（只覆盖顶部导航栏区域）
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        child: ValueListenableBuilder<double>(
-                          valueListenable: _scrollOffsetNotifier,
-                          builder: (context, scrollOffset, child) {
-                            // ✅ 毛玻璃强度：基于滚动偏移量，刚开始滑动就显示
-                            // 参考 series_detail_page.dart 的实现：blurStart=10, blurEnd=250
-                            const double blurStart = 10.0;
-                            const double blurEnd = 250.0;
-                            final double blurProgress;
-                            if (scrollOffset <= blurStart) {
-                              blurProgress = 0.0;
-                            } else {
-                              final double effective =
-                                  (scrollOffset - blurStart)
-                                      .clamp(0.0, blurEnd - blurStart);
-                              blurProgress = (effective / (blurEnd - blurStart))
-                                  .clamp(0.0, 1.0);
-                            }
-                            final blurSigma = 30.0 * blurProgress;
-                            final bgOpacity = 0.7 * blurProgress;
-                            final baseColor = isDark
-                                ? const Color(0xFF1C1C1E)
-                                : const Color(0xFFF2F2F7);
+                      ValueListenableBuilder<double>(
+                        valueListenable: _scrollOffsetNotifier,
+                        builder: (context, scrollOffset, child) {
+                          // ✅ 毛玻璃强度：基于滚动偏移量，刚开始滑动就显示
+                          // 参考 series_detail_page.dart 的实现：blurStart=10, blurEnd=250
+                          const double blurStart = 10.0;
+                          const double blurEnd = 250.0;
+                          final double blurProgress;
+                          if (scrollOffset <= blurStart) {
+                            blurProgress = 0.0;
+                          } else {
+                            final double effective = (scrollOffset - blurStart)
+                                .clamp(0.0, blurEnd - blurStart);
+                            blurProgress = (effective / (blurEnd - blurStart))
+                                .clamp(0.0, 1.0);
+                          }
+                          final blurSigma = 30.0 * blurProgress;
+                          final bgOpacity = 0.7 * blurProgress;
+                          final baseColor = isDark
+                              ? const Color(0xFF1C1C1E)
+                              : const Color(0xFFF2F2F7);
 
-                            // ✅ 只在导航栏高度范围内显示毛玻璃（包含状态栏）
-                            final statusBarHeight =
-                                MediaQuery.of(context).padding.top;
-                            final navBarHeight = kToolbarHeight;
-                            final totalHeight = statusBarHeight + navBarHeight;
+                          // ✅ 只在导航栏高度范围内显示毛玻璃（包含状态栏）
+                          final statusBarHeight =
+                              MediaQuery.of(context).padding.top;
+                          final navBarHeight = kToolbarHeight;
+                          final totalHeight = statusBarHeight + navBarHeight;
 
-                            return SizedBox(
-                              height: totalHeight,
-                              child: ClipRect(
-                                child: BackdropFilter(
-                                  filter: ui.ImageFilter.blur(
-                                    sigmaX: blurSigma,
-                                    sigmaY: blurSigma,
-                                  ),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: baseColor.withOpacity(bgOpacity),
-                                    ),
+                          return Positioned(
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            height: totalHeight,
+                            child: ClipRect(
+                              child: BackdropFilter(
+                                filter: ui.ImageFilter.blur(
+                                  sigmaX: blurSigma,
+                                  sigmaY: blurSigma,
+                                ),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: baseColor.withOpacity(bgOpacity),
                                   ),
                                 ),
                               ),
-                            );
-                          },
-                        ),
+                            ),
+                          );
+                        },
                       ),
                       // ✅ 上层：标题（在毛玻璃之上）
                       LayoutBuilder(

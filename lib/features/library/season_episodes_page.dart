@@ -127,8 +127,6 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
   static const double _backdropHeight = 300;
   static const double _headerTopOffset = 250;
   static const double _headerBaseHeight = 180;
-  static const double _heroBaseHeight = _backdropHeight +
-      (_headerTopOffset + _headerBaseHeight - _backdropHeight);
   double _headerHeight = _headerBaseHeight;
   SystemUiOverlayStyle? _navSyncedStyle;
   late SystemUiOverlayStyle _appliedStatusStyle;
@@ -142,12 +140,17 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
   bool _isUpdatingPlayed = false;
   ValueNotifier<bool>? _isPlayedNotifier;
   String? _lastSeasonDataHash; // ✅ 记录上次 season 数据的哈希，用于检测数据变化
+  late ValueNotifier<double> _scrollOffsetNotifier; // ✅ 滚动偏移量通知器
+  late ValueNotifier<SystemUiOverlayStyle?>
+      _navSyncedStyleNotifier; // ✅ 导航栏同步样式通知器
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _isPlayedNotifier = ValueNotifier<bool>(false);
+    _scrollOffsetNotifier = ValueNotifier<double>(0.0);
+    _navSyncedStyleNotifier = ValueNotifier<SystemUiOverlayStyle?>(null);
     final platformBrightness =
         WidgetsBinding.instance.platformDispatcher.platformBrightness;
     _statusBarStyle = StatusBarManager.currentStyle ??
@@ -196,6 +199,8 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
       _isRouteSubscribed = false;
     }
     _isPlayedNotifier?.dispose();
+    _scrollOffsetNotifier.dispose();
+    _navSyncedStyleNotifier.dispose();
     _statusBarController?.release();
     _statusBarController = null;
     _scrollController.removeListener(_handleScroll);
@@ -242,6 +247,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
     if (!mounted) return;
     final offset =
         _scrollController.hasClients ? _scrollController.offset : 0.0;
+    _scrollOffsetNotifier.value = offset; // ✅ 更新滚动偏移量
     // ✅ 使用节流，避免频繁更新状态栏
     _syncStatusBarWithNavigationThrottled(offset);
   }
@@ -280,10 +286,11 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
 
     final SystemUiOverlayStyle targetStyle =
         progress < 0.55 ? expandedStyle : collapsedStyle;
-    if (_navSyncedStyle == targetStyle) {
+    if (_navSyncedStyleNotifier.value == targetStyle) {
       return;
     }
     _navSyncedStyle = targetStyle;
+    _navSyncedStyleNotifier.value = targetStyle; // ✅ 更新 ValueNotifier
     if (mounted) {
       _statusBarController?.update(targetStyle);
       // ✅ 移除 setState，避免整页重建
@@ -301,7 +308,8 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
     } else if (status == AnimationStatus.completed ||
         status == AnimationStatus.forward) {
       if (mounted) {
-        _statusBarController?.update(_navSyncedStyle ?? _statusBarStyle);
+        _statusBarController
+            ?.update(_navSyncedStyleNotifier.value ?? _statusBarStyle);
       }
     }
   }
@@ -371,7 +379,12 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
       child: Builder(
         builder: (context) {
           _statusBarController = StatusBarStyleScope.of(context);
-          _statusBarController?.update(_navSyncedStyle ?? _statusBarStyle);
+          // ✅ 使用 addPostFrameCallback 延迟更新，避免在 build 期间调用 setState
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _statusBarController?.update(_navSyncedStyle ?? _statusBarStyle);
+            }
+          });
           return CupertinoPageScaffold(
             backgroundColor: CupertinoColors.systemBackground,
             child: season.maybeWhen(
@@ -380,37 +393,33 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                 if (_cachedSeasonData != null) {
                   return _buildContentArea(_cachedSeasonData!);
                 }
-                return Stack(
-                  children: [
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: _buildBlurNavigationBar(context, null),
+                return CustomScrollView(
+                  slivers: [
+                    SliverAppBar(
+                      pinned: true,
+                      leading: buildBlurBackButton(context),
                     ),
                   ],
                 );
               },
-              error: (e, _) => Stack(
-                children: [
-                  Center(child: Text('加载失败: $e')),
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: _buildBlurNavigationBar(context, null),
+              error: (e, _) => CustomScrollView(
+                slivers: [
+                  SliverAppBar(
+                    pinned: true,
+                    leading: buildBlurBackButton(context),
+                  ),
+                  SliverFillRemaining(
+                    child: Center(child: Text('加载失败: $e')),
                   ),
                 ],
               ),
               orElse: () {
                 if (_cachedSeasonData == null) {
-                  return Stack(
-                    children: [
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        child: _buildBlurNavigationBar(context, null),
+                  return CustomScrollView(
+                    slivers: [
+                      SliverAppBar(
+                        pinned: true,
+                        leading: buildBlurBackButton(context),
                       ),
                     ],
                   );
@@ -429,38 +438,238 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
       episodesProvider((widget.seriesId, widget.seasonId)),
     );
 
-    return Stack(
-      children: [
-        CustomScrollView(
+    // ✅ 使用 Builder 获取 isDark，避免在每次滚动时重新计算
+    return Builder(
+      builder: (context) {
+        final isDark = isDarkModeFromContext(context, ref);
+
+        return CustomScrollView(
           controller: _scrollController,
           cacheExtent: 500,
+          physics: const ClampingScrollPhysics(), // ✅ 防止 over-scroll 导致毛玻璃透明
           slivers: [
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: _heroBaseHeight + (_headerHeight - _headerBaseHeight),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: _backdropHeight,
-                      child: _buildBackdropBackground(context, season),
-                    ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: _headerTopOffset,
-                      child: Builder(
-                        builder: (context) {
-                          final isDark = isDarkModeFromContext(context, ref);
-                          return _buildHeaderCard(context, season, isDark);
-                        },
-                      ),
+            // ✅ 使用 SliverAppBar 实现标题滚动动画
+            ValueListenableBuilder<SystemUiOverlayStyle?>(
+              valueListenable: _navSyncedStyleNotifier,
+              builder: (context, navSyncedStyle, child) {
+                return SliverAppBar(
+                  expandedHeight: _backdropHeight - 40,
+                  pinned: true,
+                  stretch: true,
+                  backgroundColor: Colors.transparent, // ✅ 设置为透明，避免与毛玻璃效果叠加
+                  surfaceTintColor: Colors.transparent, // ✅ 移除 Material 3 的表面色调
+                  systemOverlayStyle: navSyncedStyle ?? _statusBarStyle,
+                  leading: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final settings =
+                          context.dependOnInheritedWidgetOfExactType<
+                              FlexibleSpaceBarSettings>();
+                      final deltaExtent = settings != null
+                          ? settings.maxExtent - settings.minExtent
+                          : 1.0;
+                      final t = settings != null && deltaExtent > 0
+                          ? (1.0 -
+                                  (settings.currentExtent -
+                                          settings.minExtent) /
+                                      deltaExtent)
+                              .clamp(0.0, 1.0)
+                          : 0.0;
+
+                      final brightness =
+                          getCurrentBrightnessFromContext(context, ref);
+                      final expandedStyle = _statusBarStyle;
+                      final collapsedStyle =
+                          _defaultStyleForBrightness(brightness);
+                      final targetStyle =
+                          t < 0.55 ? expandedStyle : collapsedStyle;
+                      final iconColor =
+                          _colorForStatusStyle(targetStyle, brightness);
+
+                      return buildBlurBackButton(context, color: iconColor);
+                    },
+                  ),
+                  actions: [
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final settings =
+                            context.dependOnInheritedWidgetOfExactType<
+                                FlexibleSpaceBarSettings>();
+                        final deltaExtent = settings != null
+                            ? settings.maxExtent - settings.minExtent
+                            : 1.0;
+                        final t = settings != null && deltaExtent > 0
+                            ? (1.0 -
+                                    (settings.currentExtent -
+                                            settings.minExtent) /
+                                        deltaExtent)
+                                .clamp(0.0, 1.0)
+                            : 0.0;
+
+                        final brightness =
+                            getCurrentBrightnessFromContext(context, ref);
+                        final expandedStyle = _statusBarStyle;
+                        final collapsedStyle =
+                            _defaultStyleForBrightness(brightness);
+                        final targetStyle =
+                            t < 0.55 ? expandedStyle : collapsedStyle;
+                        final iconColor =
+                            _colorForStatusStyle(targetStyle, brightness);
+
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: _buildTopActions(season, iconColor),
+                        );
+                      },
                     ),
                   ],
-                ),
+                  // ✅ 添加毛玻璃效果（刚开始滑动就显示）
+                  flexibleSpace: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // ✅ 底层：FlexibleSpaceBar（只有背景图）
+                      FlexibleSpaceBar(
+                        collapseMode: CollapseMode.pin,
+                        titlePadding: EdgeInsets.zero,
+                        centerTitle: false,
+                        title: const SizedBox.shrink(), // 不在这里显示标题
+                        background: _buildBackdropBackground(context, season),
+                      ),
+                      // ✅ 中层：毛玻璃效果（只覆盖顶部导航栏区域）
+                      ValueListenableBuilder<double>(
+                        valueListenable: _scrollOffsetNotifier,
+                        builder: (context, scrollOffset, child) {
+                          // ✅ 毛玻璃强度：基于滚动偏移量，刚开始滑动就显示
+                          // 参考 series_detail_page.dart 的实现：blurStart=10, blurEnd=250
+                          const double blurStart = 10.0;
+                          const double blurEnd = 250.0;
+                          final double blurProgress;
+                          if (scrollOffset <= blurStart) {
+                            blurProgress = 0.0;
+                          } else {
+                            final double effective = (scrollOffset - blurStart)
+                                .clamp(0.0, blurEnd - blurStart);
+                            blurProgress = (effective / (blurEnd - blurStart))
+                                .clamp(0.0, 1.0);
+                          }
+                          final blurSigma = 30.0 * blurProgress;
+                          final bgOpacity = 0.7 * blurProgress;
+                          final baseColor = isDark
+                              ? const Color(0xFF1C1C1E)
+                              : const Color(0xFFF2F2F7);
+
+                          // ✅ 只在导航栏高度范围内显示毛玻璃（包含状态栏）
+                          final statusBarHeight =
+                              MediaQuery.of(context).padding.top;
+                          final navBarHeight = kToolbarHeight;
+                          final totalHeight = statusBarHeight + navBarHeight;
+
+                          return Positioned(
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            height: totalHeight,
+                            child: ClipRect(
+                              child: BackdropFilter(
+                                filter: ui.ImageFilter.blur(
+                                  sigmaX: blurSigma,
+                                  sigmaY: blurSigma,
+                                ),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: baseColor.withOpacity(bgOpacity),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      // ✅ 上层：标题（在毛玻璃之上）
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final settings =
+                              context.dependOnInheritedWidgetOfExactType<
+                                  FlexibleSpaceBarSettings>();
+                          if (settings == null) {
+                            return const SizedBox.shrink();
+                          }
+                          final deltaExtent =
+                              settings.maxExtent - settings.minExtent;
+                          final t = deltaExtent > 0
+                              ? (1.0 -
+                                      (settings.currentExtent -
+                                              settings.minExtent) /
+                                          deltaExtent)
+                                  .clamp(0.0, 1.0)
+                              : 1.0;
+
+                          final fontSize = 28.0 -
+                              (28.0 - 17.0) * Curves.easeInOut.transform(t);
+                          final horizontalProgress =
+                              Curves.easeInOutCubic.transform(t);
+                          final verticalProgress = Curves.easeOut.transform(t);
+                          final leftPadding =
+                              20.0 + (56.0 - 40.0) * horizontalProgress;
+                          final bottomPadding = 10 + 9.0 * verticalProgress;
+
+                          final titleColor =
+                              isDark ? Colors.white : Colors.black87;
+
+                          return Container(
+                            alignment: Alignment.bottomLeft,
+                            padding: EdgeInsets.only(
+                              left: leftPadding,
+                              right: 20,
+                              bottom: bottomPadding,
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  widget.seasonName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.left,
+                                  style: TextStyle(
+                                    fontSize: fontSize,
+                                    fontWeight: FontWeight.w700,
+                                    color: titleColor,
+                                    height: 1.2,
+                                  ),
+                                ),
+                                if (t < 0.5)
+                                  Opacity(
+                                    opacity: (1.0 - t * 2).clamp(0.0, 1.0),
+                                    child: Text(
+                                      widget.seriesName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.left,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: titleColor.withOpacity(0.7),
+                                        height: 1.2,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            // ✅ 头部卡片（播放按钮等）
+            SliverToBoxAdapter(
+              child: Builder(
+                builder: (context) {
+                  final isDark = isDarkModeFromContext(context, ref);
+                  return _buildHeaderCard(context, season, isDark);
+                },
               ),
             ),
             SliverToBoxAdapter(
@@ -519,76 +728,8 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
               ),
             ),
           ],
-        ),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: _buildBlurNavigationBar(context, season),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBlurNavigationBar(
-    BuildContext context,
-    ItemInfo? season,
-  ) {
-    final brightness = getCurrentBrightnessFromContext(context, ref);
-    final SystemUiOverlayStyle baseStyle = _appliedStatusStyle;
-    final SystemUiOverlayStyle targetStyle =
-        _navSyncedStyle ?? _appliedStatusStyle;
-
-    final Color expandedColor = _colorForStatusStyle(baseStyle, brightness);
-    final Color collapsedColor = _colorForStatusStyle(targetStyle, brightness);
-    final double scrollOffset =
-        _scrollController.hasClients ? _scrollController.offset : 0.0;
-    final double navProgress = (scrollOffset > 200) ? 1.0 : 0.0;
-    final Color currentColor =
-        Color.lerp(expandedColor, collapsedColor, navProgress)!;
-
-    final actions = season != null
-        ? _buildTopActions(season, currentColor)
-        : const <Widget>[];
-
-    return BlurNavigationBar(
-      forceBlur: false,
-      scrollController: _scrollController,
-      leading: buildBlurBackButton(context, color: currentColor),
-      middle: season != null
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DefaultTextStyle(
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: currentColor,
-                  ),
-                  child: Text(widget.seasonName),
-                ),
-                DefaultTextStyle(
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: currentColor.withOpacity(0.6),
-                  ),
-                  child: Text(widget.seriesName),
-                ),
-              ],
-            )
-          : null,
-      trailing: actions.isEmpty
-          ? null
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: actions,
-            ),
-      expandedForegroundColor: expandedColor,
-      collapsedForegroundColor: collapsedColor,
-      enableTransition: false,
-      useDynamicOpacity: true,
-      blurStart: 10.0,
-      blurEnd: _headerTopOffset,
+        );
+      },
     );
   }
 
@@ -823,6 +964,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
     }
     _statusBarStyle = style;
     _navSyncedStyle = null;
+    _navSyncedStyleNotifier.value = null; // ✅ 重置同步样式
     if (mounted) {
       _statusBarController?.update(style);
       setState(() {
@@ -844,8 +986,6 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
 
   Widget _buildHeaderCardContent(
       BuildContext context, ItemInfo season, bool isDark) {
-    final Color textColor = isDark ? Colors.white : Colors.black87;
-
     return _MeasureSize(
       onChange: (size) {
         if (size == null) return;
@@ -858,35 +998,10 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
         }
       },
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ 季名称（大标题）
-            Text(
-              widget.seasonName,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 30,
-                fontWeight: FontWeight.w700,
-                color: textColor,
-                height: 1.2,
-              ),
-            ),
-            const SizedBox(height: 6),
-            // ✅ 系列名称（副标题）
-            Text(
-              widget.seriesName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 16,
-                color: textColor.withOpacity(0.7),
-                height: 1.2,
-              ),
-            ),
-            const SizedBox(height: 18),
             _buildPlaySection(context, season, isDark),
             if ((season.overview ?? '').isNotEmpty) ...[
               const SizedBox(height: 18),
