@@ -2178,7 +2178,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             ),
             // ✅ 半透明黑色遮罩，避免背景图太亮（增加透明度到0.6）
             Container(
-              color: Colors.black.withOpacity(0.6),
+              color: Colors.black.withOpacity(0.3),
             ),
           ],
         );
