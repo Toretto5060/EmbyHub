@@ -388,9 +388,7 @@ class ExoPlayerTextureController {
   }
 
   void _debugLog(String message) {
-    if (kDebugMode) {
-      debugPrint('[$_logTag] $message');
-    }
+    // 日志已禁用
   }
 
   Future<void> _invoke(String method, [Map<String, dynamic>? arguments]) async {

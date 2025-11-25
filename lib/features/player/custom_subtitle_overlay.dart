@@ -148,8 +148,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
               _lastFoundIndex = 0;
               _isImageSubtitle = true;
             });
-            debugPrint(
-                '✅ [Subtitle] Loaded image subtitle (${response.bodyBytes.length} bytes)');
             return;
           }
 
@@ -167,7 +165,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
               _lastFoundIndex = 0;
               _isImageSubtitle = false;
             });
-            debugPrint('✅ [Subtitle] Loaded ${subtitles.length} text entries');
             return;
           }
 
@@ -184,7 +181,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
       _isLoading = false;
       _error = '加载字幕失败: $lastError';
     });
-    debugPrint('❌ [Subtitle] Failed to load subtitles: $lastError');
   }
 
   /// ✅ 支持多种 VTT 时间格式：HH:MM:SS.mmm 或 MM:SS.mmm
@@ -418,9 +414,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
   void _calculateTimeOffset(Duration currentPosition) {
     if (_subtitles.isEmpty) return;
 
-    debugPrint(
-        '🔍 [Subtitle] Calculating time offset... Video position: ${currentPosition.inSeconds}s');
-
     // ✅ 策略1：查找当前位置附近（±10秒）是否有字幕
     // 扩大搜索范围，减少误判
     SubtitleEntry? nearbySubtitle;
@@ -435,8 +428,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     if (nearbySubtitle != null) {
       // ✅ 找到了附近的字幕，时间轴基本一致
       _timeOffset = Duration.zero;
-      debugPrint(
-          '✅ [Subtitle] Time sync OK - Found subtitle near current position (${nearbySubtitle.start.inSeconds}s)');
       _timeOffsetCalculated = true;
       return;
     }
@@ -445,15 +436,10 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
     final firstSubtitle = _subtitles.first;
     final lastSubtitle = _subtitles.last;
 
-    debugPrint(
-        '📊 [Subtitle] Subtitle range: ${firstSubtitle.start.inSeconds}s - ${lastSubtitle.end.inSeconds}s');
-
     // ✅ 情况1：当前位置在第一个字幕之前很久（>1分钟）
     // 说明字幕时间轴比视频快，需要正偏移
     if (currentPosition < firstSubtitle.start - const Duration(minutes: 1)) {
       _timeOffset = firstSubtitle.start - currentPosition;
-      debugPrint(
-          '⚠️ [Subtitle] Detected POSITIVE offset: +${_timeOffset.inSeconds}s (subtitles start later)');
       _timeOffsetCalculated = true;
       return;
     }
@@ -496,9 +482,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
           _timeOffset = offsetFromBefore.abs() < offsetFromAfter.abs()
               ? offsetFromBefore
               : offsetFromAfter;
-
-          debugPrint(
-              '⚠️ [Subtitle] Detected offset from gap analysis: ${_timeOffset.inSeconds}s');
           _timeOffsetCalculated = true;
           return;
         }
@@ -507,7 +490,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
 
     // ✅ 默认：不需要偏移（保守策略）
     _timeOffset = Duration.zero;
-    debugPrint('✅ [Subtitle] No time offset detected, using zero offset');
     _timeOffsetCalculated = true;
   }
 
@@ -530,8 +512,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
         widget.position.inSeconds > 0) {
       final adjustedPos = widget.position + _timeOffset;
       final hasSubtitle = currentSubtitle != null;
-      debugPrint(
-          '🕐 [Subtitle] Sync status - Offset: ${_timeOffset.inSeconds}s | Video: ${widget.position.inSeconds}s | Adjusted: ${adjustedPos.inSeconds}s | Has subtitle: $hasSubtitle');
     }
 
     // ✅ 图片字幕显示
@@ -560,7 +540,6 @@ class _CustomSubtitleOverlayState extends State<CustomSubtitleOverlay> {
                 currentSubtitle!.imageData!,
                 fit: BoxFit.contain,
                 errorBuilder: (context, error, stackTrace) {
-                  debugPrint('🎬 [Subtitle] Image decode error: $error');
                   return const SizedBox.shrink();
                 },
               ),

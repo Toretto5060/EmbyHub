@@ -145,7 +145,6 @@ class _GenreItemsPageState extends ConsumerState<GenreItemsPage>
     // ✅ 检测路由是否重新变为当前路由（从其他页面返回）
     if (!_wasRouteCurrent && isRouteCurrent && _isRouteSubscribed) {
       // 路由重新变为当前路由，说明从其他页面返回了
-      debugPrint('🔄 [GenreItemsPage] 路由重新变为当前路由，刷新数据');
       _scheduleRefresh();
     }
     _wasRouteCurrent = isRouteCurrent;
@@ -177,7 +176,6 @@ class _GenreItemsPageState extends ConsumerState<GenreItemsPage>
 
   @override
   void didPopNext() {
-    debugPrint('🔄 [GenreItemsPage] didPopNext 被调用，刷新数据');
     _scheduleRefresh();
   }
 

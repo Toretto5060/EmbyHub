@@ -18,16 +18,14 @@ import 'custom_subtitle_overlay.dart';
 import 'exoplayer_texture_controller.dart';
 import 'player_controls.dart';
 
-const bool _kPlayerLogging = true; // ✅ 临时启用日志，用于调试字幕问题
+const bool _kPlayerLogging = false; // 已禁用日志
 void _playerLog(String message) {
-  if (_kPlayerLogging) {
-    debugPrint(message);
-  }
+  // 日志已禁用
 }
 
-// 重要日志，总是输出
+// 重要日志已禁用
 void _playerLogImportant(String message) {
-  debugPrint('[Player][Important] $message');
+  // 日志已禁用
 }
 
 class PlayerPage extends ConsumerStatefulWidget {
@@ -387,7 +385,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       await _load();
     } catch (e, stack) {
       _playerLog('❌ [Player] Initialize ExoPlayer failed: $e');
-      debugPrintStack(stackTrace: stack);
     }
   }
 
@@ -648,7 +645,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerLogImportant('✅ [Player] Player reloaded successfully');
     } catch (e, stack) {
       _playerLog('❌ [Player] Reload player failed: $e');
-      debugPrintStack(stackTrace: stack);
     }
   }
 
@@ -3790,7 +3786,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     bool swallowErrors,
   ) {
     _playerLog('❌ [Player] $action failed: $error');
-    debugPrintStack(stackTrace: stackTrace);
     if (!swallowErrors) {
       Error.throwWithStackTrace(error, stackTrace);
     }
@@ -3993,7 +3988,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
     } catch (e, stack) {
       _playerLog('❌ [Player] Failed to switch episode: $e');
-      debugPrintStack(stackTrace: stack);
     } finally {
       // ✅ 重置切换标志
       _isSwitchingEpisode = false;

@@ -605,7 +605,6 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     // ✅ 检测路由是否重新变为当前路由（从其他页面返回）
     if (!_wasRouteCurrent && isRouteCurrent && _isRouteSubscribed) {
       // 路由重新变为当前路由，说明从其他页面返回了
-      debugPrint('🔄 [LibraryItemsPage] 路由重新变为当前路由，刷新数据');
       _scheduleRefresh();
     }
     _wasRouteCurrent = isRouteCurrent;
@@ -649,7 +648,6 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
   @override
   void didPopNext() {
-    debugPrint('🔄 [LibraryItemsPage] didPopNext 被调用，刷新数据');
     _scheduleRefresh();
   }
 

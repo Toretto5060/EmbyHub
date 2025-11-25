@@ -8,10 +8,12 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../utils/theme_utils.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 const bool _kImageCacheLogging = false;
 
@@ -165,6 +167,7 @@ class _ImageCache {
 
 /// 带淡入效果的图片加载组件
 /// 支持占位符、骨架屏加载动画、错误处理、淡入效果和超时控制
+/// 支持可视范围内批量加载，可视范围外懒加载
 class EmbyFadeInImage extends StatefulWidget {
   const EmbyFadeInImage({
     super.key,
@@ -175,6 +178,7 @@ class EmbyFadeInImage extends StatefulWidget {
     this.timeout = const Duration(seconds: 10),
     this.retries = -1, // -1 表示无限重试
     this.onImageReady,
+    this.enableLazyLoad = true, // 是否启用懒加载
   });
 
   final String imageUrl;
@@ -184,6 +188,7 @@ class EmbyFadeInImage extends StatefulWidget {
   final Duration timeout;
   final int retries;
   final void Function(ui.Image image)? onImageReady;
+  final bool enableLazyLoad;
 
   @override
   State<EmbyFadeInImage> createState() => _EmbyFadeInImageState();
@@ -191,16 +196,53 @@ class EmbyFadeInImage extends StatefulWidget {
 
 class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
   ui.Image? _image;
-  bool _isLoading = true;
+  bool _isLoading = false;
   bool _hasError = false;
   int _currentRetry = 0;
   String? _currentUrl; // 记录当前显示的图片URL
+  bool _isVisible = false; // 是否在可视范围内
+  bool _hasStartedLoading = false; // 是否已经开始加载过
+  bool _shouldFadeIn = false; // 是否需要淡入效果（仅网络加载的图片需要）
 
   @override
   void initState() {
     super.initState();
     _currentUrl = widget.imageUrl;
-    _loadImageWithCache();
+    
+    // ✅ 优先检查内存缓存（同步操作，立即显示，无需淡入）
+    final memoryCached = _ImageCache.getFromMemory(widget.imageUrl);
+    if (memoryCached != null) {
+      _log('✅ Image from memory cache (initState): ${widget.imageUrl}');
+      _image = memoryCached;
+      _shouldFadeIn = false; // 缓存图片不需要淡入
+      _hasStartedLoading = true;
+      widget.onImageReady?.call(memoryCached);
+      return;
+    }
+    
+    // 如果禁用懒加载，立即加载（包括检查磁盘缓存和网络加载）
+    if (!widget.enableLazyLoad) {
+      _loadImageWithCache();
+    } else {
+      // 启用懒加载时，异步检查磁盘缓存（不阻塞UI）
+      _checkDiskCacheAsync();
+    }
+  }
+  
+  /// 异步检查磁盘缓存，如果有则立即显示（无需淡入）
+  Future<void> _checkDiskCacheAsync() async {
+    final diskCached = await _ImageCache.getFromDisk(widget.imageUrl);
+    if (diskCached != null && mounted && _currentUrl == widget.imageUrl) {
+      _log('✅ Image from disk cache (async): ${widget.imageUrl}');
+      setState(() {
+        _image = diskCached;
+        _shouldFadeIn = false; // 缓存图片不需要淡入
+        _isLoading = false;
+        _hasError = false;
+      });
+      _hasStartedLoading = true;
+      widget.onImageReady?.call(diskCached);
+    }
   }
 
   @override
@@ -210,30 +252,60 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
     if (oldWidget.imageUrl != widget.imageUrl) {
       _log('🔄 Image URL changed: ${oldWidget.imageUrl} -> ${widget.imageUrl}');
       _currentUrl = widget.imageUrl;
-      // 先保留旧图片，后台加载新图片
-      _loadImageWithCache(keepOldImage: true);
+      _hasStartedLoading = false;
+      
+      // ✅ 优先检查内存缓存（同步操作，立即显示，无需淡入）
+      final memoryCached = _ImageCache.getFromMemory(widget.imageUrl);
+      if (memoryCached != null) {
+        _log('✅ Image from memory cache (didUpdate): ${widget.imageUrl}');
+        setState(() {
+          _image = memoryCached;
+          _shouldFadeIn = false; // 缓存图片不需要淡入
+          _isLoading = false;
+          _hasError = false;
+        });
+        _hasStartedLoading = true;
+        widget.onImageReady?.call(memoryCached);
+        return;
+      }
+      
+      // 如果已经可见或禁用懒加载，立即加载
+      if (_isVisible || !widget.enableLazyLoad) {
+        _loadImageWithCache(keepOldImage: true);
+      } else {
+        // 启用懒加载且不可见时，异步检查磁盘缓存
+        _checkDiskCacheAsync();
+      }
+    }
+  }
+
+  /// 当组件进入或离开可视范围时调用
+  void _onVisibilityChanged(VisibilityInfo info) {
+    final wasVisible = _isVisible;
+    _isVisible = info.visibleFraction > 0;
+
+    // 从不可见变为可见，且还未开始加载
+    if (!wasVisible && _isVisible && !_hasStartedLoading) {
+      _log('👁️ Image became visible, start loading: ${widget.imageUrl}');
+      _loadImageWithCache();
     }
   }
 
   Future<void> _loadImageWithCache({bool keepOldImage = false}) async {
+    // 标记已经开始加载
+    _hasStartedLoading = true;
+
     // ✅ 重置重试计数器（每次加载新URL时）
     _currentRetry = 0;
 
-    // 如果不保留旧图片，先显示加载状态
-    if (!keepOldImage) {
-      setState(() {
-        _isLoading = true;
-        _hasError = false;
-      });
-    }
-
-    // ✅ 1. 先检查内存缓存
+    // ✅ 1. 先检查内存缓存（无需淡入）
     final memoryCached = _ImageCache.getFromMemory(widget.imageUrl);
     if (memoryCached != null) {
       _log('✅ Image from memory cache: ${widget.imageUrl}');
       if (mounted && _currentUrl == widget.imageUrl) {
         setState(() {
           _image = memoryCached;
+          _shouldFadeIn = false; // 缓存图片不需要淡入
           _isLoading = false;
           _hasError = false;
         });
@@ -242,19 +314,28 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       return;
     }
 
-    // ✅ 2. 检查持久化缓存
+    // ✅ 2. 检查持久化缓存（无需淡入）
     final diskCached = await _ImageCache.getFromDisk(widget.imageUrl);
     if (diskCached != null) {
       _log('✅ Image from disk cache: ${widget.imageUrl}');
       if (mounted && _currentUrl == widget.imageUrl) {
         setState(() {
           _image = diskCached;
+          _shouldFadeIn = false; // 缓存图片不需要淡入
           _isLoading = false;
           _hasError = false;
         });
         widget.onImageReady?.call(diskCached);
       }
       return;
+    }
+
+    // 缓存未命中，需要从网络加载，显示加载状态
+    if (!keepOldImage && mounted) {
+      setState(() {
+        _isLoading = true;
+        _hasError = false;
+      });
     }
 
     // ✅ 3. 检查是否正在加载（避免重复请求）
@@ -318,6 +399,7 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       if (mounted && _currentUrl == widget.imageUrl) {
         setState(() {
           _image = image;
+          _shouldFadeIn = true; // 网络加载的图片需要淡入效果
           _isLoading = false;
           _hasError = false;
         });
@@ -405,17 +487,39 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
 
   @override
   Widget build(BuildContext context) {
-    // 如果有图片，直接显示（即使正在加载新图片）
+    Widget child;
+
+    // 如果有图片，根据是否需要淡入效果来显示
     if (_image != null) {
-      return RawImage(
+      final imageWidget = RawImage(
         image: _image,
         fit: widget.fit,
       );
+      
+      // 如果需要淡入效果（网络加载的图片）
+      if (_shouldFadeIn) {
+        child = AnimatedOpacity(
+          opacity: 1.0,
+          duration: widget.fadeDuration,
+          curve: Curves.easeIn,
+          child: imageWidget,
+          onEnd: () {
+            // 动画结束后重置标志，避免下次更新时再次淡入
+            if (mounted) {
+              setState(() {
+                _shouldFadeIn = false;
+              });
+            }
+          },
+        );
+      } else {
+        // 缓存图片直接显示，无需动画
+        child = imageWidget;
+      }
     }
-
     // 如果加载失败，显示错误占位符
-    if (_hasError) {
-      return widget.placeholder ??
+    else if (_hasError) {
+      child = widget.placeholder ??
           Container(
             color: CupertinoColors.systemGrey6,
             child: const Center(
@@ -427,14 +531,25 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
             ),
           );
     }
-
-    // 正在加载且没有旧图片，显示骨架屏
-    if (_isLoading) {
-      return const _ShimmerPlaceholder();
+    // 正在加载且没有旧图片，显示呼吸占位图
+    else if (_isLoading) {
+      child = const _ShimmerPlaceholder();
+    }
+    // 默认透明占位符（未开始加载）
+    else {
+      child = Container(color: Colors.transparent);
     }
 
-    // 默认占位符
-    return const _ShimmerPlaceholder();
+    // 如果启用懒加载，使用 VisibilityDetector 包裹
+    if (widget.enableLazyLoad) {
+      return VisibilityDetector(
+        key: Key('image_${widget.imageUrl}'),
+        onVisibilityChanged: _onVisibilityChanged,
+        child: child,
+      );
+    }
+
+    return child;
   }
 
   @override
@@ -467,7 +582,8 @@ class _ShimmerPlaceholder extends ConsumerStatefulWidget {
   const _ShimmerPlaceholder();
 
   @override
-  ConsumerState<_ShimmerPlaceholder> createState() => _ShimmerPlaceholderState();
+  ConsumerState<_ShimmerPlaceholder> createState() =>
+      _ShimmerPlaceholderState();
 }
 
 class _ShimmerPlaceholderState extends ConsumerState<_ShimmerPlaceholder>
@@ -496,11 +612,12 @@ class _ShimmerPlaceholderState extends ConsumerState<_ShimmerPlaceholder>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
-        // 定义明显的颜色对比
+        // 深色模式：接近黑色的呼吸动画
+        // 浅色模式：浅灰色的呼吸动画
         final Color color1 =
-            isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA);
+            isDark ? const Color(0xFF0A0A0A) : const Color(0xFFE8E8E8);
         final Color color2 =
-            isDark ? const Color(0xFF48484A) : const Color(0xFFF2F2F7);
+            isDark ? const Color(0xFF1A1A1A) : const Color(0xFFF5F5F5);
 
         return Container(
           color: Color.lerp(color1, color2, _controller.value),

@@ -1586,11 +1586,6 @@ class _QualityListState extends State<_QualityList> {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ 调试：打印分辨率选项数量
-    print(
-        '🎬 [QualityList] qualityOptions count: ${widget.state.qualityOptions.length}');
-    print('🎬 [QualityList] qualityOptions: ${widget.state.qualityOptions}');
-
     // ✅ 构建选项列表：自动 + 所有可选分辨率
     final options = [
       {'label': '自动', 'value': null}, // ✅ null 表示自动
@@ -1599,8 +1594,6 @@ class _QualityListState extends State<_QualityList> {
             'value': q['label'] as String,
           }),
     ];
-
-    print('🎬 [QualityList] Total options count: ${options.length}');
 
     return Positioned(
       top: 80, // ✅ 在顶部按钮下方（与视频裁切提示对齐）
