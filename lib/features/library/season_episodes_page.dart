@@ -618,7 +618,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                 backdropUrl = api.buildImageUrl(
                   itemId: season.id!,
                   type: 'Backdrop',
-                  maxWidth: 1200,
+                  maxWidth: 1920,
                 );
               }
 
@@ -632,7 +632,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                       backdropUrl = api.buildImageUrl(
                         itemId: widget.seriesId,
                         type: 'Backdrop',
-                        maxWidth: 1200,
+                        maxWidth: 1920,
                       );
                     }
                     if (backdropUrl == null || (backdropUrl?.isEmpty ?? true)) {
@@ -1066,12 +1066,12 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
     );
   }
 
-  void _handlePlay(
+  Future<void> _handlePlay(
     BuildContext context,
     String itemId, {
     required bool fromBeginning,
     int? resumePositionTicks,
-  }) {
+  }) async {
     final params = <String, String>{};
     if (fromBeginning) {
       params['fromStart'] = 'true';
@@ -1082,7 +1082,79 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
       path: '/player/$itemId',
       queryParameters: params.isEmpty ? null : params,
     ).toString();
-    context.push(route);
+    
+    // ✅ 获取季和剧集信息并传递给播放器页面，避免重复请求背景图
+    final seasonAsync = ref.read(seasonProvider((widget.seriesId, widget.seasonId)));
+    final season = seasonAsync.value;
+    final seriesAsync = ref.read(seriesProvider(widget.seriesId));
+    final series = seriesAsync.value;
+    
+    // ✅ 构建背景图 URL 并尝试从缓存获取图片对象（逻辑必须与 _buildBackdropBackground 一致）
+    String? backdropUrl;
+    ui.Image? backdropImage;
+    if (season != null) {
+      final api = await EmbyApi.create();
+      
+      // 1. 优先使用季的背景图
+      if (season.backdropImageTags?.isNotEmpty ?? false) {
+        backdropUrl = api.buildImageUrl(
+          itemId: widget.seasonId,
+          type: 'Backdrop',
+          maxWidth: 1920,
+        );
+      }
+      
+      // 2. 使用系列的背景图
+      if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
+        if ((series.backdropImageTags?.isNotEmpty ?? false) ||
+            (series.parentBackdropImageTags?.isNotEmpty ?? false)) {
+          backdropUrl = api.buildImageUrl(
+            itemId: widget.seriesId,
+            type: 'Backdrop',
+            maxWidth: 1920,
+          );
+        }
+      }
+      
+      // 3. Fallback 到系列的 Primary
+      if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
+        final primaryTag = series.imageTags?['Primary'] ?? '';
+        if (primaryTag.isNotEmpty) {
+          backdropUrl = api.buildImageUrl(
+            itemId: widget.seriesId,
+            type: 'Primary',
+            maxWidth: 800,
+          );
+        }
+      }
+      
+      // 4. Fallback 到季的 Primary
+      if (backdropUrl == null || backdropUrl.isEmpty) {
+        final seasonPrimaryTag = season.imageTags?['Primary'] ?? '';
+        if (seasonPrimaryTag.isNotEmpty) {
+          backdropUrl = api.buildImageUrl(
+            itemId: widget.seasonId,
+            type: 'Primary',
+            maxWidth: 800,
+          );
+        }
+      }
+      
+      // ✅ 尝试从缓存获取图片对象（立即显示，无需等待）
+      if (backdropUrl != null && backdropUrl.isNotEmpty) {
+        backdropImage = getCachedImage(backdropUrl);
+      }
+    }
+    
+    // ✅ 传递 extra 参数
+    context.push(
+      route,
+      extra: {
+        'seriesInfo': series,
+        'backdropUrl': backdropUrl,
+        'backdropImage': backdropImage,
+      },
+    );
   }
 
   Future<void> _handlePlayedToggle(ItemInfo season) async {
@@ -1254,7 +1326,7 @@ class _EpisodeTile extends ConsumerWidget {
     return CupertinoButton(
       padding: EdgeInsets.zero,
       onPressed: episode.id != null && episode.id!.isNotEmpty
-          ? () => context.push('/player/${episode.id}')
+          ? () => _handleEpisodePlay(context, ref, episode)
           : null,
       onLongPress: episode.id != null && episode.id!.isNotEmpty
           ? () => _showEpisodeOptions(context, ref, episode)
@@ -1430,6 +1502,84 @@ class _EpisodeTile extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _handleEpisodePlay(
+      BuildContext context, WidgetRef ref, ItemInfo episode) async {
+    if (episode.id == null || episode.id!.isEmpty) return;
+    
+    // ✅ 获取季和剧集信息并传递给播放器页面，避免重复请求背景图
+    final seasonAsync = ref.read(seasonProvider((seriesId, seasonId)));
+    final season = seasonAsync.value;
+    final seriesAsync = ref.read(seriesProvider(seriesId));
+    final series = seriesAsync.value;
+    
+    // ✅ 构建背景图 URL 并尝试从缓存获取图片对象（逻辑必须与 _buildBackdropBackground 一致）
+    String? backdropUrl;
+    ui.Image? backdropImage;
+    if (season != null) {
+      final api = await EmbyApi.create();
+      
+      // 1. 优先使用季的背景图
+      if (season.backdropImageTags?.isNotEmpty ?? false) {
+        backdropUrl = api.buildImageUrl(
+          itemId: seasonId,
+          type: 'Backdrop',
+          maxWidth: 1920,
+        );
+      }
+      
+      // 2. 使用系列的背景图
+      if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
+        if ((series.backdropImageTags?.isNotEmpty ?? false) ||
+            (series.parentBackdropImageTags?.isNotEmpty ?? false)) {
+          backdropUrl = api.buildImageUrl(
+            itemId: seriesId,
+            type: 'Backdrop',
+            maxWidth: 1920,
+          );
+        }
+      }
+      
+      // 3. Fallback 到系列的 Primary
+      if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
+        final primaryTag = series.imageTags?['Primary'] ?? '';
+        if (primaryTag.isNotEmpty) {
+          backdropUrl = api.buildImageUrl(
+            itemId: seriesId,
+            type: 'Primary',
+            maxWidth: 800,
+          );
+        }
+      }
+      
+      // 4. Fallback 到季的 Primary
+      if (backdropUrl == null || backdropUrl.isEmpty) {
+        final seasonPrimaryTag = season.imageTags?['Primary'] ?? '';
+        if (seasonPrimaryTag.isNotEmpty) {
+          backdropUrl = api.buildImageUrl(
+            itemId: seasonId,
+            type: 'Primary',
+            maxWidth: 800,
+          );
+        }
+      }
+      
+      // ✅ 尝试从缓存获取图片对象（立即显示，无需等待）
+      if (backdropUrl != null && backdropUrl.isNotEmpty) {
+        backdropImage = getCachedImage(backdropUrl);
+      }
+    }
+    
+    // ✅ 传递 extra 参数
+    context.push(
+      '/player/${episode.id}',
+      extra: {
+        'seriesInfo': series,
+        'backdropUrl': backdropUrl,
+        'backdropImage': backdropImage,
+      },
     );
   }
 

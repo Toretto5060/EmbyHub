@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
-import 'dart:ui';
+import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
@@ -14,6 +14,7 @@ import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../utils/status_bar_manager.dart';
 import '../../utils/theme_utils.dart';
+import '../../widgets/fade_in_image.dart';
 import 'custom_subtitle_overlay.dart';
 import 'exoplayer_texture_controller.dart';
 import 'player_controls.dart';
@@ -35,6 +36,7 @@ class PlayerPage extends ConsumerStatefulWidget {
     this.itemInfo, // ✅ 可选的 ItemInfo，避免重复请求
     this.logoUrl, // ✅ 可选的 Logo URL，避免重复请求
     this.backdropUrl, // ✅ 可选的背景图 URL，避免重复请求
+    this.backdropImage, // ✅ 可选的背景图对象，立即显示
     this.seriesInfo, // ✅ 可选的 Series 信息（用于 Episode）
     super.key,
   });
@@ -43,6 +45,7 @@ class PlayerPage extends ConsumerStatefulWidget {
   final ItemInfo? itemInfo; // ✅ 从上一页传入的 ItemInfo
   final String? logoUrl; // ✅ 从上一页传入的 Logo URL
   final String? backdropUrl; // ✅ 从上一页传入的背景图 URL
+  final ui.Image? backdropImage; // ✅ 从上一页传入的背景图对象（立即显示）
   final ItemInfo? seriesInfo; // ✅ 从上一页传入的 Series 信息
 
   @override
@@ -245,6 +248,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     // ✅ 保存当前itemId
     _currentItemId = widget.itemId;
+
+    // ✅ 如果从上一页传入了 ItemInfo，立即设置（用于显示背景图）
+    if (widget.itemInfo != null) {
+      _itemDetails = widget.itemInfo;
+      _itemType = widget.itemInfo!.type;
+      _videoTitle = widget.itemInfo!.name ?? 'Video';
+    }
+
+    // ✅ 如果从上一页传入了 Logo URL，立即设置
+    if (widget.logoUrl != null) {
+      _logoUrl = widget.logoUrl;
+    }
 
     // ✅ 在页面初始化时立即获取并保存原始亮度（在系统可能调整亮度之前）
     // 这样即使系统在进入全屏时自动调整了亮度，我们也能恢复正确的原始亮度
@@ -669,22 +684,32 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       if (widget.itemInfo != null) {
         _playerLog('✅ [Player] Using cached ItemInfo, skip getItem request');
         itemDetails = widget.itemInfo;
+      } else if (_itemDetails != null) {
+        // 如果 initState 中已经设置了（从 widget.itemInfo），就使用现有的
+        _playerLog('✅ [Player] Using ItemInfo from initState');
+        itemDetails = _itemDetails;
       } else {
         itemDetails = _userId != null
             ? await api.getItem(_userId!, _currentItemId)
             : null;
       }
-      _videoTitle = itemDetails?.name ?? 'Video';
+      
+      // ✅ 更新标题（如果还没有设置）
+      if (_videoTitle.isEmpty || _videoTitle == 'Video') {
+        _videoTitle = itemDetails?.name ?? 'Video';
+      }
 
-      // ✅ 更新 itemDetails 并触发 UI 刷新（显示背景图）
-      if (mounted) {
-        setState(() {
+      // ✅ 更新 itemDetails 并触发 UI 刷新（如果还没有设置）
+      if (_itemDetails == null && itemDetails != null) {
+        if (mounted) {
+          setState(() {
+            _itemDetails = itemDetails;
+            _itemType = itemDetails?.type;
+          });
+        } else {
           _itemDetails = itemDetails;
           _itemType = itemDetails?.type;
-        });
-      } else {
-        _itemDetails = itemDetails;
-        _itemType = itemDetails?.type;
+        }
       }
 
       // ✅ 获取Logo URL（优先使用传入的，避免重复请求）
@@ -2149,7 +2174,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return Container(color: Colors.black);
     }
 
-    // ✅ 使用 FutureBuilder 等待 API 初始化
+    // ✅ 优先使用传递的图片对象，立即显示（无需等待加载）
+    if (widget.backdropImage != null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          RawImage(
+            image: widget.backdropImage,
+            fit: BoxFit.cover,
+          ),
+          Container(
+            color: Colors.black.withOpacity(0.75),
+          ),
+        ],
+      );
+    }
+
+    // ✅ 如果传递了背景图 URL，直接显示，不需要等待 API 初始化
+    if (widget.backdropUrl != null && widget.backdropUrl!.isNotEmpty) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          EmbyFadeInImage(
+            imageUrl: widget.backdropUrl!,
+            fit: BoxFit.cover,
+            placeholder: Container(color: Colors.black),
+          ),
+          Container(
+            color: Colors.black.withOpacity(0.75),
+          ),
+        ],
+      );
+    }
+
+    // ✅ 如果没有传递背景图 URL，使用 FutureBuilder 等待 API 初始化
     return FutureBuilder<EmbyApi>(
       future: EmbyApi.create(),
       builder: (context, snapshot) {
@@ -2159,13 +2217,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
         final api = snapshot.data!;
         String? backdropUrl;
-
-        // ✅ 优先使用传入的背景图 URL，避免重复计算
-        if (widget.backdropUrl != null) {
-          backdropUrl = widget.backdropUrl;
-        }
         // ✅ 先检查是否有 Backdrop 标签，避免生成无效的 URL（404）
-        else if (_itemDetails != null) {
+        if (_itemDetails != null) {
           // ✅ 对于Episode类型，优先使用父项（Series）的背景图
           if (_itemDetails!.type == 'Episode') {
             // 1. 尝试使用父项的背景图（Series的Backdrop）
@@ -2238,23 +2291,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         return Stack(
           fit: StackFit.expand,
           children: [
-            // ✅ 背景图
-            Image.network(
-              backdropUrl,
+            // ✅ 背景图（使用 EmbyFadeInImage 以支持缓存）
+            EmbyFadeInImage(
+              imageUrl: backdropUrl,
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                return Container(color: Colors.black);
-              },
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) {
-                  return child;
-                }
-                return Container(color: Colors.black);
-              },
+              placeholder: Container(color: Colors.black),
             ),
             // ✅ 半透明黑色遮罩，避免背景图太亮（增加透明度到0.6）
             Container(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withOpacity(0.75),
             ),
           ],
         );
@@ -3301,7 +3346,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(16),
                     child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                      filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                       child: Container(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
@@ -3499,7 +3544,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(16),
                     child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                      filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                       child: Container(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(

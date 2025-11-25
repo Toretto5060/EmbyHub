@@ -183,10 +183,19 @@ GoRouter createRouter() {
           final fromStart = params['fromStart'] == 'true';
           final positionTicks = int.tryParse(params['positionTicks'] ?? '');
           final initialTicks = fromStart ? 0 : (positionTicks ?? 0);
+          
+          // ✅ 从 extra 中获取传递的参数（如果有）
+          final extra = state.extra as Map<String, dynamic>?;
+          
           return buildCupertinoPage(
             child: PlayerPage(
               itemId: itemId,
               initialPositionTicks: initialTicks > 0 ? initialTicks : null,
+              itemInfo: extra?['itemInfo'],
+              logoUrl: extra?['logoUrl'],
+              backdropUrl: extra?['backdropUrl'],
+              backdropImage: extra?['backdropImage'],
+              seriesInfo: extra?['seriesInfo'],
             ),
             state: state,
           );

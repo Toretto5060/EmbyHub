@@ -761,7 +761,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                 backdropUrl = api.buildImageUrl(
                   itemId: item.id!,
                   type: 'Backdrop',
-                  maxWidth: 1200,
+                  maxWidth: 1920,
                 );
               }
 
@@ -2009,7 +2009,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     String itemId, {
     required bool fromBeginning,
     int? resumePositionTicks,
-  }) {
+  }) async {
     final params = <String, String>{};
     if (fromBeginning) {
       params['fromStart'] = 'true';
@@ -2020,7 +2020,54 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       path: '/player/$itemId',
       queryParameters: params.isEmpty ? null : params,
     ).toString();
-    context.push(route);
+    
+    // ✅ 获取当前 item 信息并传递给播放器页面
+    final itemAsync = ref.read(itemProvider(widget.itemId));
+    final item = itemAsync.value;
+    
+    // ✅ 构建背景图 URL 并尝试从缓存获取图片对象（逻辑必须与 _buildBackdropBackground 一致）
+    String? backdropUrl;
+    ui.Image? backdropImage;
+    if (item != null) {
+      final api = await EmbyApi.create();
+      
+      // 优先使用 Backdrop
+      if ((item.backdropImageTags?.isNotEmpty ?? false) ||
+          (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+        backdropUrl = api.buildImageUrl(
+          itemId: itemId,
+          type: 'Backdrop',
+          maxWidth: 1920,
+        );
+      }
+      
+      // Fallback 到 Primary（与详情页显示逻辑一致）
+      if (backdropUrl == null || backdropUrl.isEmpty) {
+        final primaryTag = item.imageTags?['Primary'] ?? '';
+        if (primaryTag.isNotEmpty) {
+          backdropUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Primary',
+            maxWidth: 800,
+          );
+        }
+      }
+      
+      // ✅ 尝试从缓存获取图片对象（立即显示，无需等待）
+      if (backdropUrl != null && backdropUrl.isNotEmpty) {
+        backdropImage = getCachedImage(backdropUrl);
+      }
+    }
+    
+    // ✅ 传递 extra 参数
+    context.push(
+      route,
+      extra: {
+        'itemInfo': item,
+        'backdropUrl': backdropUrl,
+        'backdropImage': backdropImage,
+      },
+    );
   }
 
   /// 处理收藏切换

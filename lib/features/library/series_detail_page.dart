@@ -794,7 +794,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                 backdropUrl = api.buildImageUrl(
                   itemId: item.id!,
                   type: 'Backdrop',
-                  maxWidth: 1200,
+                  maxWidth: 1920,
                 );
               }
 
@@ -1600,12 +1600,12 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     _modalRoute = null;
   }
 
-  void _handlePlay(
+  Future<void> _handlePlay(
     BuildContext context,
     String itemId, {
     required bool fromBeginning,
     int? resumePositionTicks,
-  }) {
+  }) async {
     final params = <String, String>{};
     if (fromBeginning) {
       params['fromStart'] = 'true';
@@ -1616,7 +1616,60 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
       path: '/player/$itemId',
       queryParameters: params.isEmpty ? null : params,
     ).toString();
-    context.push(route);
+    
+    // ✅ 获取当前剧集信息并传递给播放器页面，避免重复请求背景图
+    final seriesAsync = ref.read(seriesProvider(widget.seriesId));
+    final series = seriesAsync.value;
+    
+    // ✅ 构建背景图 URL 并尝试从缓存获取图片对象（逻辑必须与 _buildBackdropBackground 一致）
+    String? backdropUrl;
+    ui.Image? backdropImage;
+    if (series != null) {
+      final api = await EmbyApi.create();
+      
+      // 优先使用 Backdrop
+      if (series.backdropImageTags?.isNotEmpty ?? false) {
+        backdropUrl = api.buildImageUrl(
+          itemId: widget.seriesId,
+          type: 'Backdrop',
+          maxWidth: 1920,
+          tag: series.backdropImageTags!.first,
+        );
+      } else if (series.parentBackdropImageTags?.isNotEmpty ?? false) {
+        backdropUrl = api.buildImageUrl(
+          itemId: widget.seriesId,
+          type: 'Backdrop',
+          maxWidth: 1920,
+        );
+      }
+      
+      // Fallback 到 Primary（与详情页显示逻辑一致）
+      if (backdropUrl == null || backdropUrl.isEmpty) {
+        final primaryTag = series.imageTags?['Primary'] ?? '';
+        if (primaryTag.isNotEmpty) {
+          backdropUrl = api.buildImageUrl(
+            itemId: widget.seriesId,
+            type: 'Primary',
+            maxWidth: 800,
+          );
+        }
+      }
+      
+      // ✅ 尝试从缓存获取图片对象（立即显示，无需等待）
+      if (backdropUrl != null) {
+        backdropImage = getCachedImage(backdropUrl);
+      }
+    }
+    
+    // ✅ 传递 extra 参数
+    context.push(
+      route,
+      extra: {
+        'seriesInfo': series,
+        'backdropUrl': backdropUrl,
+        'backdropImage': backdropImage,
+      },
+    );
   }
 
   /// 处理收藏切换

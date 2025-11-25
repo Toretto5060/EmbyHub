@@ -626,3 +626,9 @@ class _ShimmerPlaceholderState extends ConsumerState<_ShimmerPlaceholder>
     );
   }
 }
+
+/// ✅ 公共方法：从内存缓存获取图片
+/// 用于在导航到播放器页面时传递已缓存的图片对象，实现立即显示
+ui.Image? getCachedImage(String url) {
+  return _ImageCache.getFromMemory(url);
+}
