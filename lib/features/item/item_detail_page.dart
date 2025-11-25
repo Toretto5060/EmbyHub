@@ -654,28 +654,6 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                                       data.imageTags?['Logo'] != null &&
                                           data.imageTags!['Logo']!.isNotEmpty;
 
-                                  // ✅ 展开状态（t < 0.5）：如果有 Logo 显示 Logo，否则显示文字
-                                  // ✅ 折叠状态（t >= 0.5）：始终显示文字标题
-                                  Widget titleWidget;
-                                  if (t < 0.5 && hasLogo) {
-                                    // 展开时显示 Logo
-                                    titleWidget = _buildExpandedLogo(data, t);
-                                  } else {
-                                    // 折叠时或没有 Logo 时显示文字
-                                    titleWidget = Text(
-                                      data.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.left, // 明确指定居左对齐
-                                      style: TextStyle(
-                                        fontSize: fontSize,
-                                        fontWeight: FontWeight.w700,
-                                        color: titleColor,
-                                        height: 1.2,
-                                      ),
-                                    );
-                                  }
-
                                   return Container(
                                     alignment: Alignment.bottomLeft,
                                     padding: EdgeInsets.only(
@@ -683,7 +661,22 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                                       right: 20, // 右侧也保持20的边距，让文字铺满屏幕
                                       bottom: bottomPadding,
                                     ),
-                                    child: titleWidget,
+                                    child: hasLogo
+                                        ? _buildLogoToTextTransition(
+                                            data, t, fontSize, titleColor)
+                                        : Text(
+                                            data.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign:
+                                                TextAlign.left, // 明确指定居左对齐
+                                            style: TextStyle(
+                                              fontSize: fontSize,
+                                              fontWeight: FontWeight.w700,
+                                              color: titleColor,
+                                              height: 1.2,
+                                            ),
+                                          ),
                                   );
                                 },
                               ),
@@ -874,18 +867,41 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     return brightness == Brightness.dark ? _lightStatusBar : _darkStatusBar;
   }
 
-  /// ✅ 构建展开状态的 Logo（底部左侧位置）
-  Widget _buildExpandedLogo(ItemInfo data, double collapseProgress) {
+  /// ✅ 构建 Logo 到文字的酷炫过渡效果
+  Widget _buildLogoToTextTransition(
+      ItemInfo data, double t, double fontSize, Color titleColor) {
     final logoTag = data.imageTags?['Logo'];
     if (logoTag == null || logoTag.isEmpty || data.id == null) {
-      return const SizedBox.shrink();
+      return Text(
+        data.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.left,
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: FontWeight.w700,
+          color: titleColor,
+          height: 1.2,
+        ),
+      );
     }
 
     return FutureBuilder<EmbyApi>(
       future: EmbyApi.create(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const SizedBox.shrink();
+          return Text(
+            data.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.left,
+            style: TextStyle(
+              fontSize: fontSize,
+              fontWeight: FontWeight.w700,
+              color: titleColor,
+              height: 1.2,
+            ),
+          );
         }
         final api = snapshot.data!;
         final logoUrl = api.buildImageUrl(
@@ -895,22 +911,78 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
           maxWidth: 600,
         );
         if (logoUrl.isEmpty) {
-          return const SizedBox.shrink();
+          return Text(
+            data.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.left,
+            style: TextStyle(
+              fontSize: fontSize,
+              fontWeight: FontWeight.w700,
+              color: titleColor,
+              height: 1.2,
+            ),
+          );
         }
 
-        // ✅ Logo 高度：展开时较大，折叠时缩小（但在 t=0.5 时切换到文字）
-        final logoHeight = 60.0 * (1.0 - collapseProgress * 2);
+        // ✅ 过渡进度：0.0 = 完全展开(Logo)，1.0 = 完全折叠(文字)
+        // 在 t=0.3 到 t=0.7 之间进行过渡
+        final transitionStart = 0.3;
+        final transitionEnd = 0.7;
+        final transitionProgress =
+            ((t - transitionStart) / (transitionEnd - transitionStart))
+                .clamp(0.0, 1.0);
 
-        return Opacity(
-          opacity: (1.0 - collapseProgress * 2).clamp(0.0, 1.0),
-          child: SizedBox(
-            height: logoHeight.clamp(0.0, 60.0),
-            child: EmbyFadeInImage(
-              key: ValueKey('logo_${data.id}_$logoUrl'),
-              imageUrl: logoUrl,
-              fit: BoxFit.contain,
-            ),
-          ),
+        // ✅ Logo 的透明度和缩放（淡出 + 缩小）
+        final logoOpacity = (1.0 - transitionProgress).clamp(0.0, 1.0);
+        final logoScale = (1.0 - transitionProgress * 0.3).clamp(0.7, 1.0);
+        final logoHeight = 60.0 * logoScale;
+
+        // ✅ 文字的透明度和位移（从下方淡入 + 上移）
+        final textOpacity = transitionProgress.clamp(0.0, 1.0);
+        final textOffset = 10.0 * (1.0 - transitionProgress);
+
+        return Stack(
+          alignment: Alignment.bottomLeft,
+          children: [
+            // ✅ Logo 层（淡出 + 缩小）
+            if (logoOpacity > 0.01)
+              Opacity(
+                opacity: logoOpacity,
+                child: Transform.scale(
+                  scale: logoScale,
+                  alignment: Alignment.bottomLeft,
+                  child: SizedBox(
+                    height: logoHeight.clamp(0.0, 60.0),
+                    child: EmbyFadeInImage(
+                      key: ValueKey('logo_${data.id}_$logoUrl'),
+                      imageUrl: logoUrl,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ),
+            // ✅ 文字层（从下方淡入 + 上移）
+            if (textOpacity > 0.01)
+              Transform.translate(
+                offset: Offset(0, textOffset),
+                child: Opacity(
+                  opacity: textOpacity,
+                  child: Text(
+                    data.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.left,
+                    style: TextStyle(
+                      fontSize: fontSize,
+                      fontWeight: FontWeight.w700,
+                      color: titleColor,
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+              ),
+          ],
         );
       },
     );
