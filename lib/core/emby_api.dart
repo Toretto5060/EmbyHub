@@ -1444,19 +1444,330 @@ class EmbyApi {
     }
   }
 
+  // ✅ 获取设备配置文件（DeviceProfile）
+  static Map<String, dynamic> _getDeviceProfile() {
+    return {
+      "MaxStaticBitrate": 200000000,
+      "MaxStreamingBitrate": 200000000,
+      "MusicStreamingTranscodingBitrate": 192000,
+      "DirectPlayProfiles": [
+        {
+          "Container": "mp4,m4v",
+          "Type": "Video",
+          "VideoCodec": "h264,hevc,av1,vp8,vp9",
+          "AudioCodec": "mp3,aac,opus,flac,vorbis"
+        },
+        {
+          "Container": "mkv",
+          "Type": "Video",
+          "VideoCodec": "h264,hevc,av1,vp8,vp9",
+          "AudioCodec": "mp3,aac,opus,flac,vorbis"
+        },
+        {
+          "Container": "flv",
+          "Type": "Video",
+          "VideoCodec": "h264",
+          "AudioCodec": "aac,mp3"
+        },
+        {
+          "Container": "3gp",
+          "Type": "Video",
+          "VideoCodec": "",
+          "AudioCodec": "mp3,aac,opus,flac,vorbis"
+        },
+        {
+          "Container": "mov",
+          "Type": "Video",
+          "VideoCodec": "h264",
+          "AudioCodec": "mp3,aac,opus,flac,vorbis"
+        },
+        {"Container": "opus", "Type": "Audio"},
+        {"Container": "mp3", "Type": "Audio", "AudioCodec": "mp3"},
+        {"Container": "mp2,mp3", "Type": "Audio", "AudioCodec": "mp2"},
+        {"Container": "aac", "Type": "Audio", "AudioCodec": "aac"},
+        {"Container": "m4a", "AudioCodec": "aac", "Type": "Audio"},
+        {"Container": "mp4", "AudioCodec": "aac", "Type": "Audio"},
+        {"Container": "flac", "Type": "Audio"},
+        {"Container": "webma,webm", "Type": "Audio"},
+        {
+          "Container": "wav",
+          "Type": "Audio",
+          "AudioCodec": "PCM_S16LE,PCM_S24LE"
+        },
+        {"Container": "ogg", "Type": "Audio"},
+        {
+          "Container": "webm",
+          "Type": "Video",
+          "AudioCodec": "vorbis,opus",
+          "VideoCodec": "av1,VP8,VP9"
+        }
+      ],
+      "TranscodingProfiles": [
+        {
+          "Container": "aac",
+          "Type": "Audio",
+          "AudioCodec": "aac",
+          "Context": "Streaming",
+          "Protocol": "hls",
+          "MaxAudioChannels": "2",
+          "MinSegments": "1",
+          "BreakOnNonKeyFrames": false
+        },
+        {
+          "Container": "aac",
+          "Type": "Audio",
+          "AudioCodec": "aac",
+          "Context": "Streaming",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "mp3",
+          "Type": "Audio",
+          "AudioCodec": "mp3",
+          "Context": "Streaming",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "opus",
+          "Type": "Audio",
+          "AudioCodec": "opus",
+          "Context": "Streaming",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "wav",
+          "Type": "Audio",
+          "AudioCodec": "wav",
+          "Context": "Streaming",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "opus",
+          "Type": "Audio",
+          "AudioCodec": "opus",
+          "Context": "Static",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "mp3",
+          "Type": "Audio",
+          "AudioCodec": "mp3",
+          "Context": "Static",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "aac",
+          "Type": "Audio",
+          "AudioCodec": "aac",
+          "Context": "Static",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "wav",
+          "Type": "Audio",
+          "AudioCodec": "wav",
+          "Context": "Static",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "mkv",
+          "Type": "Video",
+          "AudioCodec": "mp3,aac,opus,flac,vorbis",
+          "VideoCodec": "h264,hevc,av1,vp8,vp9",
+          "Context": "Static",
+          "MaxAudioChannels": "2",
+          "CopyTimestamps": true
+        },
+        {
+          "Container": "ts",
+          "Type": "Video",
+          "AudioCodec": "mp3,aac",
+          "VideoCodec": "hevc,h264,av1",
+          "Context": "Streaming",
+          "Protocol": "hls",
+          "MaxAudioChannels": "2",
+          "MinSegments": "1",
+          "BreakOnNonKeyFrames": false,
+          "ManifestSubtitles": "vtt"
+        },
+        {
+          "Container": "webm",
+          "Type": "Video",
+          "AudioCodec": "vorbis",
+          "VideoCodec": "vpx",
+          "Context": "Streaming",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "mp4",
+          "Type": "Video",
+          "AudioCodec": "mp3,aac,opus,flac,vorbis",
+          "VideoCodec": "h264",
+          "Context": "Static",
+          "Protocol": "http"
+        }
+      ],
+      "ContainerProfiles": [],
+      "CodecProfiles": [
+        {
+          "Type": "VideoAudio",
+          "Codec": "aac",
+          "Conditions": [
+            {
+              "Condition": "Equals",
+              "Property": "IsSecondaryAudio",
+              "Value": "false",
+              "IsRequired": "false"
+            }
+          ]
+        },
+        {
+          "Type": "VideoAudio",
+          "Codec": "flac",
+          "Conditions": [
+            {
+              "Condition": "Equals",
+              "Property": "IsSecondaryAudio",
+              "Value": "false",
+              "IsRequired": "false"
+            }
+          ]
+        },
+        {
+          "Type": "VideoAudio",
+          "Codec": "vorbis",
+          "Conditions": [
+            {
+              "Condition": "Equals",
+              "Property": "IsSecondaryAudio",
+              "Value": "false",
+              "IsRequired": "false"
+            }
+          ]
+        },
+        {
+          "Type": "VideoAudio",
+          "Conditions": [
+            {
+              "Condition": "Equals",
+              "Property": "IsSecondaryAudio",
+              "Value": "false",
+              "IsRequired": "false"
+            }
+          ]
+        },
+        {
+          "Type": "Video",
+          "Codec": "h264",
+          "Conditions": [
+            {
+              "Condition": "EqualsAny",
+              "Property": "VideoProfile",
+              "Value": "high|main|baseline|constrained baseline|high 10",
+              "IsRequired": false
+            },
+            {
+              "Condition": "LessThanEqual",
+              "Property": "VideoLevel",
+              "Value": "62",
+              "IsRequired": false
+            }
+          ]
+        },
+        {
+          "Type": "Video",
+          "Codec": "hevc",
+          "Conditions": [
+            {
+              "Condition": "EqualsAny",
+              "Property": "VideoCodecTag",
+              "Value": "hvc1|hev1|hevc|hdmv",
+              "IsRequired": false
+            }
+          ]
+        }
+      ],
+      "SubtitleProfiles": [
+        {"Format": "vtt", "Method": "Hls"},
+        {
+          "Format": "eia_608",
+          "Method": "VideoSideData",
+          "Protocol": "hls"
+        },
+        {
+          "Format": "eia_708",
+          "Method": "VideoSideData",
+          "Protocol": "hls"
+        },
+        {
+          "Format": "vtt",
+          "Method": "External",
+          "AllowChunkedResponse": true
+        },
+        {"Format": "ass", "Method": "External"},
+        {"Format": "ssa", "Method": "External"}
+      ],
+      "ResponseProfiles": [
+        {"Type": "Video", "Container": "m4v", "MimeType": "video/mp4"}
+      ]
+    };
+  }
+
   // ✅ 获取播放信息（PlaybackInfo），包含正确的字幕流信息
   Future<Map<String, dynamic>> getPlaybackInfo({
     required String itemId,
     required String userId,
+    int? startTimeTicks,
+    bool isPlayback = true,
+    bool autoOpenLiveStream = true,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+    String? mediaSourceId,
+    int? maxStreamingBitrate,
   }) async {
     try {
-      final res =
-          await _dio.get('/Items/$itemId/PlaybackInfo', queryParameters: {
+      final queryParams = <String, dynamic>{
         'UserId': userId,
-        'StartTimeTicks': '0', // ✅ 添加开始时间参数
-        'IsPlayback': 'true', // ✅ 标记为播放请求
-        'AutoOpenLiveStream': 'true', // ✅ 自动打开直播流
-      });
+        'StartTimeTicks': startTimeTicks?.toString() ?? '0',
+        'IsPlayback': isPlayback.toString(),
+        'AutoOpenLiveStream': autoOpenLiveStream.toString(),
+      };
+
+      if (audioStreamIndex != null && audioStreamIndex >= 0) {
+        queryParams['AudioStreamIndex'] = audioStreamIndex.toString();
+      }
+      if (subtitleStreamIndex != null && subtitleStreamIndex >= 0) {
+        queryParams['SubtitleStreamIndex'] = subtitleStreamIndex.toString();
+      }
+      if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+        queryParams['MediaSourceId'] = mediaSourceId;
+      }
+      if (maxStreamingBitrate != null && maxStreamingBitrate > 0) {
+        queryParams['MaxStreamingBitrate'] = maxStreamingBitrate.toString();
+      }
+
+      final payload = {
+        'DeviceProfile': _getDeviceProfile(),
+      };
+
+      final res = await _dio.post(
+        '/Items/$itemId/PlaybackInfo',
+        queryParameters: queryParams,
+        data: payload,
+        options: dio.Options(
+          contentType: 'application/json',
+        ),
+      );
+      
       return res.data as Map<String, dynamic>;
     } catch (e) {
       _apiLog('❌ [API] Get PlaybackInfo failed: $e');
@@ -1510,7 +1821,7 @@ class EmbyApi {
     return urls;
   }
 
-  // Prefer HLS master for adaptive bitrate
+  // ✅ 构建播放 URL（使用正确的 Emby 播放流程）
   Future<MediaSourceUrl> buildHlsUrl(
     String itemId, {
     int? audioStreamIndex,
@@ -1518,6 +1829,7 @@ class EmbyApi {
     int? maxWidth,
     int? maxHeight,
     int? maxBitrate,
+    int? startTimeTicks,
   }) async {
     // ✅ 从 SharedPreferences 获取 token（因为 dio headers 是在拦截器中动态设置的）
     final prefs = await sp.SharedPreferences.getInstance();
@@ -1528,13 +1840,13 @@ class EmbyApi {
       throw Exception('User ID is empty');
     }
 
-    // ✅ 先获取 item 信息（包含 MediaSources）
-    final res =
+    // ✅ 先获取 item 信息（包含 MediaSources 和 UserData）
+    final itemRes =
         await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
       'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds',
+          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,UserData',
     });
-    final itemJson = res.data as Map<String, dynamic>;
+    final itemJson = itemRes.data as Map<String, dynamic>;
 
     // ✅ 从 MediaSources 获取第一个可用的 MediaSourceId
     String mediaSourceId = itemId; // 默认使用 itemId
@@ -1557,87 +1869,117 @@ class EmbyApi {
       }
     }
 
-    // ✅ 只使用 HLS master 流（支持自适应码率）
-    String? uri;
-    String? playSessionId;
-    try {
-      // ✅ 获取 PlaybackInfo 以获取 PlaySessionId
-      final playbackInfo = await getPlaybackInfo(
-        itemId: itemId,
-        userId: userId,
-      );
-      // ✅ 从 PlaybackInfo 获取 PlaySessionId
-      playSessionId = playbackInfo['PlaySessionId'] as String?;
-      if (playSessionId == null || playSessionId.isEmpty) {
-        playSessionId = DateTime.now().millisecondsSinceEpoch.toString();
+    // ✅ 如果没有指定 startTimeTicks，从 UserData 获取播放位置
+    int effectiveStartTimeTicks = startTimeTicks ?? 0;
+    if (startTimeTicks == null) {
+      final userData = itemJson['UserData'] as Map<String, dynamic>?;
+      if (userData != null) {
+        final playbackPositionTicks =
+            (userData['PlaybackPositionTicks'] as num?)?.toInt();
+        if (playbackPositionTicks != null && playbackPositionTicks > 0) {
+          effectiveStartTimeTicks = playbackPositionTicks;
+        }
       }
-    } catch (e) {
-      _apiLog('⚠️ [API] Failed to get PlaybackInfo: $e');
+    }
+
+    // ✅ 第一次请求 PlaybackInfo（带完整参数，IsPlayback=true）
+    final playbackInfo1 = await getPlaybackInfo(
+      itemId: itemId,
+      userId: userId,
+      startTimeTicks: effectiveStartTimeTicks,
+      isPlayback: true,
+      autoOpenLiveStream: true,
+      audioStreamIndex: audioStreamIndex,
+      subtitleStreamIndex: subtitleStreamIndex,
+      mediaSourceId: mediaSourceId,
+      maxStreamingBitrate: maxBitrate,
+    );
+
+    // ✅ 从第一次响应中获取信息
+    String? playSessionId = playbackInfo1['PlaySessionId'] as String?;
+    if (playSessionId == null || playSessionId.isEmpty) {
       playSessionId = DateTime.now().millisecondsSinceEpoch.toString();
     }
 
-    // ✅ 使用 HLS master 流（支持自适应码率）
-    // 添加音频和字幕流选择参数
-    final queryParams = <String, String>{
-      'MediaSourceId': mediaSourceId,
-      'PlaySessionId': playSessionId,
-      'api_key': token,
-      // ✅ 优化：优先使用直接播放（DirectPlay），只在必要时转码
-      // 这样可以减少服务器负担，提高播放流畅度
-      'EnableAutoStreamCopy': 'true', // ✅ 允许直接复制，减少转码
-      'AllowVideoStreamCopy': 'true', // ✅ 允许视频流直接复制
-      'AllowAudioStreamCopy': 'true', // ✅ 允许音频流直接复制
-      // ✅ 只在需要转码时才使用以下参数
-      'AudioCodec': 'aac,mp3', // 支持 AAC 和 MP3
-      'TranscodingMaxAudioChannels': '6', // ✅ 支持5.1声道（之前限制为2太保守）
-    };
+    // ✅ 第二次请求 PlaybackInfo（IsPlayback=false）
+    final playbackInfo2 = await getPlaybackInfo(
+      itemId: itemId,
+      userId: userId,
+      startTimeTicks: 0,
+      isPlayback: false,
+      autoOpenLiveStream: false,
+      audioStreamIndex: audioStreamIndex,
+      subtitleStreamIndex: subtitleStreamIndex,
+      mediaSourceId: mediaSourceId,
+      maxStreamingBitrate: maxBitrate,
+    );
 
-    // ✅ 添加音频流索引（如果指定）
-    if (audioStreamIndex != null && audioStreamIndex >= 0) {
-      queryParams['AudioStreamIndex'] = audioStreamIndex.toString();
+    // ✅ 从第二次响应中获取 TranscodingUrl
+    String? playbackUrl;
+    String finalMediaSourceId = mediaSourceId; // 使用动态获取的值
+
+    if (playbackInfo2['MediaSources'] != null &&
+        playbackInfo2['MediaSources'] is List) {
+      final mediaSources = playbackInfo2['MediaSources'] as List;
+      
+      if (mediaSources.isNotEmpty) {
+        final mediaSource = mediaSources[0] as Map<String, dynamic>;
+
+        // ✅ 更新 mediaSourceId（使用服务器返回的）
+        if (mediaSource['Id'] != null) {
+          finalMediaSourceId = mediaSource['Id'] as String;
+        }
+
+        // ✅ 只使用 TranscodingUrl
+        if (mediaSource['TranscodingUrl'] != null) {
+          final transcodingUrl = mediaSource['TranscodingUrl'] as String;
+          
+          // ✅ 从 TranscodingUrl 中提取 PlaySessionId（如果存在）
+          try {
+            final uri = Uri.parse(transcodingUrl);
+            final urlPlaySessionId = uri.queryParameters['PlaySessionId'];
+            if (urlPlaySessionId != null && urlPlaySessionId.isNotEmpty) {
+              playSessionId = urlPlaySessionId;
+              _apiLog('🎬 [API] Using PlaySessionId from TranscodingUrl: $playSessionId');
+            }
+          } catch (e) {
+            _apiLog('⚠️ [API] Failed to parse TranscodingUrl: $e');
+          }
+          
+          // ✅ 拼接服务器地址
+          if (transcodingUrl.startsWith('/')) {
+            playbackUrl = '${_dio.options.baseUrl}$transcodingUrl';
+          } else {
+            playbackUrl = transcodingUrl;
+          }
+        }
+      }
     }
 
-    // ✅ 添加字幕流索引（如果指定且不是-1）
-    if (subtitleStreamIndex != null && subtitleStreamIndex >= 0) {
-      queryParams['SubtitleStreamIndex'] = subtitleStreamIndex.toString();
+    // ✅ 如果没有获取到 TranscodingUrl，抛出异常
+    if (playbackUrl == null || playbackUrl.isEmpty) {
+      _apiLog('❌ [API] No TranscodingUrl found in PlaybackInfo response');
+      throw Exception('Failed to get TranscodingUrl from server');
     }
 
-    // ✅ 添加分辨率限制参数（如果指定）
-    if (maxWidth != null && maxWidth > 0) {
-      queryParams['MaxWidth'] = maxWidth.toString();
-    }
-    if (maxHeight != null && maxHeight > 0) {
-      queryParams['MaxHeight'] = maxHeight.toString();
-    }
-    if (maxBitrate != null && maxBitrate > 0) {
-      queryParams['VideoBitrate'] = maxBitrate.toString();
-      queryParams['MaxStreamingBitrate'] = maxBitrate.toString();
-    }
-
-    // ✅ 构建完整的 URL
-    final queryString = queryParams.entries
-        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
-        .join('&');
-    uri = '${_dio.options.baseUrl}/Videos/$itemId/master.m3u8?$queryString';
-
-    // ✅ 根据 Emby 要求：
-    // - 使用 DirectStreamUrl 或 HLS 时，token 必须作为 api_key 参数在 URL 里
-    // - 播放本地文件时，token 必须在 Header 里用 X-Emby-Token
-    // 对于 HLS 流，即使 token 在 URL 中，也可能需要在 Header 中添加（某些 Emby 版本要求）
+    // ✅ 构建 headers
     final headers = <String, String>{
-      // ✅ 对于 HLS 流，同时添加 Header 中的 token（某些 Emby 版本可能需要）
-      if (uri.contains('.m3u8')) 'X-Emby-Token': token,
-      // ✅ 如果 URL 中没有 token，则在 Header 中添加（本地文件场景）
-      if (!uri.contains('api_key=')) 'X-Emby-Token': token,
+      // ✅ 对于 HLS/m3u8 流，同时添加 Header 中的 token
+      if (playbackUrl.contains('.m3u8') || playbackUrl.contains('.ts'))
+        'X-Emby-Token': token,
+      // ✅ 如果 URL 中没有 token，则在 Header 中添加
+      if (!playbackUrl.contains('api_key=')) 'X-Emby-Token': token,
     };
+
     return MediaSourceUrl(
-      uri: uri,
+      uri: playbackUrl,
       headers: headers,
       bitrate: mediaBitrate,
       width: mediaWidth,
       height: mediaHeight,
       duration: mediaDuration,
-      playSessionId: playSessionId, // ✅ 返回 PlaySessionId，用于调用 /Sessions/Playing
+      playSessionId: playSessionId,
+      mediaSourceId: finalMediaSourceId, // ✅ 返回正确的 mediaSourceId
     );
   }
 
@@ -2014,6 +2356,7 @@ class MediaSourceUrl {
     this.height,
     this.duration,
     this.playSessionId,
+    this.mediaSourceId,
   });
   final String uri;
   final Map<String, String> headers;
@@ -2022,6 +2365,7 @@ class MediaSourceUrl {
   final int? height;
   final Duration? duration;
   final String? playSessionId; // ✅ PlaySessionId，用于调用 /Sessions/Playing
+  final String? mediaSourceId; // ✅ MediaSourceId，用于调用 /Sessions/Playing
 }
 
 class ExternalUrlInfo {

@@ -576,11 +576,26 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         await _playerPause();
       }
 
+      // ✅ 获取选中的画质参数
+      Map<String, dynamic>? qualityOption;
+      if (_selectedQuality != null && _qualityOptions.isNotEmpty) {
+        qualityOption = _qualityOptions.firstWhere(
+          (q) => q['label'] == _selectedQuality,
+          orElse: () => <String, dynamic>{},
+        );
+      }
+
       // ✅ 构建新的 HLS URL
       final media = await _api!.buildHlsUrl(
         widget.itemId,
         audioStreamIndex: _selectedAudioStreamIndex,
         subtitleStreamIndex: _selectedSubtitleStreamIndex,
+        maxWidth: qualityOption?['width'] as int?,
+        maxHeight: qualityOption?['height'] as int?,
+        maxBitrate: qualityOption?['bitrate'] as int?,
+        startTimeTicks: currentPosition.inMicroseconds > 0
+            ? (currentPosition.inMicroseconds * 10).toInt()
+            : null,
       );
 
       _playerLog('🎬 [Player] New media URL: ${media.uri}');
@@ -724,9 +739,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         // ✅ 获取 PlaybackInfo 以获取正确的 MediaSourceId 和分辨率选项
         if (_userId != null) {
           try {
+            // ✅ 第一次调用只是为了获取 MediaSourceId 和视频信息，不需要完整参数
             final playbackInfo = await api.getPlaybackInfo(
               itemId: _currentItemId,
               userId: _userId!,
+              startTimeTicks: 0,
+              isPlayback: false,
+              autoOpenLiveStream: false,
             );
             _playerLog('🎬 [Player] PlaybackInfo: $playbackInfo');
 
@@ -828,20 +847,39 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // ✅ 构建 HLS URL
       // 注意：对于 HLS 流，Emby 会自动处理音频和字幕选择
       // 只有在用户手动选择时才传递参数，否则让 Emby 自动选择
+      
+      // ✅ 获取选中的画质参数
+      Map<String, dynamic>? qualityOption;
+      if (_selectedQuality != null && _qualityOptions.isNotEmpty) {
+        qualityOption = _qualityOptions.firstWhere(
+          (q) => q['label'] == _selectedQuality,
+          orElse: () => <String, dynamic>{},
+        );
+      }
+      
       final media = await api.buildHlsUrl(
         _currentItemId,
         audioStreamIndex:
             _hasManuallySelectedAudio ? _selectedAudioStreamIndex : null,
         subtitleStreamIndex:
             _hasManuallySelectedSubtitle ? _selectedSubtitleStreamIndex : null,
+        maxWidth: qualityOption?['width'] as int?,
+        maxHeight: qualityOption?['height'] as int?,
+        maxBitrate: qualityOption?['bitrate'] as int?,
+        startTimeTicks: _initialSeekPosition != null 
+            ? (_initialSeekPosition!.inMicroseconds * 10).toInt()
+            : null,
       );
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
       _playerLog('🎬 [Player] Video Title: $_videoTitle');
       _playerLog(
           '🎬 [Player] Selected audio stream: $_selectedAudioStreamIndex, subtitle stream: $_selectedSubtitleStreamIndex');
 
-      // ✅ 保存 PlaySessionId，用于调用 /Sessions/Playing
+      // ✅ 保存 PlaySessionId 和 MediaSourceId，用于调用 /Sessions/Playing
       _playSessionId = media.playSessionId;
+      _mediaSourceId = media.mediaSourceId; // ✅ 使用从 TranscodingUrl 返回的 mediaSourceId
+      _playerLog('🎬 [Player] PlaySessionId: $_playSessionId');
+      _playerLog('🎬 [Player] MediaSourceId: $_mediaSourceId');
       if (mounted) {
         setState(() {
           _expectedBitrateKbps =
@@ -1598,7 +1636,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         subtitleStreamIndex: _selectedSubtitleStreamIndex,
         maxWidth: qualityOption?['width'] as int?,
         maxHeight: qualityOption?['height'] as int?,
-        maxBitrate: qualityOption?['maxBitrate'] as int?,
+        maxBitrate: qualityOption?['bitrate'] as int?,
+        startTimeTicks: currentPosition.inMicroseconds > 0
+            ? (currentPosition.inMicroseconds * 10).toInt()
+            : null,
       );
 
       _playerLog('🎬 [Player] New media URL with quality: ${media.uri}');
@@ -3837,10 +3878,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         );
       }
 
-      // ✅ 获取PlaybackInfo和MediaSourceId
+      // ✅ 获取PlaybackInfo和MediaSourceId（只是为了获取信息）
       final playbackInfo = await _api!.getPlaybackInfo(
         itemId: _currentItemId,
         userId: _userId!,
+        startTimeTicks: 0,
+        isPlayback: false,
+        autoOpenLiveStream: false,
       );
 
       if (playbackInfo['MediaSources'] != null &&
@@ -3854,6 +3898,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         }
       }
 
+      // ✅ 获取选中的画质参数
+      Map<String, dynamic>? qualityOption;
+      if (_selectedQuality != null && _qualityOptions.isNotEmpty) {
+        qualityOption = _qualityOptions.firstWhere(
+          (q) => q['label'] == _selectedQuality,
+          orElse: () => <String, dynamic>{},
+        );
+      }
+
       // ✅ 构建新的HLS URL
       final media = await _api!.buildHlsUrl(
         _currentItemId,
@@ -3861,6 +3914,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             _hasManuallySelectedAudio ? _selectedAudioStreamIndex : null,
         subtitleStreamIndex:
             _hasManuallySelectedSubtitle ? _selectedSubtitleStreamIndex : null,
+        maxWidth: qualityOption?['width'] as int?,
+        maxHeight: qualityOption?['height'] as int?,
+        maxBitrate: qualityOption?['bitrate'] as int?,
+        startTimeTicks: 0, // 新剧集从头开始
       );
 
       _playerLogImportant('🎬 [Player] New episode URL: ${media.uri}');
