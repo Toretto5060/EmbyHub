@@ -1698,21 +1698,9 @@ class EmbyApi {
       ],
       "SubtitleProfiles": [
         {"Format": "vtt", "Method": "Hls"},
-        {
-          "Format": "eia_608",
-          "Method": "VideoSideData",
-          "Protocol": "hls"
-        },
-        {
-          "Format": "eia_708",
-          "Method": "VideoSideData",
-          "Protocol": "hls"
-        },
-        {
-          "Format": "vtt",
-          "Method": "External",
-          "AllowChunkedResponse": true
-        },
+        {"Format": "eia_608", "Method": "VideoSideData", "Protocol": "hls"},
+        {"Format": "eia_708", "Method": "VideoSideData", "Protocol": "hls"},
+        {"Format": "vtt", "Method": "External", "AllowChunkedResponse": true},
         {"Format": "ass", "Method": "External"},
         {"Format": "ssa", "Method": "External"}
       ],
@@ -1767,7 +1755,7 @@ class EmbyApi {
           contentType: 'application/json',
         ),
       );
-      
+
       return res.data as Map<String, dynamic>;
     } catch (e) {
       _apiLog('❌ [API] Get PlaybackInfo failed: $e');
@@ -1830,6 +1818,7 @@ class EmbyApi {
     int? maxHeight,
     int? maxBitrate,
     int? startTimeTicks,
+    Map<String, dynamic>? cachedItemJson, // ✅ 可选的缓存数据，避免重复请求
   }) async {
     // ✅ 从 SharedPreferences 获取 token（因为 dio headers 是在拦截器中动态设置的）
     final prefs = await sp.SharedPreferences.getInstance();
@@ -1841,12 +1830,19 @@ class EmbyApi {
     }
 
     // ✅ 先获取 item 信息（包含 MediaSources 和 UserData）
-    final itemRes =
-        await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
-      'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,UserData',
-    });
-    final itemJson = itemRes.data as Map<String, dynamic>;
+    // 如果有缓存数据就使用缓存，否则请求
+    Map<String, dynamic> itemJson;
+    if (cachedItemJson != null) {
+      _apiLog('✅ [API] Using cached item data, skip request');
+      itemJson = cachedItemJson;
+    } else {
+      final itemRes =
+          await _dio.get('/Users/$userId/Items/$itemId', queryParameters: {
+        'Fields':
+            'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,UserData',
+      });
+      itemJson = itemRes.data as Map<String, dynamic>;
+    }
 
     // ✅ 从 MediaSources 获取第一个可用的 MediaSourceId
     String mediaSourceId = itemId; // 默认使用 itemId
@@ -1882,8 +1878,9 @@ class EmbyApi {
       }
     }
 
-    // ✅ 第一次请求 PlaybackInfo（带完整参数，IsPlayback=true）
-    final playbackInfo1 = await getPlaybackInfo(
+    // ✅ 只需要一次 PlaybackInfo 请求即可获取 TranscodingUrl
+    // 使用 IsPlayback=true 和 AutoOpenLiveStream=true 来获取转码流
+    final playbackInfo = await getPlaybackInfo(
       itemId: itemId,
       userId: userId,
       startTimeTicks: effectiveStartTimeTicks,
@@ -1895,33 +1892,20 @@ class EmbyApi {
       maxStreamingBitrate: maxBitrate,
     );
 
-    // ✅ 从第一次响应中获取信息
-    String? playSessionId = playbackInfo1['PlaySessionId'] as String?;
+    // ✅ 从响应中获取 PlaySessionId（备用，优先使用 TranscodingUrl 中的）
+    String? playSessionId = playbackInfo['PlaySessionId'] as String?;
     if (playSessionId == null || playSessionId.isEmpty) {
       playSessionId = DateTime.now().millisecondsSinceEpoch.toString();
     }
 
-    // ✅ 第二次请求 PlaybackInfo（IsPlayback=false）
-    final playbackInfo2 = await getPlaybackInfo(
-      itemId: itemId,
-      userId: userId,
-      startTimeTicks: 0,
-      isPlayback: false,
-      autoOpenLiveStream: false,
-      audioStreamIndex: audioStreamIndex,
-      subtitleStreamIndex: subtitleStreamIndex,
-      mediaSourceId: mediaSourceId,
-      maxStreamingBitrate: maxBitrate,
-    );
-
-    // ✅ 从第二次响应中获取 TranscodingUrl
+    // ✅ 从响应中获取 TranscodingUrl
     String? playbackUrl;
     String finalMediaSourceId = mediaSourceId; // 使用动态获取的值
 
-    if (playbackInfo2['MediaSources'] != null &&
-        playbackInfo2['MediaSources'] is List) {
-      final mediaSources = playbackInfo2['MediaSources'] as List;
-      
+    if (playbackInfo['MediaSources'] != null &&
+        playbackInfo['MediaSources'] is List) {
+      final mediaSources = playbackInfo['MediaSources'] as List;
+
       if (mediaSources.isNotEmpty) {
         final mediaSource = mediaSources[0] as Map<String, dynamic>;
 
@@ -1933,19 +1917,20 @@ class EmbyApi {
         // ✅ 只使用 TranscodingUrl
         if (mediaSource['TranscodingUrl'] != null) {
           final transcodingUrl = mediaSource['TranscodingUrl'] as String;
-          
+
           // ✅ 从 TranscodingUrl 中提取 PlaySessionId（如果存在）
           try {
             final uri = Uri.parse(transcodingUrl);
             final urlPlaySessionId = uri.queryParameters['PlaySessionId'];
             if (urlPlaySessionId != null && urlPlaySessionId.isNotEmpty) {
               playSessionId = urlPlaySessionId;
-              _apiLog('🎬 [API] Using PlaySessionId from TranscodingUrl: $playSessionId');
+              _apiLog(
+                  '🎬 [API] Using PlaySessionId from TranscodingUrl: $playSessionId');
             }
           } catch (e) {
             _apiLog('⚠️ [API] Failed to parse TranscodingUrl: $e');
           }
-          
+
           // ✅ 拼接服务器地址
           if (transcodingUrl.startsWith('/')) {
             playbackUrl = '${_dio.options.baseUrl}$transcodingUrl';
@@ -2344,6 +2329,102 @@ class ItemInfo {
       dateCreated: json['DateCreated'] as String?,
       status: json['Status'] as String?,
     );
+  }
+
+  // ✅ 转换为 JSON（用于缓存传递）
+  Map<String, dynamic> toJson() {
+    return {
+      'Id': id,
+      'Name': name,
+      'Type': type,
+      'Overview': overview,
+      'RunTimeTicks': runTimeTicks,
+      'UserData': userData,
+      'SeriesName': seriesName,
+      'ParentIndexNumber': parentIndexNumber,
+      'IndexNumber': indexNumber,
+      'SeriesId': seriesId,
+      'SeasonId': seasonId,
+      'SeriesPrimaryImageTag': seriesPrimaryImageTag,
+      'SeasonPrimaryImageTag': seasonPrimaryImageTag,
+      'ImageTags': imageTags,
+      'BackdropImageTags': backdropImageTags,
+      'ParentThumbItemId': parentThumbItemId,
+      'ParentThumbImageTag': parentThumbImageTag,
+      'ParentBackdropItemId': parentBackdropItemId,
+      'ParentBackdropImageTags': parentBackdropImageTags,
+      'Genres': genres,
+      'MediaSources': mediaSources,
+      'People': performers?.map((p) => p.raw).toList(),
+      'ExternalUrls':
+          externalUrls?.map((e) => {'Name': e.name, 'Url': e.url}).toList(),
+      'PremiereDate': premiereDate,
+      'EndDate': endDate,
+      'ProductionYear': productionYear,
+      'CommunityRating': communityRating,
+      'ChildCount': childCount,
+      'ProviderIds': providerIds,
+      'DateCreated': dateCreated,
+      'Status': status,
+    };
+  }
+
+  // ✅ 获取背景图 URL（用于传递给播放页）
+  String? getBackdropUrl(EmbyApi api) {
+    if (type == 'Episode') {
+      // Episode 优先使用父项（Series）的背景图
+      if (parentBackdropImageTags?.isNotEmpty ?? false) {
+        if (parentBackdropItemId != null && parentBackdropItemId!.isNotEmpty) {
+          return api.buildImageUrl(
+            itemId: parentBackdropItemId!,
+            type: 'Backdrop',
+            maxWidth: 1920,
+            tag: parentBackdropImageTags!.first,
+          );
+        }
+      }
+      // 如果没有，使用自己的背景图
+      if (backdropImageTags?.isNotEmpty ?? false) {
+        return api.buildImageUrl(
+          itemId: id!,
+          type: 'Backdrop',
+          maxWidth: 1920,
+          tag: backdropImageTags!.first,
+        );
+      }
+      // 最后尝试使用 Series 的 Primary 图片
+      if (seriesId != null && seriesId!.isNotEmpty) {
+        return api.buildImageUrl(
+          itemId: seriesId!,
+          type: 'Primary',
+          maxWidth: 1920,
+        );
+      }
+    } else {
+      // 非 Episode 类型，使用自己的背景图
+      if (backdropImageTags?.isNotEmpty ?? false) {
+        return api.buildImageUrl(
+          itemId: id!,
+          type: 'Backdrop',
+          maxWidth: 1920,
+          tag: backdropImageTags!.first,
+        );
+      }
+    }
+    return null;
+  }
+
+  // ✅ 获取 Logo URL（用于传递给播放页）
+  String? getLogoUrl(EmbyApi api) {
+    if (imageTags != null && imageTags!.containsKey('Logo')) {
+      return api.buildImageUrl(
+        itemId: id!,
+        type: 'Logo',
+        maxWidth: 400,
+        tag: imageTags!['Logo'],
+      );
+    }
+    return null;
   }
 }
 

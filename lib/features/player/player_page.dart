@@ -34,10 +34,18 @@ class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({
     required this.itemId,
     this.initialPositionTicks,
+    this.itemInfo, // ✅ 可选的 ItemInfo，避免重复请求
+    this.logoUrl, // ✅ 可选的 Logo URL，避免重复请求
+    this.backdropUrl, // ✅ 可选的背景图 URL，避免重复请求
+    this.seriesInfo, // ✅ 可选的 Series 信息（用于 Episode）
     super.key,
   });
   final String itemId;
   final int? initialPositionTicks;
+  final ItemInfo? itemInfo; // ✅ 从上一页传入的 ItemInfo
+  final String? logoUrl; // ✅ 从上一页传入的 Logo URL
+  final String? backdropUrl; // ✅ 从上一页传入的背景图 URL
+  final ItemInfo? seriesInfo; // ✅ 从上一页传入的 Series 信息
 
   @override
   ConsumerState<PlayerPage> createState() => _PlayerPageState();
@@ -660,8 +668,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _userId = authState.value?.userId;
 
       // ✅ 获取视频详细信息（用于显示和PiP）
-      final itemDetails =
-          _userId != null ? await api.getItem(_userId!, _currentItemId) : null;
+      // 如果从上一页传入了 ItemInfo，就使用缓存数据，避免重复请求
+      ItemInfo? itemDetails;
+      if (widget.itemInfo != null) {
+        _playerLog('✅ [Player] Using cached ItemInfo, skip getItem request');
+        itemDetails = widget.itemInfo;
+      } else {
+        itemDetails = _userId != null
+            ? await api.getItem(_userId!, _currentItemId)
+            : null;
+      }
       _videoTitle = itemDetails?.name ?? 'Video';
 
       // ✅ 更新 itemDetails 并触发 UI 刷新（显示背景图）
@@ -675,24 +691,41 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _itemType = itemDetails?.type;
       }
 
-      // ✅ 获取Logo URL（优先使用Logo类型的图片）
-      if (itemDetails != null && itemDetails.id != null) {
+      // ✅ 获取Logo URL（优先使用传入的，避免重复请求）
+      if (widget.logoUrl != null) {
+        _playerLog('✅ [Player] Using cached logo URL');
+        _logoUrl = widget.logoUrl;
+      } else if (itemDetails != null && itemDetails.id != null) {
         // 对于Episode类型，尝试获取Series的Logo
         if (itemDetails.type == 'Episode' && itemDetails.seriesId != null) {
-          try {
-            final seriesInfo =
-                await api.getItem(_userId!, itemDetails.seriesId!);
-            if (seriesInfo.imageTags != null &&
-                seriesInfo.imageTags!.containsKey('Logo')) {
+          // 优先使用传入的 seriesInfo
+          if (widget.seriesInfo != null) {
+            _playerLog('✅ [Player] Using cached series info for logo');
+            if (widget.seriesInfo!.imageTags != null &&
+                widget.seriesInfo!.imageTags!.containsKey('Logo')) {
               _logoUrl = api.buildImageUrl(
                 itemId: itemDetails.seriesId!,
                 type: 'Logo',
                 maxWidth: 400,
-                tag: seriesInfo.imageTags!['Logo'],
+                tag: widget.seriesInfo!.imageTags!['Logo'],
               );
             }
-          } catch (e) {
-            _playerLog('⚠️ [Player] Failed to get series logo: $e');
+          } else {
+            try {
+              final seriesInfo =
+                  await api.getItem(_userId!, itemDetails.seriesId!);
+              if (seriesInfo.imageTags != null &&
+                  seriesInfo.imageTags!.containsKey('Logo')) {
+                _logoUrl = api.buildImageUrl(
+                  itemId: itemDetails.seriesId!,
+                  type: 'Logo',
+                  maxWidth: 400,
+                  tag: seriesInfo.imageTags!['Logo'],
+                );
+              }
+            } catch (e) {
+              _playerLog('⚠️ [Player] Failed to get series logo: $e');
+            }
           }
         } else {
           // 对于Movie等类型，直接获取Logo
@@ -847,7 +880,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // ✅ 构建 HLS URL
       // 注意：对于 HLS 流，Emby 会自动处理音频和字幕选择
       // 只有在用户手动选择时才传递参数，否则让 Emby 自动选择
-      
+
       // ✅ 获取选中的画质参数
       Map<String, dynamic>? qualityOption;
       if (_selectedQuality != null && _qualityOptions.isNotEmpty) {
@@ -856,7 +889,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           orElse: () => <String, dynamic>{},
         );
       }
-      
+
       final media = await api.buildHlsUrl(
         _currentItemId,
         audioStreamIndex:
@@ -866,9 +899,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         maxWidth: qualityOption?['width'] as int?,
         maxHeight: qualityOption?['height'] as int?,
         maxBitrate: qualityOption?['bitrate'] as int?,
-        startTimeTicks: _initialSeekPosition != null 
+        startTimeTicks: _initialSeekPosition != null
             ? (_initialSeekPosition!.inMicroseconds * 10).toInt()
             : null,
+        cachedItemJson: itemDetails?.toJson(), // ✅ 传入缓存数据，避免重复请求
       );
       _playerLog('🎬 [Player] Media URL: ${media.uri}');
       _playerLog('🎬 [Player] Video Title: $_videoTitle');
@@ -877,7 +911,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       // ✅ 保存 PlaySessionId 和 MediaSourceId，用于调用 /Sessions/Playing
       _playSessionId = media.playSessionId;
-      _mediaSourceId = media.mediaSourceId; // ✅ 使用从 TranscodingUrl 返回的 mediaSourceId
+      _mediaSourceId =
+          media.mediaSourceId; // ✅ 使用从 TranscodingUrl 返回的 mediaSourceId
       _playerLog('🎬 [Player] PlaySessionId: $_playSessionId');
       _playerLog('🎬 [Player] MediaSourceId: $_mediaSourceId');
       if (mounted) {
@@ -2129,8 +2164,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         final api = snapshot.data!;
         String? backdropUrl;
 
+        // ✅ 优先使用传入的背景图 URL，避免重复计算
+        if (widget.backdropUrl != null) {
+          backdropUrl = widget.backdropUrl;
+        }
         // ✅ 先检查是否有 Backdrop 标签，避免生成无效的 URL（404）
-        if (_itemDetails != null) {
+        else if (_itemDetails != null) {
           // ✅ 对于Episode类型，优先使用父项（Series）的背景图
           if (_itemDetails!.type == 'Episode') {
             // 1. 尝试使用父项的背景图（Series的Backdrop）
