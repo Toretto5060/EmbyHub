@@ -649,14 +649,20 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                                   final titleColor =
                                       isDark ? Colors.white : Colors.black87;
 
-                                  return Container(
-                                    alignment: Alignment.bottomLeft,
-                                    padding: EdgeInsets.only(
-                                      left: leftPadding,
-                                      right: 20, // 右侧也保持20的边距，让文字铺满屏幕
-                                      bottom: bottomPadding,
-                                    ),
-                                    child: Text(
+                                  // ✅ 检查是否有 logo
+                                  final hasLogo =
+                                      data.imageTags?['Logo'] != null &&
+                                          data.imageTags!['Logo']!.isNotEmpty;
+
+                                  // ✅ 展开状态（t < 0.5）：如果有 Logo 显示 Logo，否则显示文字
+                                  // ✅ 折叠状态（t >= 0.5）：始终显示文字标题
+                                  Widget titleWidget;
+                                  if (t < 0.5 && hasLogo) {
+                                    // 展开时显示 Logo
+                                    titleWidget = _buildExpandedLogo(data, t);
+                                  } else {
+                                    // 折叠时或没有 Logo 时显示文字
+                                    titleWidget = Text(
                                       data.name,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
@@ -667,7 +673,17 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                                         color: titleColor,
                                         height: 1.2,
                                       ),
+                                    );
+                                  }
+
+                                  return Container(
+                                    alignment: Alignment.bottomLeft,
+                                    padding: EdgeInsets.only(
+                                      left: leftPadding,
+                                      right: 20, // 右侧也保持20的边距，让文字铺满屏幕
+                                      bottom: bottomPadding,
                                     ),
+                                    child: titleWidget,
                                   );
                                 },
                               ),
@@ -856,6 +872,48 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
 
   SystemUiOverlayStyle _defaultStyleForBrightness(Brightness brightness) {
     return brightness == Brightness.dark ? _lightStatusBar : _darkStatusBar;
+  }
+
+  /// ✅ 构建展开状态的 Logo（底部左侧位置）
+  Widget _buildExpandedLogo(ItemInfo data, double collapseProgress) {
+    final logoTag = data.imageTags?['Logo'];
+    if (logoTag == null || logoTag.isEmpty || data.id == null) {
+      return const SizedBox.shrink();
+    }
+
+    return FutureBuilder<EmbyApi>(
+      future: EmbyApi.create(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const SizedBox.shrink();
+        }
+        final api = snapshot.data!;
+        final logoUrl = api.buildImageUrl(
+          itemId: data.id!,
+          type: 'Logo',
+          tag: logoTag,
+          maxWidth: 600,
+        );
+        if (logoUrl.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        // ✅ Logo 高度：展开时较大，折叠时缩小（但在 t=0.5 时切换到文字）
+        final logoHeight = 60.0 * (1.0 - collapseProgress * 2);
+
+        return Opacity(
+          opacity: (1.0 - collapseProgress * 2).clamp(0.0, 1.0),
+          child: SizedBox(
+            height: logoHeight.clamp(0.0, 60.0),
+            child: EmbyFadeInImage(
+              key: ValueKey('logo_${data.id}_$logoUrl'),
+              imageUrl: logoUrl,
+              fit: BoxFit.contain,
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Color _colorForStatusStyle(
