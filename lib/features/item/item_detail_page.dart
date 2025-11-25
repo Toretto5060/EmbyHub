@@ -97,6 +97,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   late SystemUiOverlayStyle _statusBarStyle;
   final Map<String, SystemUiOverlayStyle> _imageStyleCache = {};
   late ValueNotifier<SystemUiOverlayStyle?> _navSyncedStyleNotifier;
+  late ValueNotifier<double> _scrollOffsetNotifier; // ✅ 用于实时更新毛玻璃效果
   int? _selectedAudioStreamIndex;
   int? _selectedSubtitleStreamIndex;
   bool _hasManuallySelectedSubtitle = false; // ✅ 标记用户是否手动选择过字幕
@@ -131,6 +132,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     _userDataNotifier = ValueNotifier<Map<String, dynamic>?>(null);
     // ✅ 初始化状态栏样式 ValueNotifier
     _navSyncedStyleNotifier = ValueNotifier<SystemUiOverlayStyle?>(null);
+    // ✅ 初始化滚动偏移量 ValueNotifier
+    _scrollOffsetNotifier = ValueNotifier<double>(0.0);
     // ✅ 默认使用亮色状态栏（白色字体），因为大多数背景图都比较暗
     // 等背景图加载完成后，会根据实际图片颜色动态调整
     _statusBarStyle = StatusBarManager.currentStyle ?? _lightStatusBar;
@@ -245,6 +248,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     _isPlayedNotifier?.dispose();
     _userDataNotifier?.dispose();
     _navSyncedStyleNotifier.dispose();
+    _scrollOffsetNotifier.dispose();
     _statusBarController?.release();
     _statusBarController = null;
     _scrollController.removeListener(_handleScroll);
@@ -347,6 +351,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     if (!mounted) return;
     final offset =
         _scrollController.hasClients ? _scrollController.offset : 0.0;
+    // ✅ 更新滚动偏移量 ValueNotifier，触发毛玻璃效果更新
+    _scrollOffsetNotifier.value = offset;
     // ✅ 使用节流，避免频繁更新状态栏
     _syncStatusBarWithNavigationThrottled(offset);
   }
@@ -564,129 +570,142 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                   ],
                   backgroundColor: Colors.transparent,
                   surfaceTintColor: Colors.transparent,
-                  // ✅ 添加毛玻璃效果（只在折叠时显示）
-                  flexibleSpace: LayoutBuilder(
-                    builder: (context, constraints) {
-                      // ✅ 计算折叠进度
-                      final settings =
-                          context.dependOnInheritedWidgetOfExactType<
-                              FlexibleSpaceBarSettings>();
-                      final deltaExtent = settings != null
-                          ? settings.maxExtent - settings.minExtent
-                          : 1.0;
-                      final t = settings != null && deltaExtent > 0
-                          ? (1.0 -
-                                  (settings.currentExtent -
-                                          settings.minExtent) /
-                                      deltaExtent)
-                              .clamp(0.0, 1.0)
-                          : 0.0;
+                  // ✅ 添加毛玻璃效果（刚开始滑动就显示）
+                  flexibleSpace: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // ✅ 底层：FlexibleSpaceBar（只有背景图，不显示标题）
+                      FlexibleSpaceBar(
+                        // ✅ collapseMode.pin: 背景图跟随滚动向上移动，不缩小
+                        collapseMode: CollapseMode.pin,
+                        titlePadding: EdgeInsets.zero,
+                        centerTitle: false,
+                        title: const SizedBox.shrink(), // 不在这里显示标题
+                        background: _buildBackdropBackground(context, data),
+                      ),
+                      // ✅ 中层：毛玻璃效果（只覆盖顶部导航栏区域）
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: ValueListenableBuilder<double>(
+                          valueListenable: _scrollOffsetNotifier,
+                          builder: (context, scrollOffset, child) {
+                            // ✅ 毛玻璃强度：基于滚动偏移量，刚开始滑动就显示
+                            // 参考 series_detail_page.dart 的实现：blurStart=10, blurEnd=250
+                            const double blurStart = 10.0;
+                            const double blurEnd = 250.0;
+                            final double blurProgress;
+                            if (scrollOffset <= blurStart) {
+                              blurProgress = 0.0;
+                            } else {
+                              final double effective =
+                                  (scrollOffset - blurStart)
+                                      .clamp(0.0, blurEnd - blurStart);
+                              blurProgress = (effective / (blurEnd - blurStart))
+                                  .clamp(0.0, 1.0);
+                            }
+                            final blurSigma = 30.0 * blurProgress;
+                            final bgOpacity = 0.7 * blurProgress;
+                            final baseColor = isDark
+                                ? const Color(0xFF1C1C1E)
+                                : const Color(0xFFF2F2F7);
 
-                      // ✅ 毛玻璃强度随折叠进度增加
-                      final blurSigma = 30.0 * t;
-                      final bgOpacity = 0.7 * t;
-                      final baseColor = isDark
-                          ? const Color(0xFF1C1C1E)
-                          : const Color(0xFFF2F2F7);
+                            // ✅ 只在导航栏高度范围内显示毛玻璃（包含状态栏）
+                            final statusBarHeight =
+                                MediaQuery.of(context).padding.top;
+                            final navBarHeight = kToolbarHeight;
+                            final totalHeight = statusBarHeight + navBarHeight;
 
-                      return ClipRect(
-                        child: BackdropFilter(
-                          filter: ui.ImageFilter.blur(
-                            sigmaX: blurSigma,
-                            sigmaY: blurSigma,
-                          ),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: baseColor.withOpacity(bgOpacity),
-                            ),
-                            child: FlexibleSpaceBar(
-                              // ✅ collapseMode.pin: 背景图跟随滚动向上移动，不缩小
-                              collapseMode: CollapseMode.pin,
-                              titlePadding: EdgeInsets.zero,
-                              centerTitle: false,
-                              // ✅ 使用 LayoutBuilder 动态计算标题的位置和大小
-                              title: LayoutBuilder(
-                                builder: (context, constraints) {
-                                  // ✅ 计算折叠进度：0.0 = 完全展开，1.0 = 完全折叠
-                                  final settings = context
-                                      .dependOnInheritedWidgetOfExactType<
-                                          FlexibleSpaceBarSettings>();
-                                  if (settings == null) {
-                                    return const SizedBox.shrink();
-                                  }
-                                  final deltaExtent =
-                                      settings.maxExtent - settings.minExtent;
-                                  final t = deltaExtent > 0
-                                      ? (1.0 -
-                                              (settings.currentExtent -
-                                                      settings.minExtent) /
-                                                  deltaExtent)
-                                          .clamp(0.0, 1.0)
-                                      : 1.0;
-
-                                  // ✅ 标题大小：从 20 缩小到 17（更小的初始大小）
-                                  final sizeProgress =
-                                      Curves.easeInOut.transform(t);
-                                  final fontSize =
-                                      20.0 - (20.0 - 17.0) * sizeProgress;
-
-                                  // ✅ 标题位置：从底部左侧移动到顶部中心
-                                  // 展开时：距离左边 12，距离底部 4（更靠近底部和左边）
-                                  // 折叠时：距离左边 56（返回按钮后），距离底部 13（与返回按钮垂直居中对齐）
-                                  // 使用不同的曲线控制水平和垂直位移，实现"吸附"效果
-                                  final horizontalProgress =
-                                      Curves.easeInOutCubic.transform(t);
-                                  final verticalProgress =
-                                      Curves.easeOut.transform(t);
-                                  final leftPadding =
-                                      14.0 + (56.0 - 28.0) * horizontalProgress;
-                                  final bottomPadding =
-                                      5 + 13.0 * verticalProgress;
-
-                                  // ✅ 获取深浅色模式，设置标题文字颜色
-                                  final isDark =
-                                      isDarkModeFromContext(context, ref);
-                                  final titleColor =
-                                      isDark ? Colors.white : Colors.black87;
-
-                                  // ✅ 检查是否有 logo
-                                  final hasLogo =
-                                      data.imageTags?['Logo'] != null &&
-                                          data.imageTags!['Logo']!.isNotEmpty;
-
-                                  return Container(
-                                    alignment: Alignment.bottomLeft,
-                                    padding: EdgeInsets.only(
-                                      left: leftPadding,
-                                      right: 20, // 右侧也保持20的边距，让文字铺满屏幕
-                                      bottom: bottomPadding,
+                            return SizedBox(
+                              height: totalHeight,
+                              child: ClipRect(
+                                child: BackdropFilter(
+                                  filter: ui.ImageFilter.blur(
+                                    sigmaX: blurSigma,
+                                    sigmaY: blurSigma,
+                                  ),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: baseColor.withOpacity(bgOpacity),
                                     ),
-                                    child: hasLogo
-                                        ? _buildLogoToTextTransition(
-                                            data, t, fontSize, titleColor)
-                                        : Text(
-                                            data.name,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            textAlign:
-                                                TextAlign.left, // 明确指定居左对齐
-                                            style: TextStyle(
-                                              fontSize: fontSize,
-                                              fontWeight: FontWeight.w700,
-                                              color: titleColor,
-                                              height: 1.2,
-                                            ),
-                                          ),
-                                  );
-                                },
+                                  ),
+                                ),
                               ),
-                              background:
-                                  _buildBackdropBackground(context, data),
-                            ),
-                          ),
+                            );
+                          },
                         ),
-                      );
-                    },
+                      ),
+                      // ✅ 上层：标题（在毛玻璃之上）
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          // ✅ 计算折叠进度：0.0 = 完全展开，1.0 = 完全折叠
+                          final settings =
+                              context.dependOnInheritedWidgetOfExactType<
+                                  FlexibleSpaceBarSettings>();
+                          if (settings == null) {
+                            return const SizedBox.shrink();
+                          }
+                          final deltaExtent =
+                              settings.maxExtent - settings.minExtent;
+                          final t = deltaExtent > 0
+                              ? (1.0 -
+                                      (settings.currentExtent -
+                                              settings.minExtent) /
+                                          deltaExtent)
+                                  .clamp(0.0, 1.0)
+                              : 1.0;
+
+                          // ✅ 标题大小：从 20 缩小到 17（更小的初始大小）
+                          final sizeProgress = Curves.easeInOut.transform(t);
+                          final fontSize = 28.0 - (28.0 - 17.0) * sizeProgress;
+
+                          // ✅ 标题位置：从底部左侧移动到顶部中心
+                          // 展开时：距离左边 12，距离底部 4（更靠近底部和左边）
+                          // 折叠时：距离左边 56（返回按钮后），距离底部 13（与返回按钮垂直居中对齐）
+                          // 使用不同的曲线控制水平和垂直位移，实现"吸附"效果
+                          final horizontalProgress =
+                              Curves.easeInOutCubic.transform(t);
+                          final verticalProgress = Curves.easeOut.transform(t);
+                          final leftPadding =
+                              20.0 + (56.0 - 40.0) * horizontalProgress;
+                          final bottomPadding = 10 + 9.0 * verticalProgress;
+
+                          // ✅ 获取深浅色模式，设置标题文字颜色
+                          final isDark = isDarkModeFromContext(context, ref);
+                          final titleColor =
+                              isDark ? Colors.white : Colors.black87;
+
+                          // ✅ 检查是否有 logo
+                          final hasLogo = data.imageTags?['Logo'] != null &&
+                              data.imageTags!['Logo']!.isNotEmpty;
+
+                          return Container(
+                            alignment: Alignment.bottomLeft,
+                            padding: EdgeInsets.only(
+                              left: leftPadding,
+                              right: 20, // 右侧也保持20的边距，让文字铺满屏幕
+                              bottom: bottomPadding,
+                            ),
+                            child: hasLogo
+                                ? _buildLogoToTextTransition(
+                                    data, t, fontSize, titleColor)
+                                : Text(
+                                    data.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.left, // 明确指定居左对齐
+                                    style: TextStyle(
+                                      fontSize: fontSize,
+                                      fontWeight: FontWeight.w700,
+                                      color: titleColor,
+                                      height: 1.2,
+                                    ),
+                                  ),
+                          );
+                        },
+                      ),
+                    ],
                   ),
                 );
               },
