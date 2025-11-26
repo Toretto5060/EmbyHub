@@ -469,8 +469,8 @@ class _TopControlsBar extends ConsumerWidget {
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(
-                                        Icons.high_quality_rounded,
+                                      Icon(
+                                        _getQualityIcon(state.selectedQuality),
                                         color: Colors.white,
                                         size: 22,
                                       ),
@@ -1559,6 +1559,26 @@ class _SpeedListState extends State<_SpeedList> {
         ),
       ),
     );
+  }
+}
+
+// ✅ 根据清晰度标签返回对应的图标（全局函数）
+IconData _getQualityIcon(String? label) {
+  if (label == null) return Icons.auto_awesome_rounded; // 自动：闪光图标
+
+  switch (label) {
+    case '自动':
+      return Icons.auto_awesome_rounded; // 自动：闪光图标
+    case '超清':
+      return Icons.hd_rounded; // 超清：HD图标
+    case '高清':
+      return Icons.high_quality_rounded; // 高清：HQ图标
+    case '清晰':
+      return Icons.sd_rounded; // 清晰：SD图标
+    case '流畅':
+      return Icons.speed_rounded; // 流畅：速度图标
+    default:
+      return Icons.auto_awesome_rounded; // 默认：自动图标
   }
 }
 
