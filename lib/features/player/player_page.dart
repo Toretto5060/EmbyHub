@@ -555,21 +555,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
   }
 
-  // ✅ 保存音频和字幕选择
+  // ✅ 保存音频和字幕选择（保存数组索引，用于UI显示）
   Future<void> _saveStreamSelections() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (_selectedAudioStreamIndex != null) {
+
+      // ✅ 保存音频数组索引
+      if (_selectedAudioStreamIndex != null &&
+          _selectedAudioStreamIndex! >= 0) {
         await prefs.setInt(
             'item_${widget.itemId}_audio', _selectedAudioStreamIndex!);
+        _playerLog('💾 [Player] 保存音频选择(数组索引): $_selectedAudioStreamIndex');
       }
-      // ✅ 支持保存-1（不显示字幕）
+
+      // ✅ 保存字幕数组索引（支持-1表示不显示）
       if (_selectedSubtitleStreamIndex != null) {
         await prefs.setInt(
             'item_${widget.itemId}_subtitle', _selectedSubtitleStreamIndex!);
         _playerLog(
-            '💾 [Player] 保存字幕选择: ${_selectedSubtitleStreamIndex}, manual: $_hasManuallySelectedSubtitle');
+            '💾 [Player] 保存字幕选择(数组索引): $_selectedSubtitleStreamIndex, manual: $_hasManuallySelectedSubtitle');
       }
+
       await prefs.setBool(
           'item_${widget.itemId}_manual_audio', _hasManuallySelectedAudio);
       await prefs.setBool('item_${widget.itemId}_manual_subtitle',
@@ -605,11 +611,38 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         );
       }
 
+      // ✅ 获取实际的 MediaStream Index（不是数组索引）
+      int? actualAudioIndex;
+      int? actualSubtitleIndex;
+
+      if (_selectedAudioStreamIndex != null &&
+          _selectedAudioStreamIndex! >= 0 &&
+          _selectedAudioStreamIndex! < _audioStreams.length) {
+        actualAudioIndex =
+            _audioStreams[_selectedAudioStreamIndex!]['Index'] as int?;
+      }
+
+      if (_selectedSubtitleStreamIndex != null &&
+          _selectedSubtitleStreamIndex! >= 0) {
+        if (_selectedSubtitleStreamIndex! < _subtitleStreams.length) {
+          actualSubtitleIndex =
+              _subtitleStreams[_selectedSubtitleStreamIndex!]['Index'] as int?;
+        }
+      } else if (_selectedSubtitleStreamIndex == -1) {
+        // -1 表示不显示字幕
+        actualSubtitleIndex = -1;
+      }
+
+      _playerLog(
+          '🎬 [Player] Array indices - Audio: $_selectedAudioStreamIndex, Subtitle: $_selectedSubtitleStreamIndex');
+      _playerLog(
+          '🎬 [Player] MediaStream indices - Audio: $actualAudioIndex, Subtitle: $actualSubtitleIndex');
+
       // ✅ 构建新的 HLS URL
       final media = await _api!.buildHlsUrl(
         widget.itemId,
-        audioStreamIndex: _selectedAudioStreamIndex,
-        subtitleStreamIndex: _selectedSubtitleStreamIndex,
+        audioStreamIndex: actualAudioIndex,
+        subtitleStreamIndex: actualSubtitleIndex,
         maxWidth: qualityOption?['width'] as int?,
         maxHeight: qualityOption?['height'] as int?,
         maxBitrate: qualityOption?['bitrate'] as int?,
@@ -693,7 +726,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             ? await api.getItem(_userId!, _currentItemId)
             : null;
       }
-      
+
       // ✅ 更新标题（如果还没有设置）
       if (_videoTitle.isEmpty || _videoTitle == 'Video') {
         _videoTitle = itemDetails?.name ?? 'Video';
@@ -911,12 +944,39 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         );
       }
 
+      // ✅ 获取实际的 MediaStream Index（不是数组索引）
+      int? actualAudioIndex;
+      int? actualSubtitleIndex;
+
+      if (_hasManuallySelectedAudio &&
+          _selectedAudioStreamIndex != null &&
+          _selectedAudioStreamIndex! >= 0 &&
+          _selectedAudioStreamIndex! < _audioStreams.length) {
+        actualAudioIndex =
+            _audioStreams[_selectedAudioStreamIndex!]['Index'] as int?;
+      }
+
+      if (_hasManuallySelectedSubtitle &&
+          _selectedSubtitleStreamIndex != null) {
+        if (_selectedSubtitleStreamIndex! >= 0 &&
+            _selectedSubtitleStreamIndex! < _subtitleStreams.length) {
+          actualSubtitleIndex =
+              _subtitleStreams[_selectedSubtitleStreamIndex!]['Index'] as int?;
+        } else if (_selectedSubtitleStreamIndex == -1) {
+          // -1 表示不显示字幕
+          actualSubtitleIndex = -1;
+        }
+      }
+
+      _playerLog(
+          '🎬 [Player] Initial load - Array indices - Audio: $_selectedAudioStreamIndex, Subtitle: $_selectedSubtitleStreamIndex');
+      _playerLog(
+          '🎬 [Player] Initial load - MediaStream indices - Audio: $actualAudioIndex, Subtitle: $actualSubtitleIndex');
+
       final media = await api.buildHlsUrl(
         _currentItemId,
-        audioStreamIndex:
-            _hasManuallySelectedAudio ? _selectedAudioStreamIndex : null,
-        subtitleStreamIndex:
-            _hasManuallySelectedSubtitle ? _selectedSubtitleStreamIndex : null,
+        audioStreamIndex: actualAudioIndex,
+        subtitleStreamIndex: actualSubtitleIndex,
         maxWidth: qualityOption?['width'] as int?,
         maxHeight: qualityOption?['height'] as int?,
         maxBitrate: qualityOption?['bitrate'] as int?,
@@ -1685,11 +1745,32 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         await _playerPause();
       }
 
+      // ✅ 获取实际的 MediaStream Index（不是数组索引）
+      int? actualAudioIndex;
+      int? actualSubtitleIndex;
+
+      if (_selectedAudioStreamIndex != null &&
+          _selectedAudioStreamIndex! >= 0 &&
+          _selectedAudioStreamIndex! < _audioStreams.length) {
+        actualAudioIndex =
+            _audioStreams[_selectedAudioStreamIndex!]['Index'] as int?;
+      }
+
+      if (_selectedSubtitleStreamIndex != null &&
+          _selectedSubtitleStreamIndex! >= 0) {
+        if (_selectedSubtitleStreamIndex! < _subtitleStreams.length) {
+          actualSubtitleIndex =
+              _subtitleStreams[_selectedSubtitleStreamIndex!]['Index'] as int?;
+        }
+      } else if (_selectedSubtitleStreamIndex == -1) {
+        actualSubtitleIndex = -1;
+      }
+
       // ✅ 构建新的 HLS URL（带分辨率参数）
       final media = await _api!.buildHlsUrl(
         widget.itemId,
-        audioStreamIndex: _selectedAudioStreamIndex,
-        subtitleStreamIndex: _selectedSubtitleStreamIndex,
+        audioStreamIndex: actualAudioIndex,
+        subtitleStreamIndex: actualSubtitleIndex,
         maxWidth: qualityOption?['width'] as int?,
         maxHeight: qualityOption?['height'] as int?,
         maxBitrate: qualityOption?['bitrate'] as int?,
@@ -3103,25 +3184,33 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   // ✅ 确保字幕选择
   void _ensureSubtitleSelection() {
-    if (_subtitleStreams.isEmpty) return;
+    if (_subtitleStreams.isEmpty) {
+      _playerLog('⚠️ [Player] No subtitle streams available');
+      return;
+    }
 
     final current = _selectedSubtitleStreamIndex;
+    _playerLog(
+        '🎬 [Player] _ensureSubtitleSelection - current: $current, hasManual: $_hasManuallySelectedSubtitle');
+
     // ✅ 如果用户选择了"不显示"（-1），则保持不显示，不自动选择
     if (current == -1) {
-      _updateSubtitleUrl();
-      return;
-    }
-    if (current != null && current >= 0 && current < _subtitleStreams.length) {
+      _playerLog('🎬 [Player] Subtitle disabled by user (-1)');
       _updateSubtitleUrl();
       return;
     }
 
+    // ✅ 如果当前选择有效，保持不变
+    if (current != null && current >= 0 && current < _subtitleStreams.length) {
+      _playerLog('🎬 [Player] Current subtitle selection valid: $current');
+      _updateSubtitleUrl();
+      return;
+    }
+
+    // ✅ 如果用户手动选择过但索引无效，回退到默认或第一个
     if (_hasManuallySelectedSubtitle) {
-      // ✅ 如果用户手动选择过，但值是-1（不显示），则保持不显示
-      if (current == -1) {
-        _updateSubtitleUrl();
-        return;
-      }
+      _playerLog(
+          '🎬 [Player] Manual selection but index invalid, falling back to default');
       final defaultIndex = _subtitleStreams
           .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
       final fallback = defaultIndex != -1 ? defaultIndex : 0;
@@ -3134,12 +3223,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return;
     }
 
+    // ✅ 自动选择最佳中文字幕
+    _playerLog('🎬 [Player] Auto-selecting best Chinese subtitle');
     int selectedIndex = _findBestChineseSubtitle(_subtitleStreams);
 
     if (selectedIndex == -1) {
       final defaultIndex = _subtitleStreams
           .indexWhere((stream) => (stream['IsDefault'] as bool?) == true);
       selectedIndex = defaultIndex != -1 ? defaultIndex : 0;
+      _playerLog(
+          '🎬 [Player] No Chinese subtitle found, using default or first: $selectedIndex');
+    } else {
+      _playerLog('🎬 [Player] Found Chinese subtitle at index: $selectedIndex');
     }
 
     if (mounted) {
@@ -3986,13 +4081,34 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         );
       }
 
+      // ✅ 获取实际的 MediaStream Index（不是数组索引）
+      int? actualAudioIndex;
+      int? actualSubtitleIndex;
+
+      if (_hasManuallySelectedAudio &&
+          _selectedAudioStreamIndex != null &&
+          _selectedAudioStreamIndex! >= 0 &&
+          _selectedAudioStreamIndex! < _audioStreams.length) {
+        actualAudioIndex =
+            _audioStreams[_selectedAudioStreamIndex!]['Index'] as int?;
+      }
+
+      if (_hasManuallySelectedSubtitle &&
+          _selectedSubtitleStreamIndex != null) {
+        if (_selectedSubtitleStreamIndex! >= 0 &&
+            _selectedSubtitleStreamIndex! < _subtitleStreams.length) {
+          actualSubtitleIndex =
+              _subtitleStreams[_selectedSubtitleStreamIndex!]['Index'] as int?;
+        } else if (_selectedSubtitleStreamIndex == -1) {
+          actualSubtitleIndex = -1;
+        }
+      }
+
       // ✅ 构建新的HLS URL
       final media = await _api!.buildHlsUrl(
         _currentItemId,
-        audioStreamIndex:
-            _hasManuallySelectedAudio ? _selectedAudioStreamIndex : null,
-        subtitleStreamIndex:
-            _hasManuallySelectedSubtitle ? _selectedSubtitleStreamIndex : null,
+        audioStreamIndex: actualAudioIndex,
+        subtitleStreamIndex: actualSubtitleIndex,
         maxWidth: qualityOption?['width'] as int?,
         maxHeight: qualityOption?['height'] as int?,
         maxBitrate: qualityOption?['bitrate'] as int?,
