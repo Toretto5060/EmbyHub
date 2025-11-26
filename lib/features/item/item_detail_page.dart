@@ -1242,41 +1242,41 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text('$label: ', style: textStyle),
-          Expanded(
-            child: highlight
-                ? Builder(
-                    builder: (context) {
-                      final key = GlobalKey();
-                      final child = Container(
-                        key: key,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: highlightColor,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          valueText,
-                          style: textStyle,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                      if (onTap == null) return child;
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => onTap(key.currentContext ?? context),
-                        child: child,
-                      );
-                    },
-                  )
-                : Text(
+          if (highlight)
+            Builder(
+              builder: (context) {
+                final key = GlobalKey();
+                final child = Container(
+                  key: key,
+                  width: 280.0, // ✅ 固定宽度
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: highlightColor,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
                     valueText,
                     style: textStyle,
                     overflow: TextOverflow.ellipsis,
                   ),
-          ),
+                );
+                if (onTap == null) return child;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onTap(key.currentContext ?? context),
+                  child: child,
+                );
+              },
+            )
+          else
+            Text(
+              valueText,
+              style: textStyle,
+              overflow: TextOverflow.ellipsis,
+            ),
         ],
       ));
     }
@@ -1293,7 +1293,11 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
         selectedAudioIndex >= 0 &&
         selectedAudioIndex < audioStreams.length) {
       final audioStream = audioStreams[selectedAudioIndex];
-      final audioLabel = _formatAudioStream(audioStream);
+      // ✅ 选中项只显示 DisplayTitle，不显示 Title
+      final displayTitle = audioStream['DisplayTitle']?.toString() ?? '';
+      final audioLabel = displayTitle.isNotEmpty
+          ? displayTitle
+          : _formatAudioStream(audioStream);
       final hasMultiple = audioStreams.length > 1;
 
       addRow(
@@ -1334,44 +1338,48 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text('字幕: ', style: textStyle),
-                Expanded(
-                  child: Builder(
-                    builder: (context) {
-                      final key = GlobalKey();
-                      final child = Container(
-                        key: key,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: highlightColor,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '不显示',
-                          style: textStyle,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => _showSubtitleSelectionMenu(
-                          key.currentContext ?? context,
-                          subtitleStreams,
-                          currentIndex,
-                        ),
-                        child: child,
-                      );
-                    },
-                  ),
+                Builder(
+                  builder: (context) {
+                    final key = GlobalKey();
+                    final child = Container(
+                      key: key,
+                      width: 280.0, // ✅ 固定宽度
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: highlightColor,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '不显示',
+                        style: textStyle,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _showSubtitleSelectionMenu(
+                        key.currentContext ?? context,
+                        subtitleStreams,
+                        currentIndex,
+                      ),
+                      child: child,
+                    );
+                  },
                 ),
               ],
             );
           } else if (currentIndex >= 0 &&
               currentIndex < subtitleStreams.length) {
             final subtitleStream = subtitleStreams[currentIndex];
-            final subtitleLabel = _formatSubtitleStream(subtitleStream);
+            // ✅ 选中项只显示 DisplayTitle，不显示 Title
+            final displayTitle =
+                subtitleStream['DisplayTitle']?.toString() ?? '';
+            final subtitleLabel = displayTitle.isNotEmpty
+                ? displayTitle
+                : _formatSubtitleStream(subtitleStream);
             // ✅ 即使只有一个字幕，也要显示可点击的菜单（因为可以选择"不显示"）
             final isDefault = (subtitleStream['IsDefault'] as bool?) == true;
             final valueText = isDefault && !subtitleLabel.contains('默认')
@@ -1382,38 +1390,37 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text('字幕: ', style: textStyle),
-                Expanded(
-                  // ✅ 始终显示可点击的组件，即使只有一个字幕（可以选择"不显示"）
-                  child: Builder(
-                    builder: (context) {
-                      final key = GlobalKey();
-                      final child = Container(
-                        key: key,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: highlightColor,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          valueText,
-                          style: textStyle,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => _showSubtitleSelectionMenu(
-                          key.currentContext ?? context,
-                          subtitleStreams,
-                          currentIndex,
-                        ),
-                        child: child,
-                      );
-                    },
-                  ),
+                // ✅ 始终显示可点击的组件，即使只有一个字幕（可以选择"不显示"）
+                Builder(
+                  builder: (context) {
+                    final key = GlobalKey();
+                    final child = Container(
+                      key: key,
+                      width: 280.0, // ✅ 固定宽度
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: highlightColor,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        valueText,
+                        style: textStyle,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _showSubtitleSelectionMenu(
+                        key.currentContext ?? context,
+                        subtitleStreams,
+                        currentIndex,
+                      ),
+                      child: child,
+                    );
+                  },
                 ),
               ],
             );
@@ -2027,14 +2034,23 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   }
 
   String _formatAudioStream(Map<String, dynamic> stream) {
+    final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+
+    // ✅ 如果有 DisplayTitle，直接使用
+    if (displayTitle.isNotEmpty) {
+      return displayTitle;
+    }
+
+    // ✅ 如果没有 DisplayTitle，尝试使用 Title
+    final title = stream['Title']?.toString() ?? '';
+    if (title.isNotEmpty) {
+      return title;
+    }
+
+    // ✅ 如果都没有，回退到手动构建
     final codec = stream['Codec']?.toString().toUpperCase();
     final channels = (stream['Channels'] as num?)?.toInt();
     final language = stream['Language']?.toString();
-
-    final displayTitle = stream['DisplayTitle']?.toString();
-    if (displayTitle != null && displayTitle.isNotEmpty) {
-      return displayTitle;
-    }
 
     final parts = <String>[];
     if (language != null && language.isNotEmpty) {
@@ -2054,11 +2070,20 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   }
 
   String _formatSubtitleStream(Map<String, dynamic> stream) {
-    final displayTitle = stream['DisplayTitle']?.toString();
-    if (displayTitle != null && displayTitle.isNotEmpty) {
+    final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+
+    // ✅ 如果有 DisplayTitle，直接使用
+    if (displayTitle.isNotEmpty) {
       return displayTitle;
     }
 
+    // ✅ 如果没有 DisplayTitle，尝试使用 Title
+    final title = stream['Title']?.toString() ?? '';
+    if (title.isNotEmpty) {
+      return title;
+    }
+
+    // ✅ 如果都没有，回退到手动构建
     final language = stream['Language']?.toString();
     final codec = stream['Codec']?.toString().toUpperCase();
     final isForced = stream['IsForced'] == true;
@@ -2115,44 +2140,218 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     List<Map<String, dynamic>> audioStreams,
     int selected,
   ) async {
-    final overlay =
-        Overlay.of(anchorContext).context.findRenderObject() as RenderBox;
-    final box = anchorContext.findRenderObject() as RenderBox;
-    final origin = box.localToGlobal(Offset.zero, ancestor: overlay);
-    final position = RelativeRect.fromLTRB(
-      origin.dx,
-      origin.dy + box.size.height,
-      overlay.size.width - origin.dx,
-      overlay.size.height - origin.dy - box.size.height,
+    if (audioStreams.isEmpty) return;
+
+    final RenderBox? button = anchorContext.findRenderObject() as RenderBox?;
+    final overlay = Navigator.of(context).overlay;
+    final RenderBox? overlayBox =
+        overlay?.context.findRenderObject() as RenderBox?;
+
+    if (button == null || overlayBox == null) return;
+
+    final Offset buttonOffset =
+        button.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final Size overlaySize = overlayBox.size;
+
+    double panelWidth = 280.0; // ✅ 增加宽度从 240 到 320
+    const double maxHeight = 260.0;
+
+    const double minLeftMargin = 16.0;
+    const double rightMargin = 18.0;
+
+    final double maxAllowedWidth =
+        overlaySize.width - minLeftMargin - rightMargin;
+    if (panelWidth > maxAllowedWidth) {
+      panelWidth = maxAllowedWidth.clamp(120.0, panelWidth);
+    }
+
+    double left = buttonOffset.dx;
+    final double maxLeft = overlaySize.width - panelWidth - rightMargin;
+
+    if (maxLeft < minLeftMargin) {
+      panelWidth = (overlaySize.width - minLeftMargin - rightMargin)
+          .clamp(120.0, panelWidth);
+      left = minLeftMargin;
+    } else {
+      left = left.clamp(minLeftMargin, maxLeft);
+    }
+    // ✅ 改为 top 定位，显示在按钮下方
+    final double top = buttonOffset.dy - 10;
+
+    final scrollController = ScrollController();
+    final itemKeys = List.generate(
+      audioStreams.length,
+      (index) => GlobalKey(),
     );
 
-    final result = await showMenu<int>(
+    final result = await showDialog<int>(
       context: context,
-      position: position,
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.26,
-      ),
-      items: List.generate(audioStreams.length, (index) {
-        final data = audioStreams[index];
-        final label = _formatAudioStream(data);
-        final isDefault = (data['IsDefault'] as bool?) == true;
-        final hasDefaultTag = label.contains('默认');
-        return PopupMenuItem<int>(
-          value: index,
-          child: Row(
+      barrierDismissible: true,
+      barrierColor: Colors.transparent,
+      builder: (dialogCtx) {
+        // ✅ 使用延迟确保 ScrollView 已经完全构建后滚动到选中项
+        if (selected >= 0 && selected < itemKeys.length) {
+          Future.delayed(const Duration(milliseconds: 100), () {
+            try {
+              final key = itemKeys[selected];
+              final keyContext = key.currentContext;
+              if (keyContext != null) {
+                Scrollable.ensureVisible(
+                  keyContext,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  alignment: 0.0, // 0.0 = 顶部, 0.5 = 中间, 1.0 = 底部
+                );
+              }
+            } catch (e) {
+              // 忽略滚动错误
+            }
+          });
+        }
+
+        final isDark = isDarkModeFromContext(context, ref);
+        final gradientColors = isDark
+            ? [
+                Colors.grey.shade900.withValues(alpha: 0.7),
+                Colors.grey.shade800.withValues(alpha: 0.5),
+              ]
+            : [
+                Colors.white.withValues(alpha: 0.25),
+                Colors.white.withValues(alpha: 0.15),
+              ];
+
+        return Material(
+          type: MaterialType.transparency,
+          child: Stack(
             children: [
-              Expanded(
-                child: Text(
-                  isDefault && !hasDefaultTag ? '$label (默认)' : label,
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.of(dialogCtx).pop(),
                 ),
               ),
-              if (index == selected)
-                const Icon(Icons.check, size: 18, color: Colors.blue),
+              Positioned(
+                left: left,
+                top: top,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: panelWidth,
+                    maxHeight: maxHeight,
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: gradientColors,
+                          ),
+                        ),
+                        child: SingleChildScrollView(
+                          controller: scrollController,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(
+                              audioStreams.length,
+                              (index) {
+                                final data = audioStreams[index];
+                                final displayTitle =
+                                    data['DisplayTitle']?.toString() ?? '';
+                                final title = data['Title']?.toString() ?? '';
+                                final isDefault =
+                                    (data['IsDefault'] as bool?) == true;
+                                final isSelected = index == selected;
+
+                                // ✅ 主标题：优先使用 DisplayTitle
+                                String mainLabel = displayTitle.isNotEmpty
+                                    ? displayTitle
+                                    : _formatAudioStream(data);
+
+                                // ✅ 添加默认标记
+                                if (isDefault && !mainLabel.contains('默认')) {
+                                  mainLabel = '$mainLabel (默认)';
+                                }
+
+                                // ✅ 副标题：如果 Title 存在且不同于 DisplayTitle
+                                final hasSubtitle = title.isNotEmpty &&
+                                    title != displayTitle &&
+                                    displayTitle.isNotEmpty;
+
+                                return Material(
+                                  key: itemKeys[index], // ✅ 添加 key 用于滚动定位
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () =>
+                                        Navigator.of(dialogCtx).pop(index),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 8,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  mainLabel,
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 15,
+                                                    fontWeight: isSelected
+                                                        ? FontWeight.w600
+                                                        : FontWeight.w500,
+                                                  ),
+                                                ),
+                                                if (hasSubtitle) ...[
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    title,
+                                                    style: TextStyle(
+                                                      color: Colors.white
+                                                          .withOpacity(0.6),
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w400,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                          ),
+                                          if (isSelected)
+                                            const Icon(
+                                              Icons.check_rounded,
+                                              size: 20,
+                                              color: Colors.white,
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         );
-      }),
+      },
     );
+
+    scrollController.dispose();
 
     if (result != null && result >= 0 && result < audioStreams.length) {
       setState(() {
@@ -2170,60 +2369,258 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     List<Map<String, dynamic>> subtitleStreams,
     int selected,
   ) async {
-    final overlay =
-        Overlay.of(anchorContext).context.findRenderObject() as RenderBox;
-    final box = anchorContext.findRenderObject() as RenderBox;
-    final origin = box.localToGlobal(Offset.zero, ancestor: overlay);
-    final position = RelativeRect.fromLTRB(
-      origin.dx,
-      origin.dy + box.size.height,
-      overlay.size.width - origin.dx,
-      overlay.size.height - origin.dy - box.size.height,
+    if (subtitleStreams.isEmpty) return;
+
+    final RenderBox? button = anchorContext.findRenderObject() as RenderBox?;
+    final overlay = Navigator.of(context).overlay;
+    final RenderBox? overlayBox =
+        overlay?.context.findRenderObject() as RenderBox?;
+
+    if (button == null || overlayBox == null) return;
+
+    final Offset buttonOffset =
+        button.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final Size overlaySize = overlayBox.size;
+
+    double panelWidth = 280.0; // ✅ 增加宽度从 240 到 320
+    const double maxHeight = 260.0;
+
+    const double minLeftMargin = 16.0;
+    const double rightMargin = 18.0;
+
+    final double maxAllowedWidth =
+        overlaySize.width - minLeftMargin - rightMargin;
+    if (panelWidth > maxAllowedWidth) {
+      panelWidth = maxAllowedWidth.clamp(120.0, panelWidth);
+    }
+
+    double left = buttonOffset.dx;
+    final double maxLeft = overlaySize.width - panelWidth - rightMargin;
+
+    if (maxLeft < minLeftMargin) {
+      panelWidth = (overlaySize.width - minLeftMargin - rightMargin)
+          .clamp(120.0, panelWidth);
+      left = minLeftMargin;
+    } else {
+      left = left.clamp(minLeftMargin, maxLeft);
+    }
+    // ✅ 改为 top 定位，显示在按钮下方
+    final double top = buttonOffset.dy - 10;
+
+    final scrollController = ScrollController();
+    final itemKeys = List.generate(
+      subtitleStreams.length,
+      (index) => GlobalKey(),
     );
 
-    final result = await showMenu<int>(
+    final result = await showDialog<int>(
       context: context,
-      position: position,
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.26,
-      ),
-      items: [
-        // ✅ 添加"不显示"选项
-        PopupMenuItem<int>(
-          value: -1,
-          child: Row(
+      barrierDismissible: true,
+      barrierColor: Colors.transparent,
+      builder: (dialogCtx) {
+        // ✅ 使用延迟确保 ScrollView 已经完全构建后滚动到选中项
+        if (selected >= 0 && selected < itemKeys.length) {
+          Future.delayed(const Duration(milliseconds: 100), () {
+            try {
+              final key = itemKeys[selected];
+              final keyContext = key.currentContext;
+              if (keyContext != null) {
+                Scrollable.ensureVisible(
+                  keyContext,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  alignment: 0.0, // 0.0 = 顶部, 0.5 = 中间, 1.0 = 底部
+                );
+              }
+            } catch (e) {
+              // 忽略滚动错误
+            }
+          });
+        }
+
+        final isDark = isDarkModeFromContext(context, ref);
+        final gradientColors = isDark
+            ? [
+                Colors.grey.shade900.withValues(alpha: 0.7),
+                Colors.grey.shade800.withValues(alpha: 0.5),
+              ]
+            : [
+                Colors.white.withValues(alpha: 0.25),
+                Colors.white.withValues(alpha: 0.15),
+              ];
+
+        return Material(
+          type: MaterialType.transparency,
+          child: Stack(
             children: [
-              Expanded(
-                child: Text('不显示'),
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.of(dialogCtx).pop(),
+                ),
               ),
-              if (selected == -1)
-                const Icon(Icons.check, size: 18, color: Colors.blue),
-            ],
-          ),
-        ),
-        // ✅ 字幕流列表
-        ...List.generate(subtitleStreams.length, (index) {
-          final label = _formatSubtitleStream(subtitleStreams[index]);
-          final isDefault =
-              (subtitleStreams[index]['IsDefault'] as bool?) == true;
-          final hasDefaultTag = label.contains('默认');
-          return PopupMenuItem<int>(
-            value: index,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    isDefault && !hasDefaultTag ? '$label (默认)' : label,
+              Positioned(
+                left: left,
+                top: top,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: panelWidth,
+                    maxHeight: maxHeight,
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: gradientColors,
+                          ),
+                        ),
+                        child: SingleChildScrollView(
+                          controller: scrollController,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // ✅ "不显示"选项
+                              if (subtitleStreams.isNotEmpty)
+                                Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () =>
+                                        Navigator.of(dialogCtx).pop(-1),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 8,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '不显示',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 15,
+                                                fontWeight: selected == -1
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                          if (selected == -1)
+                                            const Icon(
+                                              Icons.check_rounded,
+                                              size: 20,
+                                              color: Colors.white,
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              // ✅ 字幕流列表
+                              ...List.generate(
+                                subtitleStreams.length,
+                                (index) {
+                                  final data = subtitleStreams[index];
+                                  final displayTitle =
+                                      data['DisplayTitle']?.toString() ?? '';
+                                  final title = data['Title']?.toString() ?? '';
+                                  final isDefault =
+                                      (data['IsDefault'] as bool?) == true;
+                                  final isSelected = index == selected;
+
+                                  // ✅ 主标题：优先使用 DisplayTitle
+                                  String mainLabel = displayTitle.isNotEmpty
+                                      ? displayTitle
+                                      : _formatSubtitleStream(data);
+
+                                  // ✅ 添加默认标记
+                                  if (isDefault && !mainLabel.contains('默认')) {
+                                    mainLabel = '$mainLabel (默认)';
+                                  }
+
+                                  // ✅ 副标题：如果 Title 存在且不同于 DisplayTitle
+                                  final hasSubtitle = title.isNotEmpty &&
+                                      title != displayTitle &&
+                                      displayTitle.isNotEmpty;
+
+                                  return Material(
+                                    key: itemKeys[index], // ✅ 添加 key 用于滚动定位
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () =>
+                                          Navigator.of(dialogCtx).pop(index),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 20,
+                                          vertical: 8,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    mainLabel,
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 15,
+                                                      fontWeight: isSelected
+                                                          ? FontWeight.w600
+                                                          : FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                  if (hasSubtitle) ...[
+                                                    const SizedBox(height: 2),
+                                                    Text(
+                                                      title,
+                                                      style: TextStyle(
+                                                        color: Colors.white
+                                                            .withOpacity(0.6),
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.w400,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                            ),
+                                            if (isSelected)
+                                              const Icon(
+                                                Icons.check_rounded,
+                                                size: 20,
+                                                color: Colors.white,
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                if (index == selected)
-                  const Icon(Icons.check, size: 18, color: Colors.blue),
-              ],
-            ),
-          );
-        }),
-      ],
+              ),
+            ],
+          ),
+        );
+      },
     );
+
+    scrollController.dispose();
 
     // ✅ 支持选择"不显示"（-1）或有效的字幕流索引
     if (result != null &&

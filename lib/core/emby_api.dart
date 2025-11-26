@@ -1975,6 +1975,8 @@ class EmbyApi {
     required String playSessionId,
     String? mediaSourceId,
     int? positionTicks,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
   }) async {
     try {
       final payload = <String, dynamic>{
@@ -1986,7 +1988,16 @@ class EmbyApi {
       if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
         payload['MediaSourceId'] = mediaSourceId;
       }
+      if (audioStreamIndex != null && audioStreamIndex >= 0) {
+        payload['AudioStreamIndex'] = audioStreamIndex;
+      }
+      if (subtitleStreamIndex != null) {
+        // ✅ 支持 -1 表示不显示字幕
+        payload['SubtitleStreamIndex'] = subtitleStreamIndex;
+      }
 
+      _apiLog(
+          '🎬 [API] Report playback start - Audio: $audioStreamIndex, Subtitle: $subtitleStreamIndex');
       await _dio.post('/Sessions/Playing', data: payload);
     } catch (e) {
       _apiLog('⚠️ [API] Failed to report playback start: $e');
@@ -2002,6 +2013,8 @@ class EmbyApi {
     String? mediaSourceId,
     required int positionTicks,
     bool isPaused = false,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
   }) async {
     try {
       final payload = <String, dynamic>{
@@ -2012,6 +2025,13 @@ class EmbyApi {
       };
       if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
         payload['MediaSourceId'] = mediaSourceId;
+      }
+      if (audioStreamIndex != null && audioStreamIndex >= 0) {
+        payload['AudioStreamIndex'] = audioStreamIndex;
+      }
+      if (subtitleStreamIndex != null) {
+        // ✅ 支持 -1 表示不显示字幕
+        payload['SubtitleStreamIndex'] = subtitleStreamIndex;
       }
 
       await _dio.post('/Sessions/Playing/Progress', data: payload);

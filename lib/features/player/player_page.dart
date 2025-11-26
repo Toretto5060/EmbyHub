@@ -222,6 +222,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _hasManuallySelectedAudio = false;
   List<Map<String, dynamic>> _audioStreams = [];
   List<Map<String, dynamic>> _subtitleStreams = [];
+  bool _showAudioMenu = false; // ✅ 是否显示音频选择菜单
+  bool _showSubtitleMenu = false; // ✅ 是否显示字幕选择菜单
 
   // ✅ 自定义字幕URL
   String? _subtitleUrl;
@@ -473,17 +475,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       } else {
         // ✅ 播放时，如果控制栏显示则启动自动隐藏计时器
         if (_showControls) {
-          // ✅ 如果是首次自动播放，立刻隐藏控制栏
+          // ✅ 如果是首次自动播放，立刻隐藏控制栏（但要检查是否有菜单显示）
           if (_isFirstTimeAutoPlay) {
             _isFirstTimeAutoPlay = false;
-            _playerLog(
-                '🎬 [Player] First time auto play, hide controls immediately');
-            _controlsAnimationController.reverse();
-            SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-            if (mounted) {
-              setState(() {
-                _showControls = false;
-              });
+            // ✅ 如果有音频或字幕菜单显示，不隐藏控制栏
+            if (!_showAudioMenu && !_showSubtitleMenu) {
+              _playerLog(
+                  '🎬 [Player] First time auto play, hide controls immediately');
+              _controlsAnimationController.reverse();
+              SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+              if (mounted) {
+                setState(() {
+                  _showControls = false;
+                });
+              }
             }
           } else {
             // ✅ 非首次播放（用户手动显示控制栏后），3秒后自动隐藏
@@ -498,6 +503,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             _playSessionId != null &&
             _mediaSourceId != null) {
           try {
+            final audioIndex = _getCurrentAudioStreamIndex();
+            final subtitleIndex = _getCurrentSubtitleStreamIndex();
+            _playerLog(
+                '🎬 [Player] Reporting playback start - Audio: $audioIndex, Subtitle: $subtitleIndex');
+
             await _api!.reportPlaybackStart(
               itemId: _currentItemId,
               userId: _userId!,
@@ -506,6 +516,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               positionTicks: _initialSeekPosition != null
                   ? (_initialSeekPosition!.inMicroseconds * 10).toInt()
                   : 0,
+              audioStreamIndex: audioIndex,
+              subtitleStreamIndex: subtitleIndex,
             );
             _hasReportedPlaybackStart = true; // ✅ 标记已汇报
             _playerLog('✅ [Player] Reported playback start to Emby server');
@@ -826,13 +838,42 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         // ✅ 获取 PlaybackInfo 以获取正确的 MediaSourceId 和分辨率选项
         if (_userId != null) {
           try {
-            // ✅ 第一次调用只是为了获取 MediaSourceId 和视频信息，不需要完整参数
+            // ✅ 获取实际的 MediaStream Index（用于 PlaybackInfo）
+            int? actualAudioIndex;
+            int? actualSubtitleIndex;
+
+            if (_hasManuallySelectedAudio &&
+                _selectedAudioStreamIndex != null &&
+                _selectedAudioStreamIndex! >= 0 &&
+                _selectedAudioStreamIndex! < _audioStreams.length) {
+              actualAudioIndex =
+                  _audioStreams[_selectedAudioStreamIndex!]['Index'] as int?;
+            }
+
+            if (_hasManuallySelectedSubtitle &&
+                _selectedSubtitleStreamIndex != null) {
+              if (_selectedSubtitleStreamIndex! >= 0 &&
+                  _selectedSubtitleStreamIndex! < _subtitleStreams.length) {
+                actualSubtitleIndex =
+                    _subtitleStreams[_selectedSubtitleStreamIndex!]['Index']
+                        as int?;
+              } else if (_selectedSubtitleStreamIndex == -1) {
+                actualSubtitleIndex = -1;
+              }
+            }
+
+            _playerLog(
+                '🎬 [Player] PlaybackInfo request - Audio Index: $actualAudioIndex, Subtitle Index: $actualSubtitleIndex');
+
+            // ✅ 调用 PlaybackInfo，传递音频和字幕索引
             final playbackInfo = await api.getPlaybackInfo(
               itemId: _currentItemId,
               userId: _userId!,
               startTimeTicks: 0,
               isPlayback: false,
               autoOpenLiveStream: false,
+              audioStreamIndex: actualAudioIndex,
+              subtitleStreamIndex: actualSubtitleIndex,
             );
             _playerLog('🎬 [Player] PlaybackInfo: $playbackInfo');
 
@@ -2150,8 +2191,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   // ✅ 开始自动隐藏控制栏的计时器
   void _startHideControlsTimer() {
-    // ✅ 如果速度列表正在显示或已锁定，不启动隐藏计时器，避免无法解锁
-    if (_showSpeedList || _isLocked) return;
+    // ✅ 如果速度列表、音频菜单、字幕菜单正在显示或已锁定，不启动隐藏计时器
+    if (_showSpeedList || _showAudioMenu || _showSubtitleMenu || _isLocked)
+      return;
 
     _cancelHideControlsTimer();
     _hideControlsTimer = Timer(const Duration(seconds: 3), () {
@@ -2159,6 +2201,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _showControls &&
           _isPlaying &&
           !_showSpeedList &&
+          !_showAudioMenu &&
+          !_showSubtitleMenu &&
           !_isLocked) {
         _controlsAnimationController.reverse();
         // ✅ 自动隐藏时也隐藏状态栏
@@ -2217,6 +2261,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     // ✅ 通知 Emby 服务器播放进度更新（用于记录播放历史）
     if (_playSessionId != null && _mediaSourceId != null) {
       final positionTicks = (pos.inMicroseconds * 10).toInt();
+      final audioIndex = _getCurrentAudioStreamIndex();
+      final subtitleIndex = _getCurrentSubtitleStreamIndex();
+
       unawaited(_api!.reportPlaybackProgress(
         itemId: _currentItemId,
         userId: _userId!,
@@ -2224,6 +2271,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         mediaSourceId: _mediaSourceId,
         positionTicks: positionTicks,
         isPaused: !_isPlaying,
+        audioStreamIndex: audioIndex,
+        subtitleStreamIndex: subtitleIndex,
       ));
     }
 
@@ -3289,16 +3338,25 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     return index;
   }
 
-  // ✅ 格式化音频流
+  // ✅ 格式化音频流（仅用于选中后的显示）
   String _formatAudioStream(Map<String, dynamic> stream) {
+    final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+
+    // ✅ 如果有 DisplayTitle，直接使用
+    if (displayTitle.isNotEmpty) {
+      return displayTitle;
+    }
+
+    // ✅ 如果没有 DisplayTitle，尝试使用 Title
+    final title = stream['Title']?.toString() ?? '';
+    if (title.isNotEmpty) {
+      return title;
+    }
+
+    // ✅ 如果都没有，回退到手动构建
     final codec = stream['Codec']?.toString().toUpperCase();
     final channels = (stream['Channels'] as num?)?.toInt();
     final language = stream['Language']?.toString();
-
-    final displayTitle = stream['DisplayTitle']?.toString();
-    if (displayTitle != null && displayTitle.isNotEmpty) {
-      return displayTitle;
-    }
 
     final parts = <String>[];
     if (language != null && language.isNotEmpty) {
@@ -3317,13 +3375,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     return parts.isEmpty ? '未知' : parts.join(' ');
   }
 
-  // ✅ 格式化字幕流
+  // ✅ 格式化字幕流（仅用于选中后的显示）
   String _formatSubtitleStream(Map<String, dynamic> stream) {
-    final displayTitle = stream['DisplayTitle']?.toString();
-    if (displayTitle != null && displayTitle.isNotEmpty) {
+    final displayTitle = stream['DisplayTitle']?.toString() ?? '';
+
+    // ✅ 如果有 DisplayTitle，直接使用
+    if (displayTitle.isNotEmpty) {
       return displayTitle;
     }
 
+    // ✅ 如果没有 DisplayTitle，尝试使用 Title
+    final title = stream['Title']?.toString() ?? '';
+    if (title.isNotEmpty) {
+      return title;
+    }
+
+    // ✅ 如果都没有，回退到手动构建
     final language = stream['Language']?.toString();
     final codec = stream['Codec']?.toString().toUpperCase();
     final isForced = stream['IsForced'] == true;
@@ -3347,6 +3414,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (_audioStreams.isEmpty) return;
 
     _cancelHideControlsTimer();
+
+    // ✅ 标记音频菜单正在显示
+    setState(() {
+      _showAudioMenu = true;
+    });
 
     final RenderBox? button = anchorContext.findRenderObject() as RenderBox?;
     final overlay = Navigator.of(context).overlay;
@@ -3385,21 +3457,33 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     } else {
       left = left.clamp(minLeftMargin, maxLeft);
     }
-    final double bottom = (overlaySize.height - buttonOffset.dy) + spacing;
+    final double bottom = (overlaySize.height - buttonOffset.dy) + spacing + 10;
 
     final scrollController = ScrollController();
+    final itemKeys = List.generate(
+      _audioStreams.length,
+      (index) => GlobalKey(),
+    );
 
     void scheduleScroll() {
-      if (_selectedAudioStreamIndex == null) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!scrollController.hasClients) return;
-        const itemHeight = 48.0;
-        final target = _selectedAudioStreamIndex! * itemHeight;
-        final maxExtent = scrollController.position.maxScrollExtent;
-        final viewport = scrollController.position.viewportDimension;
-        final offset =
-            (target - viewport / 2 + itemHeight / 2).clamp(0.0, maxExtent);
-        scrollController.jumpTo(offset);
+      if (_selectedAudioStreamIndex == null ||
+          _selectedAudioStreamIndex! < 0 ||
+          _selectedAudioStreamIndex! >= itemKeys.length) return;
+      Future.delayed(const Duration(milliseconds: 100), () {
+        try {
+          final key = itemKeys[_selectedAudioStreamIndex!];
+          final context = key.currentContext;
+          if (context != null) {
+            Scrollable.ensureVisible(
+              context,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              alignment: 0.0, // ✅ 滚动到顶部
+            );
+          }
+        } catch (e) {
+          // 忽略滚动错误
+        }
       });
     }
 
@@ -3458,17 +3542,31 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                               _audioStreams.length,
                               (index) {
                                 final data = _audioStreams[index];
-                                final label = _formatAudioStream(data);
+                                final displayTitle =
+                                    data['DisplayTitle']?.toString() ?? '';
+                                final title = data['Title']?.toString() ?? '';
                                 final isDefault =
                                     (data['IsDefault'] as bool?) == true;
-                                final hasDefaultTag = label.contains('默认');
                                 final isSelected =
                                     index == _selectedAudioStreamIndex;
-                                final displayLabel = isDefault && !hasDefaultTag
-                                    ? '$label (默认)'
-                                    : label;
+
+                                // ✅ 主标题：优先使用 DisplayTitle
+                                String mainLabel = displayTitle.isNotEmpty
+                                    ? displayTitle
+                                    : _formatAudioStream(data);
+
+                                // ✅ 添加默认标记
+                                if (isDefault && !mainLabel.contains('默认')) {
+                                  mainLabel = '$mainLabel (默认)';
+                                }
+
+                                // ✅ 副标题：如果 Title 存在且不同于 DisplayTitle
+                                final hasSubtitle = title.isNotEmpty &&
+                                    title != displayTitle &&
+                                    displayTitle.isNotEmpty;
 
                                 return Material(
+                                  key: itemKeys[index], // ✅ 添加 key 用于滚动定位
                                   color: Colors.transparent,
                                   child: InkWell(
                                     onTap: () =>
@@ -3476,20 +3574,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                     child: Padding(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 20,
-                                        vertical: 14,
+                                        vertical: 8,
                                       ),
                                       child: Row(
                                         children: [
                                           Expanded(
-                                            child: Text(
-                                              displayLabel,
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 15,
-                                                fontWeight: isSelected
-                                                    ? FontWeight.w600
-                                                    : FontWeight.w500,
-                                              ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  mainLabel,
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 15,
+                                                    fontWeight: isSelected
+                                                        ? FontWeight.w600
+                                                        : FontWeight.w500,
+                                                  ),
+                                                ),
+                                                if (hasSubtitle) ...[
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    title,
+                                                    style: TextStyle(
+                                                      color: Colors.white
+                                                          .withOpacity(0.6),
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w400,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
                                             ),
                                           ),
                                           if (isSelected)
@@ -3519,6 +3637,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     );
 
     scrollController.dispose();
+
+    // ✅ 标记音频菜单已关闭
+    setState(() {
+      _showAudioMenu = false;
+    });
+
     _resetHideControlsTimer();
 
     if (result != null && result >= 0 && result < _audioStreams.length) {
@@ -3543,6 +3667,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (_subtitleStreams.isEmpty) return;
 
     _cancelHideControlsTimer();
+
+    // ✅ 标记字幕菜单正在显示
+    setState(() {
+      _showSubtitleMenu = true;
+    });
 
     final RenderBox? button = anchorContext.findRenderObject() as RenderBox?;
     final overlay = Navigator.of(context).overlay;
@@ -3581,23 +3710,38 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     } else {
       left = left.clamp(minLeftMargin, maxLeft);
     }
-    final double bottom = (overlaySize.height - buttonOffset.dy) + spacing;
+    final double bottom = (overlaySize.height - buttonOffset.dy) + spacing + 10;
 
     final scrollController = ScrollController();
+    // ✅ +1 因为第一个是"不显示"选项
+    final itemKeys = List.generate(
+      _subtitleStreams.length + 1,
+      (index) => GlobalKey(),
+    );
 
     void scheduleScroll() {
-      if (_selectedSubtitleStreamIndex == null ||
-          _selectedSubtitleStreamIndex == -1) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!scrollController.hasClients) return;
-        const itemHeight = 48.0;
-        // ✅ 如果选择了"不显示"（-1），则不需要滚动；否则需要+1因为第一个是"不显示"选项
-        final target = (_selectedSubtitleStreamIndex! + 1) * itemHeight;
-        final maxExtent = scrollController.position.maxScrollExtent;
-        final viewport = scrollController.position.viewportDimension;
-        final offset =
-            (target - viewport / 2 + itemHeight / 2).clamp(0.0, maxExtent);
-        scrollController.jumpTo(offset);
+      if (_selectedSubtitleStreamIndex == null) return;
+      // ✅ -1 表示"不显示"，对应 itemKeys[0]
+      // >=0 表示字幕流索引，对应 itemKeys[index + 1]
+      final keyIndex = _selectedSubtitleStreamIndex == -1
+          ? 0
+          : _selectedSubtitleStreamIndex! + 1;
+      if (keyIndex < 0 || keyIndex >= itemKeys.length) return;
+      Future.delayed(const Duration(milliseconds: 100), () {
+        try {
+          final key = itemKeys[keyIndex];
+          final context = key.currentContext;
+          if (context != null) {
+            Scrollable.ensureVisible(
+              context,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              alignment: 0.0, // ✅ 滚动到顶部
+            );
+          }
+        } catch (e) {
+          // 忽略滚动错误
+        }
       });
     }
 
@@ -3656,6 +3800,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                               // ✅ 只有当字幕数量大于0时才添加"不显示"选项
                               if (_subtitleStreams.isNotEmpty)
                                 Material(
+                                  key: itemKeys[0], // ✅ "不显示"选项的 key
                                   color: Colors.transparent,
                                   child: InkWell(
                                     onTap: () =>
@@ -3663,7 +3808,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                     child: Padding(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 20,
-                                        vertical: 14,
+                                        vertical: 8,
                                       ),
                                       child: Row(
                                         children: [
@@ -3697,21 +3842,33 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                               ...List.generate(
                                 _subtitleStreams.length,
                                 (index) {
-                                  final label = _formatSubtitleStream(
-                                      _subtitleStreams[index]);
-                                  final isDefault = (_subtitleStreams[index]
-                                          ['IsDefault'] as bool?) ==
-                                      true;
-                                  final hasDefaultTag = label.contains('默认');
+                                  final data = _subtitleStreams[index];
+                                  final displayTitle =
+                                      data['DisplayTitle']?.toString() ?? '';
+                                  final title = data['Title']?.toString() ?? '';
+                                  final isDefault =
+                                      (data['IsDefault'] as bool?) == true;
                                   final isSelected =
                                       index == _selectedSubtitleStreamIndex;
 
-                                  final displayLabel =
-                                      isDefault && !hasDefaultTag
-                                          ? '$label (默认)'
-                                          : label;
+                                  // ✅ 主标题：优先使用 DisplayTitle
+                                  String mainLabel = displayTitle.isNotEmpty
+                                      ? displayTitle
+                                      : _formatSubtitleStream(data);
+
+                                  // ✅ 添加默认标记
+                                  if (isDefault && !mainLabel.contains('默认')) {
+                                    mainLabel = '$mainLabel (默认)';
+                                  }
+
+                                  // ✅ 副标题：如果 Title 存在且不同于 DisplayTitle
+                                  final hasSubtitle = title.isNotEmpty &&
+                                      title != displayTitle &&
+                                      displayTitle.isNotEmpty;
 
                                   return Material(
+                                    key: itemKeys[index +
+                                        1], // ✅ 字幕流的 key（+1 因为第一个是"不显示"）
                                     color: Colors.transparent,
                                     child: InkWell(
                                       onTap: () =>
@@ -3719,20 +3876,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       child: Padding(
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 20,
-                                          vertical: 14,
+                                          vertical: 10,
                                         ),
                                         child: Row(
                                           children: [
                                             Expanded(
-                                              child: Text(
-                                                displayLabel,
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 15,
-                                                  fontWeight: isSelected
-                                                      ? FontWeight.w600
-                                                      : FontWeight.w500,
-                                                ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    mainLabel,
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 15,
+                                                      fontWeight: isSelected
+                                                          ? FontWeight.w600
+                                                          : FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                  if (hasSubtitle) ...[
+                                                    const SizedBox(height: 2),
+                                                    Text(
+                                                      title,
+                                                      style: TextStyle(
+                                                        color: Colors.white
+                                                            .withOpacity(0.6),
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.w400,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
                                               ),
                                             ),
                                             if (isSelected)
@@ -3763,6 +3940,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     );
 
     scrollController.dispose();
+
+    // ✅ 标记字幕菜单已关闭
+    setState(() {
+      _showSubtitleMenu = false;
+    });
+
     _resetHideControlsTimer();
 
     // ✅ 支持选择"不显示"（-1）或有效的字幕流索引
@@ -3970,6 +4153,31 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         () => _player.setVolume(volumePercent),
       );
 
+  // ✅ 获取当前选中的音频 MediaStream Index（不是数组索引）
+  int? _getCurrentAudioStreamIndex() {
+    if (_selectedAudioStreamIndex != null &&
+        _selectedAudioStreamIndex! >= 0 &&
+        _selectedAudioStreamIndex! < _audioStreams.length) {
+      return _audioStreams[_selectedAudioStreamIndex!]['Index'] as int?;
+    }
+    return null;
+  }
+
+  // ✅ 获取当前选中的字幕 MediaStream Index（不是数组索引）
+  int? _getCurrentSubtitleStreamIndex() {
+    if (_selectedSubtitleStreamIndex == null) {
+      return null;
+    }
+    if (_selectedSubtitleStreamIndex == -1) {
+      return -1; // 不显示字幕
+    }
+    if (_selectedSubtitleStreamIndex! >= 0 &&
+        _selectedSubtitleStreamIndex! < _subtitleStreams.length) {
+      return _subtitleStreams[_selectedSubtitleStreamIndex!]['Index'] as int?;
+    }
+    return null;
+  }
+
   // ✅ 切换到新剧集（直接切换URL，不重新创建播放器）
   Future<void> _switchToNewEpisode(String newItemId) async {
     _playerLogImportant('🎬 [Player] Switching to new episode: $newItemId');
@@ -4052,36 +4260,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         );
       }
 
-      // ✅ 获取PlaybackInfo和MediaSourceId（只是为了获取信息）
-      final playbackInfo = await _api!.getPlaybackInfo(
-        itemId: _currentItemId,
-        userId: _userId!,
-        startTimeTicks: 0,
-        isPlayback: false,
-        autoOpenLiveStream: false,
-      );
+      // ✅ 更新音频和字幕流信息（新剧集）
+      _audioStreams = _getAudioStreams(itemDetails);
+      _subtitleStreams = _getSubtitleStreams(itemDetails);
 
-      if (playbackInfo['MediaSources'] != null &&
-          playbackInfo['MediaSources'] is List &&
-          (playbackInfo['MediaSources'] as List).isNotEmpty) {
-        final firstSource = (playbackInfo['MediaSources'] as List).first;
-        if (firstSource is Map) {
-          final playbackMediaSource = Map<String, dynamic>.from(firstSource);
-          _mediaSourceId = playbackMediaSource['Id'] as String?;
-          _playSessionId = playbackInfo['PlaySessionId'] as String?;
-        }
-      }
-
-      // ✅ 获取选中的画质参数
-      Map<String, dynamic>? qualityOption;
-      if (_selectedQuality != null && _qualityOptions.isNotEmpty) {
-        qualityOption = _qualityOptions.firstWhere(
-          (q) => q['label'] == _selectedQuality,
-          orElse: () => <String, dynamic>{},
-        );
-      }
-
-      // ✅ 获取实际的 MediaStream Index（不是数组索引）
+      // ✅ 获取实际的 MediaStream Index（用于 PlaybackInfo）
       int? actualAudioIndex;
       int? actualSubtitleIndex;
 
@@ -4104,7 +4287,41 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         }
       }
 
-      // ✅ 构建新的HLS URL
+      _playerLog(
+          '🎬 [Player] Switch episode - Audio Index: $actualAudioIndex, Subtitle Index: $actualSubtitleIndex');
+
+      // ✅ 获取PlaybackInfo和MediaSourceId（传递音频和字幕索引）
+      final playbackInfo = await _api!.getPlaybackInfo(
+        itemId: _currentItemId,
+        userId: _userId!,
+        startTimeTicks: 0,
+        isPlayback: false,
+        autoOpenLiveStream: false,
+        audioStreamIndex: actualAudioIndex,
+        subtitleStreamIndex: actualSubtitleIndex,
+      );
+
+      if (playbackInfo['MediaSources'] != null &&
+          playbackInfo['MediaSources'] is List &&
+          (playbackInfo['MediaSources'] as List).isNotEmpty) {
+        final firstSource = (playbackInfo['MediaSources'] as List).first;
+        if (firstSource is Map) {
+          final playbackMediaSource = Map<String, dynamic>.from(firstSource);
+          _mediaSourceId = playbackMediaSource['Id'] as String?;
+          _playSessionId = playbackInfo['PlaySessionId'] as String?;
+        }
+      }
+
+      // ✅ 获取选中的画质参数
+      Map<String, dynamic>? qualityOption;
+      if (_selectedQuality != null && _qualityOptions.isNotEmpty) {
+        qualityOption = _qualityOptions.firstWhere(
+          (q) => q['label'] == _selectedQuality,
+          orElse: () => <String, dynamic>{},
+        );
+      }
+
+      // ✅ 构建新的HLS URL（复用之前计算的 actualAudioIndex 和 actualSubtitleIndex）
       final media = await _api!.buildHlsUrl(
         _currentItemId,
         audioStreamIndex: actualAudioIndex,
@@ -4134,12 +4351,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // ✅ 主动向 Emby 汇报新剧集的播放开始
       if (_playSessionId != null && _mediaSourceId != null) {
         try {
+          final audioIndex = _getCurrentAudioStreamIndex();
+          final subtitleIndex = _getCurrentSubtitleStreamIndex();
+          _playerLog(
+              '🎬 [Player] Reporting new episode start - Audio: $audioIndex, Subtitle: $subtitleIndex');
+
           await _api!.reportPlaybackStart(
             itemId: _currentItemId,
             userId: _userId!,
             playSessionId: _playSessionId!,
             mediaSourceId: _mediaSourceId,
             positionTicks: 0, // 从头开始
+            audioStreamIndex: audioIndex,
+            subtitleStreamIndex: subtitleIndex,
           );
           _hasReportedPlaybackStart = true; // ✅ 标记已汇报，防止重复
           _playerLog('✅ [Player] Reported playback start for new episode');
