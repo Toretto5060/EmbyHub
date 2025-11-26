@@ -879,10 +879,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 '🎬 [Player] PlaybackInfo request - Audio Index: $actualAudioIndex, Subtitle Index: $actualSubtitleIndex');
 
             // ✅ 调用 PlaybackInfo，传递音频和字幕索引
+            // ✅ 如果有初始播放位置（恢复播放），传递对应的 ticks 值
             final playbackInfo = await api.getPlaybackInfo(
               itemId: _currentItemId,
               userId: _userId!,
-              startTimeTicks: 0,
+              startTimeTicks: _initialSeekPosition != null
+                  ? (_initialSeekPosition!.inMicroseconds * 10).toInt()
+                  : 0,
               isPlayback: false,
               autoOpenLiveStream: false,
               audioStreamIndex: actualAudioIndex,
