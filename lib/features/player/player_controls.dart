@@ -303,12 +303,11 @@ class PlayerControls extends ConsumerWidget {
   }
 }
 
-/// ✅ 提取分辨率短标签（只显示 "xxxP" 部分，不显示比特率）
+/// ✅ 获取画质档位标签
 String _getShortQualityLabel(String? fullLabel) {
   if (fullLabel == null) return '自动';
-  // ✅ 格式：1080p-60Mbps -> 1080p
-  final parts = fullLabel.split('-');
-  return parts.isNotEmpty ? parts[0] : fullLabel;
+  // ✅ 直接返回档位名称：超清、高清、清晰、流畅
+  return fullLabel;
 }
 
 /// ✅ 顶部控制栏

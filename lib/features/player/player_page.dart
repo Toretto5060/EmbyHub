@@ -21,12 +21,15 @@ import 'player_controls.dart';
 
 const bool _kPlayerLogging = false; // 已禁用日志
 void _playerLog(String message) {
-  // 日志已禁用
+  if (kDebugMode) {
+    print(message);
+  }
 }
 
-// 重要日志已禁用
 void _playerLogImportant(String message) {
-  // 日志已禁用
+  if (kDebugMode) {
+    print(message);
+  }
 }
 
 class PlayerPage extends ConsumerStatefulWidget {
@@ -445,12 +448,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       setState(() => _isBuffering = isBuffering);
 
       // ✅ 如果从缓冲状态变为非缓冲状态，且播放器应该在播放但实际没有播放，则恢复播放
-      if (wasBuffering && !isBuffering && !_player.isPlaying) {
+      // ✅ 但要确保已经完成初始加载（_ready == true），避免与初始播放逻辑冲突
+      if (wasBuffering && !isBuffering && _ready && !_player.isPlaying) {
         _playerLog(
             '🎬 [Player] Buffering ended, checking if need to resume playback...');
         // 延迟一小段时间，确保播放器状态稳定
-        await Future.delayed(const Duration(milliseconds: 100));
-        if (mounted && !_player.isPlaying) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (mounted && _ready && !_player.isPlaying) {
           _playerLog('🎬 [Player] Resuming playback after buffering');
           await _playerPlay();
         }
@@ -532,9 +536,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
 
     _readySub?.cancel();
-    _readySub = _player.readyStream.listen((ready) {
+    _readySub = _player.readyStream.listen((ready) async {
       if (mounted) {
         setState(() => _ready = ready);
+      }
+
+      // ✅ 当播放器准备就绪时，确保播放已经开始
+      if (ready && mounted) {
+        // 延迟检查，给 autoPlay 一些时间生效
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted && _ready && !_player.isPlaying && !_isBuffering) {
+          _playerLogImportant(
+              '🎬 [Player] Player ready but not playing, starting playback');
+          await _playerPlay();
+        }
       }
     });
 
@@ -655,8 +670,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         widget.itemId,
         audioStreamIndex: actualAudioIndex,
         subtitleStreamIndex: actualSubtitleIndex,
-        maxWidth: qualityOption?['width'] as int?,
-        maxHeight: qualityOption?['height'] as int?,
         maxBitrate: qualityOption?['bitrate'] as int?,
         startTimeTicks: currentPosition.inMicroseconds > 0
             ? (currentPosition.inMicroseconds * 10).toInt()
@@ -891,12 +904,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               }
             }
 
-            // ✅ 根据 PlaybackInfo 中的视频分辨率生成转码选项（优先使用 PlaybackInfo）
-            final generatedOptions = playbackMediaSource != null
-                ? _generateQualityOptionsFromMediaSource(playbackMediaSource)
-                : _generateQualityOptions(itemDetails);
+            // ✅ 根据原始视频分辨率和码率生成画质选项
+            // ✅ 优先从 MediaSource 获取宽高，如果没有则从 VideoStream 获取
+            final mediaWidth = (playbackMediaSource?['Width'] as num?)?.toInt();
+            final mediaHeight =
+                (playbackMediaSource?['Height'] as num?)?.toInt();
+            final videoStream =
+                _getVideoStreamFromMediaSource(playbackMediaSource);
+            final sourceWidth =
+                mediaWidth ?? (videoStream?['Width'] as num?)?.toInt();
+            final sourceHeight =
+                mediaHeight ?? (videoStream?['Height'] as num?)?.toInt();
+
+            // ✅ 从视频流中获取比特率（不是整个 MediaSource 的比特率）
+            final videoBitrate = (videoStream?['BitRate'] as num?)?.toInt();
             _playerLog(
-                '🎬 [Player] Generated options count: ${generatedOptions.length}');
+                '🎬 [Player] Video stream bitrate: $videoBitrate (${videoBitrate != null ? (videoBitrate / 1000000).toStringAsFixed(1) : "unknown"}Mbps)');
+
+            final generatedOptions = _generateSimpleQualityOptions(
+                videoBitrate, sourceWidth, sourceHeight);
+            _playerLog(
+                '🎬 [Player] Original: ${sourceWidth}x${sourceHeight}, bitrate: $videoBitrate, Generated quality options: ${generatedOptions.map((o) => o['label']).join(', ')}');
 
             if (mounted) {
               setState(() {
@@ -983,6 +1011,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           (q) => q['label'] == _selectedQuality,
           orElse: () => <String, dynamic>{},
         );
+        if (qualityOption.isEmpty) {
+          qualityOption = null;
+        }
+        _playerLogImportant(
+            '🎬 [Player] Selected quality: ${qualityOption?['label']}, '
+            'bitrate=${qualityOption?['bitrate']}');
+      } else {
+        _playerLogImportant(
+            '🎬 [Player] No quality selected (will use original quality)');
       }
 
       // ✅ 获取实际的 MediaStream Index（不是数组索引）
@@ -995,6 +1032,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _selectedAudioStreamIndex! < _audioStreams.length) {
         actualAudioIndex =
             _audioStreams[_selectedAudioStreamIndex!]['Index'] as int?;
+      } else if (_audioStreams.isNotEmpty) {
+        // ✅ 如果没有手动选择，使用第一个音轨
+        actualAudioIndex = _audioStreams[0]['Index'] as int?;
+        _playerLog(
+            '🎬 [Player] Using default audio track (Index: $actualAudioIndex)');
       }
 
       if (_hasManuallySelectedSubtitle &&
@@ -1007,6 +1049,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           // -1 表示不显示字幕
           actualSubtitleIndex = -1;
         }
+      } else {
+        // ✅ 如果没有手动选择字幕，默认不显示字幕
+        actualSubtitleIndex = -1;
+        _playerLog('🎬 [Player] Using default subtitle setting (disabled)');
       }
 
       _playerLog(
@@ -1014,13 +1060,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerLog(
           '🎬 [Player] Initial load - MediaStream indices - Audio: $actualAudioIndex, Subtitle: $actualSubtitleIndex');
 
+      final requestedBitrate = qualityOption?['bitrate'] as int?;
+      _playerLogImportant(
+          '🎬 [Player] Initial load with bitrate: $requestedBitrate');
+
       final media = await api.buildHlsUrl(
         _currentItemId,
         audioStreamIndex: actualAudioIndex,
         subtitleStreamIndex: actualSubtitleIndex,
-        maxWidth: qualityOption?['width'] as int?,
-        maxHeight: qualityOption?['height'] as int?,
-        maxBitrate: qualityOption?['bitrate'] as int?,
+        maxBitrate: requestedBitrate,
         startTimeTicks: _initialSeekPosition != null
             ? (_initialSeekPosition!.inMicroseconds * 10).toInt()
             : null,
@@ -1129,8 +1177,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerLog('🎬 [Player] ✅ Media opened successfully');
       _showMediaNotification();
 
-      // ✅ 播放器已通过原生层的 playWhenReady 自动开始播放
-      _playerLogImportant('🎬 [Player] Playback started with autoPlay');
+      // ✅ 等待播放器准备就绪并确保开始播放
+      _playerLogImportant(
+          '🎬 [Player] Waiting for player ready and ensuring playback...');
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // ✅ 明确检查并启动播放（防止 autoPlay 失败）
+      if (mounted && !_player.isPlaying) {
+        _playerLogImportant(
+            '🎬 [Player] AutoPlay did not start, manually starting playback');
+        await _playerPlay();
+      } else {
+        _playerLogImportant('🎬 [Player] Playback started with autoPlay');
+      }
 
       // ✅ 更新初始位置（如果有）
       if (resumeFromSavedPosition && _initialSeekPosition != null) {
@@ -1597,136 +1656,110 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     );
   }
 
-  // 获取原始分辨率
+  // 获取最高画质
   String? _getOriginalQuality() {
     if (_qualityOptions.isEmpty) return null;
-
-    // 查找标记为原始的选项
-    final originalOption = _qualityOptions.firstWhere(
-      (q) => q['isOriginal'] == true,
-      orElse: () => <String, dynamic>{},
-    );
-
-    if (originalOption.isNotEmpty) {
-      return originalOption['label'] as String;
-    }
-
-    // 如果没有标记原始的，返回第一个（最高画质）
+    // 返回第一个选项（最高画质）
     return _qualityOptions.first['label'] as String;
   }
 
-  // 质量优先模式：默认选择视频原始分辨率
+  // 质量优先模式：选择最高画质
   String? _selectQualityForQualityMode() {
     return _getOriginalQuality();
   }
 
-  // 自动模式：根据网络环境自动切换到合适的分辨率
-  // 速度好则最高使用原始分辨率，其他网络状态则根据原始分辨率依次往下
+  // 自动模式：根据网络速度选择合适的画质
   String? _selectQualityForAutoMode() {
     if (_qualityOptions.isEmpty) return null;
 
     final speedMbps = (_currentSpeedKbps ?? 0) / 1000;
 
-    // 没有网络速度数据，使用原始分辨率
+    // 没有网络速度数据，使用最高画质
     if (speedMbps <= 0) {
       return _getOriginalQuality();
     }
 
-    // 根据网络速度选择合适的画质
-    // 策略：选择比特率不超过网络速度 70% 的最高画质
-    final targetBitrateMbps = speedMbps * 0.7;
+    // ✅ 根据网络速度选择合适的画质，但要确保该档位存在
+    final availableLabels =
+        _qualityOptions.map((o) => o['label'] as String).toList();
 
-    for (final option in _qualityOptions) {
-      final maxBitrate = option['maxBitrate'] as int?;
-      if (maxBitrate != null) {
-        final bitrateMbps = maxBitrate / 1000000;
-        if (bitrateMbps <= targetBitrateMbps) {
-          return option['label'] as String;
-        }
+    String? targetQuality;
+    if (speedMbps >= 120) {
+      targetQuality = '超清';
+    } else if (speedMbps >= 60) {
+      targetQuality = '高清';
+    } else if (speedMbps >= 30) {
+      targetQuality = '清晰';
+    } else {
+      targetQuality = '流畅';
+    }
+
+    // ✅ 如果目标档位不存在，选择最接近的较低档位
+    if (availableLabels.contains(targetQuality)) {
+      return targetQuality;
+    }
+
+    // ✅ 目标档位不存在，从目标档位往下找第一个可用的
+    final preferredOrder = ['超清', '高清', '清晰', '流畅'];
+    final targetIndex = preferredOrder.indexOf(targetQuality);
+
+    for (int i = targetIndex + 1; i < preferredOrder.length; i++) {
+      if (availableLabels.contains(preferredOrder[i])) {
+        return preferredOrder[i];
       }
     }
 
-    // 网络太慢，选择最低画质
+    // ✅ 都没找到，返回最低画质
     return _qualityOptions.last['label'] as String;
   }
 
-  // 速度优先模式：
-  // 网络允许的情况下走自动
-  // 网络状态不允许的情况下使用1080p的最低画质
-  // 如果最高画质只有720p则使用最高画质
+  // 速度优先模式：选择平衡的画质
   String? _selectQualityForSpeedMode() {
     if (_qualityOptions.isEmpty) return null;
 
     final speedMbps = (_currentSpeedKbps ?? 0) / 1000;
+    final availableLabels =
+        _qualityOptions.map((o) => o['label'] as String).toList();
 
-    // 没有网络速度数据，使用保守策略
+    String? targetQuality;
+
+    // 没有网络速度数据，优先选择高清，如果没有则选次高档位
     if (speedMbps <= 0) {
-      return _selectFallbackQualityForSpeedMode();
-    }
-
-    // 网络允许的情况下，走自动模式
-    final autoQuality = _selectQualityForAutoMode();
-    if (autoQuality != null) {
-      // 检查自动选择的画质是否合理
-      // 如果网络速度足够（>= 20Mbps），使用自动选择
-      if (speedMbps >= 20) {
-        return autoQuality;
+      if (availableLabels.contains('高清')) {
+        return '高清';
+      } else {
+        return _qualityOptions.first['label'] as String; // 返回最高可用档位
       }
     }
 
-    // 网络不够好，使用保守策略
-    return _selectFallbackQualityForSpeedMode();
-  }
+    // 根据网络速度选择
+    if (speedMbps >= 60) {
+      targetQuality = '高清';
+    } else if (speedMbps >= 30) {
+      targetQuality = '清晰';
+    } else {
+      targetQuality = '流畅';
+    }
 
-  // 速度优先模式的保守策略
-  String? _selectFallbackQualityForSpeedMode() {
-    if (_qualityOptions.isEmpty) return null;
+    // ✅ 如果目标档位不存在，选择最接近的较低档位
+    if (availableLabels.contains(targetQuality)) {
+      return targetQuality;
+    }
 
-    // 查找最高分辨率
-    int maxHeight = 0;
-    for (final option in _qualityOptions) {
-      final height = option['height'] as int? ?? 0;
-      if (height > maxHeight) {
-        maxHeight = height;
+    // ✅ 目标档位不存在，从目标档位往下找第一个可用的
+    final preferredOrder = ['高清', '清晰', '流畅'];
+    final targetIndex = preferredOrder.indexOf(targetQuality);
+
+    if (targetIndex >= 0) {
+      for (int i = targetIndex + 1; i < preferredOrder.length; i++) {
+        if (availableLabels.contains(preferredOrder[i])) {
+          return preferredOrder[i];
+        }
       }
     }
 
-    // 如果最高画质只有720p或更低，使用最高画质
-    if (maxHeight <= 720) {
-      return _qualityOptions.first['label'] as String;
-    }
-
-    // 最高画质超过720p，查找1080p的最低比特率选项
-    String? lowest1080p;
-    int lowestBitrate = 999999999;
-
-    for (final option in _qualityOptions) {
-      final label = option['label'] as String;
-      final height = option['height'] as int? ?? 0;
-      final bitrate = option['maxBitrate'] as int? ?? 0;
-
-      if (height == 1080 && bitrate > 0 && bitrate < lowestBitrate) {
-        lowestBitrate = bitrate;
-        lowest1080p = label;
-      }
-    }
-
-    // 如果找到1080p选项，返回最低比特率的1080p
-    if (lowest1080p != null) {
-      return lowest1080p;
-    }
-
-    // 没有1080p，查找最接近1080p的选项（往下找）
-    for (final option in _qualityOptions) {
-      final height = option['height'] as int? ?? 0;
-      if (height < 1080 && height >= 720) {
-        return option['label'] as String;
-      }
-    }
-
-    // 都没有，返回中等画质
-    final middleIndex = _qualityOptions.length ~/ 2;
-    return _qualityOptions[middleIndex]['label'] as String;
+    // ✅ 都没找到，返回最低画质
+    return _qualityOptions.last['label'] as String;
   }
 
   // ✅ 分辨率选择回调
@@ -1758,9 +1791,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         orElse: () => <String, dynamic>{},
       );
       if (selectedOption.isNotEmpty) {
+        final bitrate = selectedOption['bitrate'] as int?;
+        final bitrateMbps = bitrate != null
+            ? (bitrate / 1000000).toStringAsFixed(1)
+            : 'unknown';
         _playerLogImportant(
-            '🎬 [Player] Selected quality params: width=${selectedOption['width']}, '
-            'height=${selectedOption['height']}, maxBitrate=${selectedOption['maxBitrate']}');
+            '🎬 [Player] Selected quality: ${selectedOption['label']}, bitrate: ${bitrateMbps}Mbps');
       }
     }
 
@@ -1795,6 +1831,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _selectedAudioStreamIndex! < _audioStreams.length) {
         actualAudioIndex =
             _audioStreams[_selectedAudioStreamIndex!]['Index'] as int?;
+      } else if (_audioStreams.isNotEmpty) {
+        // ✅ 如果没有选择，使用第一个音轨
+        actualAudioIndex = _audioStreams[0]['Index'] as int?;
       }
 
       if (_selectedSubtitleStreamIndex != null &&
@@ -1805,22 +1844,41 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         }
       } else if (_selectedSubtitleStreamIndex == -1) {
         actualSubtitleIndex = -1;
+      } else {
+        // ✅ 如果没有选择字幕，默认不显示
+        actualSubtitleIndex = -1;
       }
 
-      // ✅ 构建新的 HLS URL（带分辨率参数）
+      // ✅ 构建新的 HLS URL（带码率参数）
+      final requestedBitrate = qualityOption?['bitrate'] as int?;
+      _playerLogImportant(
+          '🔄 [Player] Building HLS URL with bitrate: $requestedBitrate');
+
       final media = await _api!.buildHlsUrl(
         widget.itemId,
         audioStreamIndex: actualAudioIndex,
         subtitleStreamIndex: actualSubtitleIndex,
-        maxWidth: qualityOption?['width'] as int?,
-        maxHeight: qualityOption?['height'] as int?,
-        maxBitrate: qualityOption?['bitrate'] as int?,
+        maxBitrate: requestedBitrate,
         startTimeTicks: currentPosition.inMicroseconds > 0
             ? (currentPosition.inMicroseconds * 10).toInt()
             : null,
+        currentPlaySessionId: _playSessionId, // ✅ 传递当前会话ID
       );
 
-      _playerLog('🎬 [Player] New media URL with quality: ${media.uri}');
+      _playerLogImportant(
+          '🎬 [Player] New media URL with quality: ${media.uri}');
+
+      // ✅ 更新 PlaySessionId 和 MediaSourceId（切换清晰度后会变化）
+      if (media.playSessionId != null) {
+        _playSessionId = media.playSessionId;
+        _playerLogImportant(
+            '🎬 [Player] Updated PlaySessionId: $_playSessionId');
+      }
+      if (media.mediaSourceId != null) {
+        _mediaSourceId = media.mediaSourceId;
+        _playerLogImportant(
+            '🎬 [Player] Updated MediaSourceId: $_mediaSourceId');
+      }
 
       // ✅ 检测是否为 HLS 流
       final isHlsStream =
@@ -1835,13 +1893,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       };
 
       // ✅ 重新打开媒体（使用快速启动逻辑）
+      _playerLogImportant(
+          '🔄 [Player] Opening new media - wasPlaying: $wasPlaying, position: ${currentPosition.inSeconds}s');
+
       await _guardPlayerCommand(
         'reload media with quality',
         () => _player.open(
           url: media.uri,
           headers: media.headers,
           isHls: isHlsStream,
-          autoPlay: wasPlaying, // ✅ 根据之前的播放状态决定是否自动播放
+          autoPlay: false, // ✅ 先不自动播放，等加载完成后手动播放
           startPosition: currentPosition > Duration.zero
               ? currentPosition
               : null, // ✅ 直接传入位置
@@ -1851,6 +1912,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       // ✅ 禁用内置字幕
       await _disableSubtitle();
+
+      // ✅ 等待播放器准备就绪
+      _playerLogImportant('🔄 [Player] Waiting for player ready...');
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // ✅ 如果之前在播放，恢复播放
+      if (wasPlaying && mounted) {
+        _playerLogImportant(
+            '▶️ [Player] Resuming playback after quality change');
+        await _playerPlay();
+      }
 
       // ✅ 更新 UI 位置
       if (currentPosition > Duration.zero && mounted) {
@@ -2162,11 +2234,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     final bool willShow = !_showControls;
     setState(() {
       _showControls = willShow;
-      // ✅ 隐藏控制栏时，立即隐藏tooltip和速度列表
+      // ✅ 隐藏控制栏时，立即隐藏tooltip、速度列表和分辨率列表
       // 注意：锁定时不自动解锁，保持锁定状态
       if (!willShow) {
         _showVideoFitHint = false;
         _showSpeedList = false;
+        _showQualityList = false;
         // 不在这里解锁，保持锁定状态
       }
     });
@@ -2191,9 +2264,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   // ✅ 开始自动隐藏控制栏的计时器
   void _startHideControlsTimer() {
-    // ✅ 如果速度列表、音频菜单、字幕菜单正在显示或已锁定，不启动隐藏计时器
-    if (_showSpeedList || _showAudioMenu || _showSubtitleMenu || _isLocked)
-      return;
+    // ✅ 如果速度列表、分辨率列表、音频菜单、字幕菜单正在显示或已锁定，不启动隐藏计时器
+    if (_showSpeedList ||
+        _showQualityList ||
+        _showAudioMenu ||
+        _showSubtitleMenu ||
+        _isLocked) return;
 
     _cancelHideControlsTimer();
     _hideControlsTimer = Timer(const Duration(seconds: 3), () {
@@ -2201,6 +2277,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _showControls &&
           _isPlaying &&
           !_showSpeedList &&
+          !_showQualityList &&
           !_showAudioMenu &&
           !_showSubtitleMenu &&
           !_isLocked) {
@@ -2211,10 +2288,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _videoFitHintTimer?.cancel();
         setState(() {
           _showControls = false;
-          // ✅ 立即隐藏tooltip和速度列表
+          // ✅ 立即隐藏tooltip、速度列表和分辨率列表
           // 注意：锁定时不自动解锁，保持锁定状态
           _showVideoFitHint = false;
           _showSpeedList = false;
+          _showQualityList = false;
           // 不在这里解锁，保持锁定状态
         });
       }
@@ -2893,258 +2971,100 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     );
   }
 
-  // ✅ 从 PlaybackInfo 的 MediaSource 生成分辨率选项（推荐使用）
-  List<Map<String, dynamic>> _generateQualityOptionsFromMediaSource(
-      Map<String, dynamic> mediaSource) {
-    _playerLog('🎬 [Player] _generateQualityOptionsFromMediaSource called');
-
-    // ✅ 打印 MediaSource 的关键字段
-    _playerLog('🎬 [Player] MediaSource keys: ${mediaSource.keys.toList()}');
-    _playerLog('🎬 [Player] MediaSource Width: ${mediaSource['Width']}');
-    _playerLog('🎬 [Player] MediaSource Height: ${mediaSource['Height']}');
-    _playerLog('🎬 [Player] MediaSource Bitrate: ${mediaSource['Bitrate']}');
-    _playerLog(
-        '🎬 [Player] MediaSource Container: ${mediaSource['Container']}');
-    _playerLog(
-        '🎬 [Player] MediaSource VideoCodec: ${mediaSource['VideoCodec']}');
-
-    // ✅ 尝试多种方式获取视频分辨率
-    int? originalWidth;
-    int? originalHeight;
-    int? originalBitrate = (mediaSource['Bitrate'] as num?)?.toInt();
-
-    // ✅ 方式1: 直接从 MediaSource 获取（优先）
-    originalWidth = (mediaSource['Width'] as num?)?.toInt();
-    originalHeight = (mediaSource['Height'] as num?)?.toInt();
-
-    _playerLog(
-        '🎬 [Player] From MediaSource directly: ${originalWidth}x${originalHeight}');
-
-    // ✅ 方式2: 从 MediaStreams 中获取视频流信息（备用）
-    final mediaStreams = mediaSource['MediaStreams'];
-    if (mediaStreams is List) {
-      _playerLog('🎬 [Player] MediaStreams count: ${mediaStreams.length}');
-      for (int i = 0; i < mediaStreams.length; i++) {
-        final stream = mediaStreams[i];
-        if (stream is Map) {
-          _playerLog(
-              '🎬 [Player] Stream $i - Type: ${stream['Type']}, Width: ${stream['Width']}, Height: ${stream['Height']}, BitRate: ${stream['BitRate']}');
-
-          if (stream['Type'] == 'Video') {
-            // 如果方式1没获取到，使用方式2
-            if (originalWidth == null || originalHeight == null) {
-              originalWidth = (stream['Width'] as num?)?.toInt();
-              originalHeight = (stream['Height'] as num?)?.toInt();
-            }
-            // 如果视频流有比特率，使用视频流的比特率
-            if (stream['BitRate'] != null) {
-              originalBitrate = (stream['BitRate'] as num?)?.toInt();
-            }
-          }
+  // ✅ 从 MediaSource 中获取视频流信息
+  Map<String, dynamic>? _getVideoStreamFromMediaSource(
+      Map<String, dynamic>? media) {
+    if (media == null) return null;
+    final streams = media['MediaStreams'];
+    if (streams is List) {
+      for (final stream in streams) {
+        if (stream is Map &&
+            (stream['Type'] as String?)?.toLowerCase() == 'video') {
+          return Map<String, dynamic>.from(stream);
         }
       }
     }
-
-    _playerLog(
-        '🎬 [Player] Final dimensions: ${originalWidth}x${originalHeight}, bitrate: $originalBitrate');
-
-    if (originalHeight == null || originalHeight <= 0) {
-      _playerLog('⚠️ [Player] No valid video height found in MediaSource');
-      return const [];
-    }
-
-    _playerLog(
-        '🎬 [Player] Original video: ${originalWidth}x${originalHeight}, bitrate: ${originalBitrate != null ? (originalBitrate / 1000000).round() : "unknown"}Mbps');
-
-    return _buildQualityOptionsList(
-        originalWidth, originalHeight, originalBitrate);
+    return null;
   }
 
-  // ✅ 从 ItemInfo 生成分辨率选项（备用方法）
-  List<Map<String, dynamic>> _generateQualityOptions(ItemInfo item) {
-    _playerLog('🎬 [Player] _generateQualityOptions called');
-    final media = _getPrimaryMediaSource(item);
-    if (media == null) {
-      _playerLog('❌ [Player] No media source found');
-      return const [];
-    }
-
-    _playerLog('🎬 [Player] Media source: $media');
-
-    // ✅ 获取原始视频的分辨率和比特率
-    final originalWidth = (media['Width'] as num?)?.toInt();
-    final originalHeight = (media['Height'] as num?)?.toInt();
-    final originalBitrate = (media['Bitrate'] as num?)?.toInt();
-
-    _playerLog(
-        '🎬 [Player] Original dimensions: ${originalWidth}x${originalHeight}, bitrate: $originalBitrate');
-
-    if (originalHeight == null || originalHeight <= 0) {
-      _playerLog('⚠️ [Player] No valid video height found');
-      return const [];
-    }
-
-    _playerLog(
-        '🎬 [Player] Original video: ${originalWidth}x${originalHeight}, bitrate: ${originalBitrate != null ? (originalBitrate / 1000000).round() : "unknown"}Mbps');
-
-    return _buildQualityOptionsList(
-        originalWidth, originalHeight, originalBitrate);
-  }
-
-  // ✅ 构建分辨率选项列表（公共逻辑）
-  List<Map<String, dynamic>> _buildQualityOptionsList(
-      int? originalWidth, int? originalHeight, int? originalBitrate) {
-    if (originalHeight == null || originalHeight <= 0) {
-      return const [];
-    }
-
+  // ✅ 根据原始分辨率和码率生成画质档位选项
+  List<Map<String, dynamic>> _generateSimpleQualityOptions(
+      int? originalBitrate, int? sourceWidth, int? sourceHeight) {
     final options = <Map<String, dynamic>>[];
 
-    // ✅ 判断视频级别（优先根据宽度判断，因为有超宽屏等特殊比例）
-    String videoLevel;
-    if (originalWidth != null && originalWidth >= 3840) {
-      videoLevel = '4K'; // 宽度 >= 3840 就是 4K
-    } else if (originalWidth != null && originalWidth >= 2560) {
-      videoLevel = '2K'; // 宽度 >= 2560 就是 2K
-    } else if (originalHeight >= 2160) {
-      videoLevel = '4K'; // 高度 >= 2160 也是 4K
-    } else if (originalHeight >= 1440) {
-      videoLevel = '2K'; // 高度 >= 1440 也是 2K
-    } else if (originalHeight >= 1080) {
-      videoLevel = '1080p';
-    } else if (originalHeight >= 720) {
-      videoLevel = '720p';
-    } else if (originalHeight >= 480) {
-      videoLevel = '480p';
-    } else {
-      videoLevel = '360p';
-    }
+    // ✅ 定义所有可能的档位（从高到低）
+    // 超清：适用于4K/2K视频
+    // 高清：适用于1080p及以上视频
+    // 清晰：适用于720p及以上视频
+    // 流畅：适用于所有视频
+    final allLevels = [
+      {
+        'label': '超清',
+        'bitrate': 120000000,
+        'minWidth': 2560,
+        'minHeight': 1440
+      }, // 120 Mbps, 需要2K+
+      {
+        'label': '高清',
+        'bitrate': 60000000,
+        'minWidth': 1920,
+        'minHeight': 1080
+      }, // 60 Mbps, 需要1080p+
+      {
+        'label': '清晰',
+        'bitrate': 4000000,
+        'minWidth': 1280,
+        'minHeight': 720
+      }, // 4 Mbps, 需要720p+
+      {
+        'label': '流畅',
+        'bitrate': 1000000,
+        'minWidth': 0,
+        'minHeight': 0
+      }, // 1 Mbps, 所有视频
+    ];
 
-    _playerLog(
-        '🎬 [Player] Video level detected: $videoLevel (${originalWidth}x${originalHeight})');
-
-    // ✅ 定义分辨率和对应的多档位比特率（模仿 Emby 官方客户端）
-    final resolutionOptions = {
-      2160: {
-        // 4K
-        'label': '4K',
-        'bitrates': [200, 160, 120, 100, 60, 40], // Mbps
-      },
-      1440: {
-        // 2K
-        'label': '2K',
-        'bitrates': [100, 80, 60, 40, 30], // Mbps
-      },
-      1080: {
-        // 1080p
-        'label': '1080p',
-        'bitrates': [60, 50, 40, 30, 25, 20], // Mbps
-      },
-      720: {
-        // 720p
-        'label': '720p',
-        'bitrates': [40, 30, 20], // Mbps
-      },
-      480: {
-        // 480p
-        'label': '480p',
-        'bitrates': [20, 15, 10], // Mbps
-      },
-      360: {
-        // 360p
-        'label': '360p',
-        'bitrates': [10, 8, 6], // Mbps
-      },
-    };
-
-    // ✅ 确定最大分辨率高度（根据视频级别）
-    int maxResolutionHeight;
-    if (videoLevel == '4K') {
-      maxResolutionHeight = 2160;
-    } else if (videoLevel == '2K') {
-      maxResolutionHeight = 1440;
-    } else if (videoLevel == '1080p') {
-      maxResolutionHeight = 1080;
-    } else if (videoLevel == '720p') {
-      maxResolutionHeight = 720;
-    } else if (videoLevel == '480p') {
-      maxResolutionHeight = 480;
-    } else {
-      maxResolutionHeight = 360;
-    }
-
-    // ✅ 遍历所有分辨率选项
-    for (final entry in resolutionOptions.entries) {
-      final height = entry.key;
-      final config = entry.value;
-      final label = config['label'] as String;
-      final bitrates = config['bitrates'] as List<int>;
-
-      // ✅ 只添加不超过最大分辨率的选项
-      if (height <= maxResolutionHeight) {
-        // ✅ 计算对应的宽度（保持原始宽高比）
-        final width = originalWidth != null && originalHeight > 0
-            ? ((originalWidth / originalHeight) * height).round()
-            : (height * 16 / 9).round(); // 默认使用 16:9 比例
-
-        // ✅ 为每个分辨率添加多个比特率档位
-        for (final bitrate in bitrates) {
+    // ✅ 根据视频分辨率筛选档位（优先使用宽度，与 item_detail_page.dart 一致）
+    if (sourceWidth != null && sourceWidth > 0) {
+      // 优先使用宽度判断
+      for (final level in allLevels) {
+        final minWidth = level['minWidth'] as int;
+        if (sourceWidth >= minWidth) {
           options.add({
-            'label': '$label-${bitrate}Mbps',
-            'width': width,
-            'height': height,
-            'bitrate': bitrate * 1000000, // 转换为 bps
-            'maxBitrate': bitrate * 1000000,
+            'label': level['label'],
+            'bitrate': level['bitrate'],
           });
         }
       }
-    }
-
-    // ✅ 如果有原始比特率且不在列表中，添加原始分辨率选项
-    if (originalBitrate != null) {
-      // ✅ 使用之前检测的视频级别作为标签
-      final originalLabel = videoLevel;
-
-      final mbps = (originalBitrate / 1000000).round();
-      final originalWidthCalculated =
-          originalWidth ?? (originalHeight * 16 / 9).round();
-
-      // ✅ 检查是否已经有相同的选项
-      final hasSameOption = options.any((o) =>
-          o['height'] == originalHeight &&
-          ((o['bitrate'] as int) / 1000000).round() == mbps);
-
-      if (!hasSameOption) {
-        final originalOption = {
-          'label': '$originalLabel-${mbps}Mbps (原始)',
-          'width': originalWidthCalculated,
-          'height': originalHeight,
-          'bitrate': originalBitrate,
-          'maxBitrate': originalBitrate,
-          'isOriginal': true,
-        };
-
-        // ✅ 找到合适的位置插入（按比特率从高到低排序）
-        int insertIndex = 0;
-        for (int i = 0; i < options.length; i++) {
-          final optionBitrate = options[i]['bitrate'] as int;
-          if (originalBitrate >= optionBitrate) {
-            insertIndex = i;
-            break;
-          }
-          insertIndex = i + 1;
+    } else if (sourceHeight != null && sourceHeight > 0) {
+      // 如果没有宽度，使用高度判断
+      for (final level in allLevels) {
+        final minHeight = level['minHeight'] as int;
+        if (sourceHeight >= minHeight) {
+          options.add({
+            'label': level['label'],
+            'bitrate': level['bitrate'],
+          });
         }
-
-        options.insert(insertIndex, originalOption);
-        _playerLog(
-            '🎬 [Player] Inserted original quality at index $insertIndex: $originalLabel-${mbps}Mbps');
+      }
+    } else {
+      // ✅ 没有分辨率信息，返回所有档位
+      for (final level in allLevels) {
+        options.add({
+          'label': level['label'],
+          'bitrate': level['bitrate'],
+        });
       }
     }
 
-    _playerLog(
-        '🎬 [Player] Generated ${options.length} quality options for ${originalHeight}p');
-    _playerLog(
-        '🎬 [Player] First 5 options: ${options.take(5).map((o) => o['label']).join(', ')}');
+    // ✅ 确保至少有一个档位
+    if (options.isEmpty) {
+      options.add({
+        'label': '流畅',
+        'bitrate': 1000000,
+      });
+    }
+
     return options;
   }
 
@@ -4326,8 +4246,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _currentItemId,
         audioStreamIndex: actualAudioIndex,
         subtitleStreamIndex: actualSubtitleIndex,
-        maxWidth: qualityOption?['width'] as int?,
-        maxHeight: qualityOption?['height'] as int?,
         maxBitrate: qualityOption?['bitrate'] as int?,
         startTimeTicks: 0, // 新剧集从头开始
       );

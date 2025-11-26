@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:dio/dio.dart' as dio;
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart' as sp;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -8,7 +9,11 @@ import '../utils/device_name.dart';
 
 const bool _kEmbyApiLogging = false;
 void _apiLog(String message) {
-  if (_kEmbyApiLogging) {}
+  if (_kEmbyApiLogging) {
+    if (kDebugMode) {
+      print(message);
+    }
+  }
 }
 
 class EmbyApi {
@@ -1721,6 +1726,7 @@ class EmbyApi {
     int? subtitleStreamIndex,
     String? mediaSourceId,
     int? maxStreamingBitrate,
+    String? currentPlaySessionId, // ✅ 添加 CurrentPlaySessionId 参数
   }) async {
     try {
       final queryParams = <String, dynamic>{
@@ -1730,10 +1736,10 @@ class EmbyApi {
         'AutoOpenLiveStream': autoOpenLiveStream.toString(),
       };
 
-      if (audioStreamIndex != null && audioStreamIndex >= 0) {
+      if (audioStreamIndex != null) {
         queryParams['AudioStreamIndex'] = audioStreamIndex.toString();
       }
-      if (subtitleStreamIndex != null && subtitleStreamIndex >= 0) {
+      if (subtitleStreamIndex != null) {
         queryParams['SubtitleStreamIndex'] = subtitleStreamIndex.toString();
       }
       if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
@@ -1741,6 +1747,9 @@ class EmbyApi {
       }
       if (maxStreamingBitrate != null && maxStreamingBitrate > 0) {
         queryParams['MaxStreamingBitrate'] = maxStreamingBitrate.toString();
+      }
+      if (currentPlaySessionId != null && currentPlaySessionId.isNotEmpty) {
+        queryParams['CurrentPlaySessionId'] = currentPlaySessionId;
       }
 
       final payload = {
@@ -1814,11 +1823,10 @@ class EmbyApi {
     String itemId, {
     int? audioStreamIndex,
     int? subtitleStreamIndex,
-    int? maxWidth,
-    int? maxHeight,
     int? maxBitrate,
     int? startTimeTicks,
     Map<String, dynamic>? cachedItemJson, // ✅ 可选的缓存数据，避免重复请求
+    String? currentPlaySessionId, // ✅ 当前播放会话ID（切换清晰度时需要）
   }) async {
     // ✅ 从 SharedPreferences 获取 token（因为 dio headers 是在拦截器中动态设置的）
     final prefs = await sp.SharedPreferences.getInstance();
@@ -1890,6 +1898,7 @@ class EmbyApi {
       subtitleStreamIndex: subtitleStreamIndex,
       mediaSourceId: mediaSourceId,
       maxStreamingBitrate: maxBitrate,
+      currentPlaySessionId: currentPlaySessionId, // ✅ 传递当前会话ID
     );
 
     // ✅ 从响应中获取 PlaySessionId（备用，优先使用 TranscodingUrl 中的）
@@ -1914,37 +1923,40 @@ class EmbyApi {
           finalMediaSourceId = mediaSource['Id'] as String;
         }
 
-        // ✅ 只使用 TranscodingUrl
-        if (mediaSource['TranscodingUrl'] != null) {
-          final transcodingUrl = mediaSource['TranscodingUrl'] as String;
+        // ✅ 优先使用 TranscodingUrl，其次使用 DirectStreamUrl
+        String? streamUrl;
 
-          // ✅ 从 TranscodingUrl 中提取 PlaySessionId（如果存在）
+        if (mediaSource['TranscodingUrl'] != null) {
+          streamUrl = mediaSource['TranscodingUrl'] as String;
+        } else if (mediaSource['DirectStreamUrl'] != null) {
+          streamUrl = mediaSource['DirectStreamUrl'] as String;
+        }
+
+        if (streamUrl != null) {
+          // ✅ 从 URL 中提取 PlaySessionId（如果存在）
           try {
-            final uri = Uri.parse(transcodingUrl);
+            final uri = Uri.parse(streamUrl);
             final urlPlaySessionId = uri.queryParameters['PlaySessionId'];
             if (urlPlaySessionId != null && urlPlaySessionId.isNotEmpty) {
               playSessionId = urlPlaySessionId;
-              _apiLog(
-                  '🎬 [API] Using PlaySessionId from TranscodingUrl: $playSessionId');
             }
           } catch (e) {
-            _apiLog('⚠️ [API] Failed to parse TranscodingUrl: $e');
+            // 忽略解析错误
           }
 
           // ✅ 拼接服务器地址
-          if (transcodingUrl.startsWith('/')) {
-            playbackUrl = '${_dio.options.baseUrl}$transcodingUrl';
+          if (streamUrl.startsWith('/')) {
+            playbackUrl = '${_dio.options.baseUrl}$streamUrl';
           } else {
-            playbackUrl = transcodingUrl;
+            playbackUrl = streamUrl;
           }
         }
       }
     }
 
-    // ✅ 如果没有获取到 TranscodingUrl，抛出异常
+    // ✅ 如果没有获取到播放 URL，抛出异常
     if (playbackUrl == null || playbackUrl.isEmpty) {
-      _apiLog('❌ [API] No TranscodingUrl found in PlaybackInfo response');
-      throw Exception('Failed to get TranscodingUrl from server');
+      throw Exception('Failed to get playback URL from server');
     }
 
     // ✅ 构建 headers
