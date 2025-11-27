@@ -740,7 +740,7 @@ class _VideoFitHint extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Positioned(
       top: 80, // 在顶部按钮下方，紧贴按钮组
-      right: 85, // 对齐裁剪按钮位置
+      right: 126, // ✅ 对齐裁剪按钮位置（85 + 76，往左移动两个按钮的宽度）
       child: AnimatedOpacity(
         opacity: state.showVideoFitHint ? 1.0 : 0.0,
         duration: const Duration(milliseconds: 200),
@@ -1654,12 +1654,12 @@ class _QualityListState extends State<_QualityList> {
 
     return Positioned(
       top: 80, // ✅ 在顶部按钮下方（与视频裁切提示对齐）
-      right: 16, // ✅ 与顶部右侧按钮组对齐
+      right: 150, // ✅ 对齐清晰度按钮位置（16 + 76，往左移动两个按钮的宽度）
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxHeight:
               MediaQuery.of(context).size.height * 0.5, // ✅ 最大高度为屏幕高度的50%
-          minWidth: 140, // ✅ 设置最小宽度
+          minWidth: 100, // ✅ 设置最小宽度
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
