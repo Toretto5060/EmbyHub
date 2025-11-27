@@ -3092,7 +3092,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
               // ✅ 音频切换提示（类似裁切提示的样式，显示在底部进度条上方右侧）
               if (_showAudioSwitchHint)
                 Positioned(
-                  bottom: 90, // ✅ 在进度条上方，距离更近一些
+                  bottom: 86, // ✅ 在进度条上方，距离更近一些
                   right: 30, // ✅ 往左移动一些，不要太靠右
                   child: AnimatedOpacity(
                     opacity: _showAudioSwitchHint ? 1.0 : 0.0,
@@ -3104,7 +3104,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
-                            vertical: 8,
+                            vertical: 4,
                           ),
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
