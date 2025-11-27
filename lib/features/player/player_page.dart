@@ -19,7 +19,6 @@ import 'custom_subtitle_overlay.dart';
 import 'exoplayer_texture_controller.dart';
 import 'player_controls.dart';
 
-const bool _kPlayerLogging = false; // 已禁用日志
 void _playerLog(String message) {
   if (kDebugMode) {
     print(message);
@@ -72,7 +71,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     2.0,
     3.0
   ];
-  static const Duration _playerReadyTimeout = Duration(seconds: 30);
   // ✅ 显示速度列表的状态
   bool _showSpeedList = false;
   Duration _position = Duration.zero;
@@ -94,6 +92,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   double? _expectedBitrateKbps;
   double? _currentSpeedKbps;
   String? _qualityLabel;
+
+  // ✅ 错误处理和重试
+  int _errorRetryCount = 0;
+  static const int _maxRetryCount = 3;
+  Timer? _retryTimer;
+
+  // ✅ 应用生命周期
+  bool _wasPlayingBeforeBackground = false;
+
+  // ✅ 预加载下一集
+  bool _hasPreloadedNextEpisode = false;
+
+  // ✅ 播放统计
+  int _bufferingCount = 0;
+  Duration _totalBufferingTime = Duration.zero;
+  DateTime? _lastBufferingStart;
+  int _errorCount = 0;
   EmbyApi? _api;
   String? _userId;
   DateTime _lastProgressSync = DateTime.fromMillisecondsSinceEpoch(0);
@@ -132,6 +147,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     Duration target, {
     bool resumeAfterSeek = true,
     bool forcePlayAfterSeek = false,
+    bool waitForConfirmation = true, // ✅ 新增参数，拖动时不等待确认
   }) {
     _seekChain ??= Future.value();
     return _seekChain = _seekChain!.then((_) async {
@@ -150,13 +166,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         });
       }
 
-      // 等待 positionStream 确认落在目标附近（误差 <1 秒）
-      try {
-        await _player.positionStream
-            .firstWhere(
-                (pos) => (pos - target).abs() < const Duration(seconds: 1))
-            .timeout(const Duration(seconds: 3));
-      } catch (_) {}
+      // ✅ 只在需要时等待确认（拖动进度条时不等待，提升响应速度）
+      if (waitForConfirmation) {
+        try {
+          await _player.positionStream
+              .firstWhere(
+                  (pos) => (pos - target).abs() < const Duration(seconds: 1))
+              .timeout(const Duration(seconds: 3));
+        } catch (_) {}
+      }
 
       final shouldResume = forcePlayAfterSeek || resumeAfterSeek;
       if (shouldResume) {
@@ -255,10 +273,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _currentItemId = widget.itemId;
 
     // ✅ 如果从上一页传入了 ItemInfo，立即设置（用于显示背景图）
-    if (widget.itemInfo != null) {
-      _itemDetails = widget.itemInfo;
-      _itemType = widget.itemInfo!.type;
-      _videoTitle = widget.itemInfo!.name ?? 'Video';
+    final itemInfo = widget.itemInfo;
+    if (itemInfo != null) {
+      _itemDetails = itemInfo;
+      _itemType = itemInfo.type;
+      _videoTitle = itemInfo.name;
     }
 
     // ✅ 如果从上一页传入了 Logo URL，立即设置
@@ -269,9 +288,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     // ✅ 在页面初始化时立即获取并保存原始亮度（在系统可能调整亮度之前）
     // 这样即使系统在进入全屏时自动调整了亮度，我们也能恢复正确的原始亮度
     _getCurrentBrightness().then((_) {
-      if (_originalBrightness == null && _currentBrightness != null) {
-        _originalBrightness = _currentBrightness;
-      }
+      _originalBrightness = _currentBrightness;
     });
 
     // ✅ 创建 ExoPlayer 控制器
@@ -403,7 +420,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _attachPlayerStreams();
       await _disableSubtitle();
       await _load();
-    } catch (e, stack) {
+    } catch (e) {
       _playerLog('❌ [Player] Initialize ExoPlayer failed: $e');
     }
   }
@@ -444,6 +461,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
       // ✅ 记录之前的缓冲状态
       final wasBuffering = _isBuffering;
+
+      // ✅ 统计缓冲信息
+      if (isBuffering) {
+        _bufferingCount++;
+        _lastBufferingStart = DateTime.now();
+      } else if (_lastBufferingStart != null) {
+        final bufferingDuration =
+            DateTime.now().difference(_lastBufferingStart!);
+        _totalBufferingTime += bufferingDuration;
+        _playerLog(
+            '📊 [Player] Buffering duration: ${bufferingDuration.inMilliseconds}ms');
+      }
 
       setState(() => _isBuffering = isBuffering);
 
@@ -556,6 +585,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _errorSub?.cancel();
     _errorSub = _player.errorStream.listen((message) {
       _playerLog('❌ [Player] Error: $message');
+      _handlePlaybackError(message);
     });
 
     _videoSizeSub?.cancel();
@@ -682,13 +712,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final isHlsStream =
           media.uri.contains('.m3u8') || media.uri.contains('hls');
 
-      // ✅ 使用激进的缓冲策略
-      final cacheConfig = {
-        'minBufferMs': 15000,
-        'maxBufferMs': 60000,
-        'bufferForPlaybackMs': 1500,
-        'bufferForPlaybackAfterRebufferMs': 3000,
-      };
+      // ✅ 使用自适应缓冲策略
+      final cacheConfig = _getAdaptiveCacheConfig();
 
       // ✅ 重新打开媒体（使用快速启动逻辑）
       await _guardPlayerCommand(
@@ -701,7 +726,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           startPosition: currentPosition > Duration.zero
               ? currentPosition
               : null, // ✅ 直接传入位置
-          cacheConfig: cacheConfig, // ✅ 使用优化的缓冲配置
+          cacheConfig: cacheConfig, // ✅ 使用自适应缓冲配置
         ),
       );
 
@@ -716,7 +741,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
 
       _playerLogImportant('✅ [Player] Player reloaded successfully');
-    } catch (e, stack) {
+    } catch (e) {
       _playerLog('❌ [Player] Reload player failed: $e');
     }
   }
@@ -758,35 +783,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
 
       // ✅ 更新 itemDetails 并触发 UI 刷新（如果还没有设置）
-      if (_itemDetails == null && itemDetails != null) {
-        if (mounted) {
-          setState(() {
-            _itemDetails = itemDetails;
-            _itemType = itemDetails?.type;
-          });
-        } else {
-          _itemDetails = itemDetails;
-          _itemType = itemDetails?.type;
+      if (_itemDetails == null) {
+        final details = itemDetails;
+        if (details != null) {
+          if (mounted) {
+            setState(() {
+              _itemDetails = details;
+              _itemType = details.type;
+            });
+          } else {
+            _itemDetails = details;
+            _itemType = details.type;
+          }
         }
       }
 
       // ✅ 获取Logo URL（优先使用传入的，避免重复请求）
-      if (widget.logoUrl != null) {
+      final logoUrl = widget.logoUrl;
+      if (logoUrl != null) {
         _playerLog('✅ [Player] Using cached logo URL');
-        _logoUrl = widget.logoUrl;
+        _logoUrl = logoUrl;
       } else if (itemDetails != null && itemDetails.id != null) {
         // 对于Episode类型，尝试获取Series的Logo
         if (itemDetails.type == 'Episode' && itemDetails.seriesId != null) {
           // 优先使用传入的 seriesInfo
-          if (widget.seriesInfo != null) {
+          final seriesInfo = widget.seriesInfo;
+          if (seriesInfo != null) {
             _playerLog('✅ [Player] Using cached series info for logo');
-            if (widget.seriesInfo!.imageTags != null &&
-                widget.seriesInfo!.imageTags!.containsKey('Logo')) {
+            if (seriesInfo.imageTags != null &&
+                seriesInfo.imageTags!.containsKey('Logo')) {
               _logoUrl = api.buildImageUrl(
                 itemId: itemDetails.seriesId!,
                 type: 'Logo',
                 maxWidth: 400,
-                tag: widget.seriesInfo!.imageTags!['Logo'],
+                tag: seriesInfo.imageTags!['Logo'],
               );
             }
           } else {
@@ -1147,13 +1177,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       _playerLog('🎬 [Player] Video bitrate: ${media.bitrate} bps');
 
       // ✅ 优化：使用 autoPlay 立即开始播放，提升响应速度
-      // ✅ 使用激进的缓冲策略，适合高速网络
-      final cacheConfig = {
-        'minBufferMs': 15000, // 最小缓冲15秒（默认50秒太多）
-        'maxBufferMs': 60000, // 最大缓冲60秒（默认50秒）
-        'bufferForPlaybackMs': 1500, // 开始播放需要1.5秒缓冲（默认2.5秒）
-        'bufferForPlaybackAfterRebufferMs': 3000, // 重新缓冲后需要3秒（默认5秒）
-      };
+      // ✅ 使用自适应缓冲策略，根据网络速度动态调整
+      final cacheConfig = _getAdaptiveCacheConfig();
 
       await _guardPlayerCommand(
         'open media',
@@ -1165,7 +1190,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           startPosition: resumeFromSavedPosition
               ? _initialSeekPosition
               : null, // ✅ 直接传入起始位置
-          cacheConfig: cacheConfig, // ✅ 使用优化的缓冲配置
+          cacheConfig: cacheConfig, // ✅ 使用自适应缓冲配置
         ),
       );
 
@@ -1225,15 +1250,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
       _playerLog(
           '🎬 [Player] ✅ Ready to play, isPlaying: $_isPlaying, isBuffering: $_isBuffering');
-    } catch (e, stack) {
+    } catch (e) {
       _playerLog('❌ [Player] Load failed: $e');
-      _playerLog('Stack: $stack');
     }
   }
 
   @override
   void dispose() {
     _playerLog('🎬 [Player] 🔴 PlayerPage disposing...');
+
+    // ✅ 上报播放统计
+    _reportPlaybackStats();
 
     // ✅ 隐藏系统媒体通知
     _hideMediaNotification();
@@ -1251,9 +1278,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _videoFitHintTimer?.cancel(); // ✅ 取消视频裁切模式提示计时器
     _longPressTimer?.cancel(); // ✅ 取消长按定时器
     _speedAccelerationTimer?.cancel(); // ✅ 取消倍速加速定时器
+    _retryTimer?.cancel(); // ✅ 取消重试定时器
     _speedListScrollController.dispose(); // ✅ 释放速度列表滚动控制器
     _qualityListScrollController.dispose(); // ✅ 释放分辨率列表滚动控制器
     _controlsAnimationController.dispose();
+
+    // ✅ 清空大对象引用，帮助 GC
+    _itemDetails = null;
+    _previousEpisode = null;
+    _nextEpisode = null;
+    _audioStreams = [];
+    _subtitleStreams = [];
+    _qualityOptions = [];
     final markComplete =
         _duration > Duration.zero && _position >= _duration * 0.95;
     _syncProgress(_position, force: true, markComplete: markComplete);
@@ -1887,13 +1923,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       final isHlsStream =
           media.uri.contains('.m3u8') || media.uri.contains('hls');
 
-      // ✅ 使用激进的缓冲策略
-      final cacheConfig = {
-        'minBufferMs': 15000,
-        'maxBufferMs': 60000,
-        'bufferForPlaybackMs': 1500,
-        'bufferForPlaybackAfterRebufferMs': 3000,
-      };
+      // ✅ 使用自适应缓冲策略
+      final cacheConfig = _getAdaptiveCacheConfig();
 
       // ✅ 重新打开媒体（使用快速启动逻辑）
       _playerLogImportant(
@@ -1909,7 +1940,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           startPosition: currentPosition > Duration.zero
               ? currentPosition
               : null, // ✅ 直接传入位置
-          cacheConfig: cacheConfig, // ✅ 使用优化的缓冲配置
+          cacheConfig: cacheConfig, // ✅ 使用自适应缓冲配置
         ),
       );
 
@@ -2179,6 +2210,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       });
     }
     _syncProgress(pos);
+
+    // ✅ 预加载下一集（90% 时）
+    if (_duration > Duration.zero &&
+        pos >= _duration * 0.9 &&
+        !_hasPreloadedNextEpisode &&
+        _itemType == 'Episode' &&
+        _nextEpisode != null &&
+        _nextEpisode!.id != null) {
+      _hasPreloadedNextEpisode = true;
+      _preloadNextEpisode();
+    }
 
     // ✅ 检查是否播放完毕（播放进度 >= 98%）
     if (_duration > Duration.zero && pos >= _duration * 0.98) {
@@ -2881,7 +2923,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     setState(() {
                       _draggingPosition = null;
                     });
-                    await _performSeek(d, resumeAfterSeek: shouldResume);
+                    await _performSeek(
+                      d,
+                      resumeAfterSeek: shouldResume,
+                      waitForConfirmation: false, // ✅ 拖动时不等待确认，提升响应速度
+                    );
                     if (mounted) {
                       setState(() {
                         _isDraggingProgress = false;
@@ -4037,13 +4083,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
   }
 
-  Future<void> _waitForPlayerReady() async {
-    await _guardPlayerCommand(
-      'wait until ready',
-      () => _player.waitUntilReady(timeout: _playerReadyTimeout),
-    );
-  }
-
   Future<void> _playerPlay() =>
       _guardPlayerCommand('play', _player.play, swallowErrors: true);
 
@@ -4292,7 +4331,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           _playerLog('⚠️ [Player] Failed to report playback start: $e');
         }
       }
-    } catch (e, stack) {
+    } catch (e) {
       _playerLog('❌ [Player] Failed to switch episode: $e');
     } finally {
       // ✅ 重置切换标志
@@ -4348,5 +4387,166 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     // ✅ 切换到新剧集（直接切换URL）
     _switchToNewEpisode(episodeId);
+  }
+
+  // ✅ 应用生命周期状态变化
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    _playerLog('🎬 [Player] App lifecycle state: $state');
+
+    switch (state) {
+      case AppLifecycleState.paused:
+        // 应用进入后台，暂停播放（节省资源）
+        if (_isPlaying && !_isInPipMode) {
+          _wasPlayingBeforeBackground = true;
+          _playerPause();
+          _playerLog('🎬 [Player] Auto-paused on background');
+        }
+        break;
+
+      case AppLifecycleState.resumed:
+        // 应用恢复前台，恢复播放
+        if (_wasPlayingBeforeBackground && !_isInPipMode) {
+          _wasPlayingBeforeBackground = false;
+          _playerPlay();
+          _playerLog('🎬 [Player] Auto-resumed on foreground');
+        }
+        break;
+
+      case AppLifecycleState.inactive:
+        // 应用失去焦点（如来电），暂停播放
+        if (_isPlaying && !_isInPipMode) {
+          _playerPause();
+          _playerLog('🎬 [Player] Auto-paused on inactive');
+        }
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  // ✅ 获取全速缓冲配置（极度激进策略）
+  Map<String, dynamic> _getAdaptiveCacheConfig() {
+    // ✅ 使用极度激进的缓冲策略，全速下载
+    // maxBufferMs 设置为 30 分钟（1800秒），让播放器可以缓存整部电影/剧集
+    // minBufferMs 设置为 3 秒，更快启动
+    // bufferForPlaybackMs 设置为 300ms，几乎瞬间开始播放
+    // 这样可以充分利用 100Mbps+ 的高速带宽，快速缓存整个视频
+    _playerLog(
+        '🚀 [Player] Using ULTRA-AGGRESSIVE FULL SPEED cache config - Maximum buffering enabled');
+    _playerLog(
+        '🚀 [Player] Target: Cache entire video at full network speed (100+ Mbps)');
+    return {
+      'minBufferMs': 3000, // 最小缓冲 3 秒（超快启动）
+      'maxBufferMs': 1800000, // 最大缓冲 30 分钟（可缓存整部电影）
+      'bufferForPlaybackMs': 300, // 只需 0.3 秒即可开始播放（瞬间启动）
+      'bufferForPlaybackAfterRebufferMs': 500, // 重新缓冲后 0.5 秒继续（极速恢复）
+      'targetBufferBytes': -1, // 不限制目标缓冲字节数（无限制）
+      'prioritizeTimeOverSizeThresholds': true, // 优先时间而非大小
+      'backBufferDurationMs': 0, // 不保留后向缓冲（节省内存，全力前向缓冲）
+      'maxLoadingQueueSize': 10, // 最大加载队列（允许更多并发下载）
+    };
+  }
+
+  // ✅ 处理播放错误
+  Future<void> _handlePlaybackError(String error) async {
+    _errorCount++;
+
+    // 网络错误可以重试
+    if (error.toLowerCase().contains('network') ||
+        error.toLowerCase().contains('timeout') ||
+        error.toLowerCase().contains('connection')) {
+      if (_errorRetryCount < _maxRetryCount) {
+        _errorRetryCount++;
+        _playerLog(
+            '🔄 [Player] Retrying... ($_errorRetryCount/$_maxRetryCount)');
+
+        // 延迟重试，避免频繁请求
+        _retryTimer?.cancel();
+        _retryTimer = Timer(Duration(seconds: _errorRetryCount * 2), () async {
+          if (mounted) {
+            try {
+              await _reloadPlayer();
+              _errorRetryCount = 0; // 重试成功，重置计数
+            } catch (e) {
+              _playerLog('❌ [Player] Retry failed: $e');
+            }
+          }
+        });
+      } else {
+        // 达到最大重试次数，显示错误提示
+        _showErrorDialog('播放失败，请检查网络连接');
+        _errorRetryCount = 0; // 重置计数
+      }
+    } else {
+      // 其他错误直接提示
+      _showErrorDialog('播放出错：$error');
+    }
+  }
+
+  // ✅ 显示错误对话框
+  void _showErrorDialog(String message) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('播放错误'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pop(); // 退出播放页
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ 预加载下一集
+  Future<void> _preloadNextEpisode() async {
+    if (_nextEpisode?.id == null || _api == null || _userId == null) return;
+
+    try {
+      _playerLog('🚀 [Player] Preloading next episode...');
+
+      // 获取选中的画质参数
+      Map<String, dynamic>? qualityOption;
+      if (_selectedQuality != null && _qualityOptions.isNotEmpty) {
+        qualityOption = _qualityOptions.firstWhere(
+          (q) => q['label'] == _selectedQuality,
+          orElse: () => <String, dynamic>{},
+        );
+      }
+
+      // 预加载下一集的 URL（不实际播放）
+      await _api!.buildHlsUrl(
+        _nextEpisode!.id!,
+        maxBitrate: qualityOption?['bitrate'] as int?,
+      );
+
+      _playerLog('✅ [Player] Next episode preloaded');
+    } catch (e) {
+      _playerLog('⚠️ [Player] Failed to preload next episode: $e');
+    }
+  }
+
+  // ✅ 上报播放统计
+  void _reportPlaybackStats() {
+    final averageSpeed = _currentSpeedKbps ?? 0;
+    _playerLog('''
+📊 [Player] Playback Stats:
+  - Buffering count: $_bufferingCount
+  - Total buffering time: ${_totalBufferingTime.inSeconds}s
+  - Error count: $_errorCount
+  - Average speed: ${(averageSpeed / 1000).toStringAsFixed(1)} Mbps
+  - Video title: $_videoTitle
+  - Duration: ${_formatTime(_duration)}
+  - Final position: ${_formatTime(_position)}
+  ''');
   }
 }
