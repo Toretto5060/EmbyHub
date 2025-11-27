@@ -128,8 +128,34 @@ class MainActivity: FlutterActivity() {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         val isPlaying = call.argument<Boolean>("isPlaying") ?: false
                         val title = call.argument<String>("title") ?: ""
-                        enterPip(isPlaying, title)
-                        result.success(true)
+                        
+                        android.util.Log.d("MainActivity", "Manual entering PiP via button, isPlaying=$isPlaying, title=$title")
+                        
+                        // ✅ 使用和 onUserLeaveHint 完全相同的逻辑，避免闪烁
+                        isPipExpanded = false
+                        currentPlayingState = isPlaying
+                        currentVideoTitle = title
+                        
+                        val params = PictureInPictureParams.Builder()
+                            .setAspectRatio(getPipAspectRatio())
+                            .setActions(createPipActions(isPlaying))
+                            .apply {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    setTitle(title)
+                                    // ✅ 启用无缝调整大小，避免白屏闪烁
+                                    setSeamlessResizeEnabled(true)
+                                }
+                            }
+                            .build()
+                        
+                        try {
+                            val enterResult = enterPictureInPictureMode(params)
+                            android.util.Log.d("MainActivity", "✅ Manual PiP mode entered via button: $enterResult")
+                            result.success(enterResult)
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "❌ Failed to enter PiP via button: $e")
+                            result.success(false)
+                        }
                     } else {
                         result.success(false)
                     }
@@ -274,27 +300,6 @@ class MainActivity: FlutterActivity() {
         } ?: 50.0
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
-    private fun enterPip(isPlaying: Boolean, title: String) {
-        android.util.Log.d("MainActivity", "Entering PiP mode, isPlaying=$isPlaying, title=$title")
-        isPipExpanded = false // 重置为小窗状态
-        currentPlayingState = isPlaying // 保存播放状态
-        val params = PictureInPictureParams.Builder()
-            .setAspectRatio(getPipAspectRatio())
-            .setActions(createPipActions(isPlaying))
-            .apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    setTitle(title)
-                    setAutoEnterEnabled(true)
-                    // ✅ 启用无缝调整大小，避免白屏闪烁
-                    setSeamlessResizeEnabled(true)
-                }
-            }
-            .build()
-        val result = enterPictureInPictureMode(params)
-        android.util.Log.d("MainActivity", "PiP mode entered: $result")
-    }
-    
     // ✅ 退出 PiP 模式
     @RequiresApi(Build.VERSION_CODES.N)
     private fun exitPip() {
