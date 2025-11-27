@@ -42,6 +42,7 @@ class MainActivity: FlutterActivity() {
     private var pipChannel: MethodChannel? = null
     private var isPipExpanded = false // PiP 窗口是否放大
     private var currentPlayingState = true // 当前播放状态
+    private var shouldAutoEnterPip = false // ✅ 是否应该自动进入 PiP（在播放时为 true）
     
     // ✅ MediaSession 相关
     private var mediaSession: MediaSessionCompat? = null
@@ -168,6 +169,16 @@ class MainActivity: FlutterActivity() {
                     hideMediaNotification()
                     result.success(true)
                 }
+                "setPlayingState" -> {
+                    // ✅ 设置播放状态，用于 onUserLeaveHint 自动进入 PiP
+                    val isPlaying = call.argument<Boolean>("isPlaying") ?: false
+                    val title = call.argument<String>("title") ?: "EmbyHub"
+                    shouldAutoEnterPip = isPlaying
+                    currentPlayingState = isPlaying
+                    currentVideoTitle = title
+                    android.util.Log.d("MainActivity", "Set playing state: isPlaying=$isPlaying, title=$title, shouldAutoEnterPip=$shouldAutoEnterPip")
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -275,6 +286,8 @@ class MainActivity: FlutterActivity() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     setTitle(title)
                     setAutoEnterEnabled(true)
+                    // ✅ 启用无缝调整大小，避免白屏闪烁
+                    setSeamlessResizeEnabled(true)
                 }
             }
             .build()
@@ -285,10 +298,14 @@ class MainActivity: FlutterActivity() {
     // ✅ 退出 PiP 模式
     @RequiresApi(Build.VERSION_CODES.N)
     private fun exitPip() {
-        android.util.Log.d("MainActivity", "Exit PiP requested, isInPipMode=$isInPictureInPictureMode")
+        android.util.Log.d("MainActivity", "Exit PiP requested, isInPipMode=$isInPictureInPictureMode, shouldAutoEnterPip=$shouldAutoEnterPip")
+        
+        // ✅ 重置自动进入 PiP 标志，防止其他页面也进入小窗
+        shouldAutoEnterPip = false
+        android.util.Log.d("MainActivity", "✅ Reset shouldAutoEnterPip to false")
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // ✅ 禁用自动进入 PiP，防止其他页面也进入小窗
+            // ✅ 禁用自动进入 PiP（Android 12+）
             try {
                 val params = PictureInPictureParams.Builder()
                     .setAspectRatio(Rational(16, 9))
@@ -299,7 +316,7 @@ class MainActivity: FlutterActivity() {
                     }
                     .build()
                 setPictureInPictureParams(params)
-                android.util.Log.d("MainActivity", "✅ Disabled auto-enter PiP")
+                android.util.Log.d("MainActivity", "✅ Disabled auto-enter PiP (Android 12+)")
             } catch (e: Exception) {
                 android.util.Log.e("MainActivity", "❌ Failed to disable auto-enter PiP: $e")
             }
@@ -309,6 +326,51 @@ class MainActivity: FlutterActivity() {
         // 注意：Android 没有直接的 API 退出 PiP，只能通过 moveTaskToBack 或让用户点击小窗
         if (isInPictureInPictureMode) {
             android.util.Log.d("MainActivity", "Currently in PiP, will exit on user action or app resume")
+        }
+    }
+    
+    // ✅ 用户主动离开应用时触发（按Home键、切换应用等）
+    // 注意：下拉通知栏不会触发此方法
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        android.util.Log.d("MainActivity", "onUserLeaveHint called, shouldAutoEnterPip=$shouldAutoEnterPip, isInPipMode=$isInPictureInPictureMode")
+        
+        // ✅ 只有在视频播放时且不在 PiP 模式下才自动进入 PiP
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (shouldAutoEnterPip && !isInPictureInPictureMode) {
+                android.util.Log.d("MainActivity", "Auto-entering PiP on user leave")
+                
+                // ✅ 立即通知 Flutter 即将进入 PiP，防止 paused 状态暂停播放
+                try {
+                    pipChannel?.invokeMethod("onPipModeChanged", mapOf("isInPipMode" to true))
+                    android.util.Log.d("MainActivity", "✅ Pre-notified Flutter: isInPipMode=true (before enterPip)")
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "❌ Failed to pre-notify Flutter PiP state: $e")
+                }
+                
+                // ✅ 在 onUserLeaveHint 中，直接调用 enterPictureInPictureMode
+                // 这是 Android 官方推荐的自动进入 PiP 的方式
+                isPipExpanded = false // 重置为小窗状态
+                currentPlayingState = currentPlayingState // 保存播放状态
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(getPipAspectRatio())
+                    .setActions(createPipActions(currentPlayingState))
+                    .apply {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            setTitle(currentVideoTitle)
+                            // ✅ 启用无缝调整大小，避免白屏闪烁
+                            setSeamlessResizeEnabled(true)
+                        }
+                    }
+                    .build()
+                
+                try {
+                    val result = enterPictureInPictureMode(params)
+                    android.util.Log.d("MainActivity", "✅ PiP mode entered in onUserLeaveHint: $result")
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "❌ Failed to enter PiP in onUserLeaveHint: $e")
+                }
+            }
         }
     }
     

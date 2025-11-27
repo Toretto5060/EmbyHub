@@ -104,8 +104,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   String _audioSwitchHintText = ''; // ✅ 音频切换提示文本
   Timer? _audioSwitchHintTimer; // ✅ 音频切换提示自动隐藏定时器
 
-  // ✅ 应用生命周期（已移除后台播放暂停逻辑）
-  // bool _wasPlayingBeforeBackground = false;
+  // ✅ 应用生命周期
+  bool _isManuallyEnteringPip = false; // ✅ 是否正在手动进入 PiP（点击按钮）
 
   // ✅ 预加载下一集
   bool _hasPreloadedNextEpisode = false;
@@ -388,15 +388,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             _isInPipMode = isInPipMode;
           });
 
-          // ✅ 如果退出 PiP 模式（回到全屏），禁用自动进入 PiP
-          // 防止退出播放页面后，应用进入后台时自动进入小窗
-          if (!isInPipMode && Platform.isAndroid) {
-            try {
-              _playerLog(
-                  '🎬 [Player] Exited PiP mode, disabling auto-enter PiP');
-              unawaited(_pip.invokeMethod('exit'));
-            } catch (e) {
-              _playerLog('❌ [Player] Failed to disable auto-enter PiP: $e');
+          // ✅ 退出 PiP 模式时，恢复全屏状态
+          if (!isInPipMode) {
+            _playerLog('🎬 [Player] Exited PiP mode, back to fullscreen');
+            // ✅ 重置手动进入 PiP 标志
+            _isManuallyEnteringPip = false;
+            // ✅ 确保系统 UI 处于正确状态
+            if (_showControls) {
+              SystemChrome.setEnabledSystemUIMode(
+                SystemUiMode.manual,
+                overlays: SystemUiOverlay.values,
+              );
+            } else {
+              SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
             }
           }
 
@@ -578,6 +582,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             _hasStartedPlayback = true;
           }
         });
+
+        // ✅ 通知原生层播放状态，用于 onUserLeaveHint 自动进入 PiP
+        if (Platform.isAndroid) {
+          try {
+            await _pip.invokeMethod('setPlayingState', {
+              'isPlaying': isPlaying,
+              'title': _videoTitle,
+            });
+            _playerLog('🎬 [Player] Notified native playing state: $isPlaying');
+          } catch (e) {
+            _playerLog('❌ [Player] Failed to notify native playing state: $e');
+          }
+        }
       }
       if (!isPlaying) {
         _syncProgress(_position, force: true);
@@ -1395,8 +1412,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     unawaited(_saveStreamSelections());
     unawaited(_player.dispose());
 
-    // ✅ 重置 PiP 状态
+    // ✅ 重置 PiP 状态并禁用自动进入 PiP
     _isInPipMode = false;
+    if (Platform.isAndroid) {
+      try {
+        _playerLog('🎬 [Player] Disabling auto-enter PiP on page dispose');
+        unawaited(_pip.invokeMethod('exit'));
+      } catch (e) {
+        _playerLog(
+            '❌ [Player] Failed to disable auto-enter PiP on dispose: $e');
+      }
+    }
 
     // ✅ 恢复原始亮度（只有在保存了原始亮度时才恢复）
     // 注意：在 dispose 前获取保存的原始亮度值，防止被修改
@@ -2073,8 +2099,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // ✅ 立即设置 PiP 状态，防止 inactive 生命周期暂停播放
       // 必须在调用原生方法之前同步设置，因为原生方法会立即触发 inactive 状态
       _isInPipMode = true;
+      _isManuallyEnteringPip = true; // ✅ 标记正在手动进入 PiP
       _playerLog(
-          '🎬 [Player] ✅ Pre-set _isInPipMode = true before entering PiP');
+          '🎬 [Player] ✅ Pre-set _isInPipMode = true, _isManuallyEnteringPip = true before entering PiP');
 
       final result = await _pip.invokeMethod('enter', {
         'isPlaying': _isPlaying,
@@ -2087,10 +2114,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       if (mounted) {
         setState(() {});
       }
+
+      // ✅ 延迟重置标志，确保 inactive 状态已经处理完
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _isManuallyEnteringPip = false;
+      });
     } catch (e) {
       _playerLog('❌ [Player] Manual PiP enter failed: $e');
       // 如果进入失败，恢复状态
       _isInPipMode = false;
+      _isManuallyEnteringPip = false;
       if (mounted) {
         setState(() {});
       }
@@ -4559,20 +4592,35 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     _playerLog(
-        '🎬 [Player] App lifecycle state: $state, isInPipMode: $_isInPipMode');
+        '🎬 [Player] App lifecycle state: $state, isInPipMode: $_isInPipMode, isPlaying: $_isPlaying, isManuallyEnteringPip: $_isManuallyEnteringPip');
 
-    // ✅ 已移除后台播放暂停逻辑，让用户自己控制播放状态
-    // 注意：进入 PiP 模式时不应该暂停播放
     switch (state) {
       case AppLifecycleState.inactive:
-        // 应用失去焦点（如来电），但如果是 PiP 模式则不暂停
-        // 因为进入 PiP 模式时也会触发 inactive 状态
-        if (_isPlaying && !_isInPipMode) {
-          _playerPause();
-          _playerLog('🎬 [Player] Auto-paused on inactive (not PiP)');
-        } else if (_isInPipMode) {
-          _playerLog('🎬 [Player] In PiP mode, continue playing');
+        // ✅ 应用失去焦点（如来电、下拉通知栏、进入任务中心、按Home键等）
+        // 不要在这里暂停播放，让原生层的 onUserLeaveHint 决定是进入 PiP 还是暂停
+        // 只有手动进入 PiP 时才需要特殊处理（防止闪烁）
+        if (_isManuallyEnteringPip) {
+          _playerLog('🎬 [Player] Manually entering PiP, keep playing');
+        } else {
+          _playerLog(
+              '🎬 [Player] Inactive state, waiting for native onUserLeaveHint or paused state');
         }
+        break;
+
+      case AppLifecycleState.paused:
+        // ✅ 应用进入后台（此时 onUserLeaveHint 已经触发）
+        // 如果不在 PiP 模式，说明 onUserLeaveHint 没有进入 PiP（如下拉通知栏），需要暂停播放
+        _playerLog('🎬 [Player] App paused, isInPipMode: $_isInPipMode');
+        if (!_isInPipMode && _isPlaying) {
+          _playerPause();
+          _playerLog('🎬 [Player] Auto-paused on background (not in PiP)');
+        }
+        break;
+
+      case AppLifecycleState.resumed:
+        // 应用恢复前台，重置状态
+        _isManuallyEnteringPip = false;
+        _playerLog('🎬 [Player] App resumed');
         break;
 
       default:
