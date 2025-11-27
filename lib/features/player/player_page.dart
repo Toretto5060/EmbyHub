@@ -246,6 +246,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _showAudioMenu = false; // ✅ 是否显示音频选择菜单
   bool _showSubtitleMenu = false; // ✅ 是否显示字幕选择菜单
 
+  // ✅ 视频详情弹窗
+  bool _showMediaInfo = false; // ✅ 是否显示媒体信息弹窗
+
   // ✅ 自定义字幕URL
   String? _subtitleUrl;
 
@@ -1667,13 +1670,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   void _scrollToSelectedQuality() {
     if (!_qualityListScrollController.hasClients) return;
 
-    // ✅ 找到选中项的索引（包括"自动"选项）
-    int selectedIndex = 0; // 默认是"自动"
+    // ✅ 找到选中项的索引（"自动"现在在最后）
+    int selectedIndex = _qualityOptions.length; // 默认是"自动"（最后一个）
     if (_selectedQuality != null) {
       selectedIndex = _qualityOptions.indexWhere(
-            (q) => q['label'] == _selectedQuality,
-          ) +
-          1; // +1 因为第一个是"自动"
+        (q) => q['label'] == _selectedQuality,
+      );
+      // 如果找不到，默认为"自动"（最后一个）
+      if (selectedIndex == -1) {
+        selectedIndex = _qualityOptions.length;
+      }
     }
 
     // 每个按钮的高度约为 48（padding 12*2 + 文字行高约24）
@@ -3011,6 +3017,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   nextEpisode: _nextEpisode,
                   onPlayPreviousEpisode: _playPreviousEpisode,
                   onPlayNextEpisode: _playNextEpisode,
+                  showMediaInfo: _showMediaInfo,
+                  onToggleMediaInfo: () {
+                    setState(() {
+                      _showMediaInfo = !_showMediaInfo;
+                    });
+                  },
                 ),
               ),
             ],

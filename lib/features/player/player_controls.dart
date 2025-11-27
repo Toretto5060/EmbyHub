@@ -85,6 +85,8 @@ class PlayerControlsState {
   final ItemInfo? nextEpisode; // ✅ 下一集
   final VoidCallback? onPlayPreviousEpisode; // ✅ 播放上一集
   final VoidCallback? onPlayNextEpisode; // ✅ 播放下一集
+  final bool showMediaInfo; // ✅ 是否显示媒体信息弹窗
+  final VoidCallback onToggleMediaInfo; // ✅ 切换媒体信息弹窗显示
 
   const PlayerControlsState({
     required this.isInPipMode,
@@ -162,6 +164,8 @@ class PlayerControlsState {
     this.nextEpisode,
     this.onPlayPreviousEpisode,
     this.onPlayNextEpisode,
+    this.showMediaInfo = false,
+    required this.onToggleMediaInfo,
   });
 }
 
@@ -298,6 +302,10 @@ class PlayerControls extends ConsumerWidget {
           _BrightnessIndicator(brightness: state.currentBrightness!),
         if (state.isAdjustingVolume && state.currentVolume != null)
           _VolumeIndicator(volume: state.currentVolume!),
+
+        // ✅ 媒体信息弹窗（显示在左侧，不受控制层显示/隐藏影响）
+        if (!state.isInPipMode && state.showMediaInfo)
+          _MediaInfoPanel(state: state),
       ],
     );
   }
@@ -569,6 +577,34 @@ class _TopControlsBar extends ConsumerWidget {
                                   child: const Icon(
                                     Icons.screen_rotation_rounded,
                                     color: Colors.white,
+                                    size: 22,
+                                  ),
+                                ),
+                                // ✅ 媒体信息按钮
+                                CupertinoButton(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 6,
+                                  ),
+                                  minSize: 0,
+                                  onPressed: () {
+                                    // ✅ 关闭所有列表
+                                    if (state.showSpeedList) {
+                                      state.onShowSpeedListChanged(false);
+                                    }
+                                    if (state.showQualityList) {
+                                      state.onShowQualityListChanged(false);
+                                    }
+                                    state.onToggleMediaInfo();
+                                    // ✅ 不重置计时器，让媒体信息弹窗独立显示
+                                  },
+                                  child: Icon(
+                                    state.showMediaInfo
+                                        ? Icons.info_rounded
+                                        : Icons.info_outline_rounded,
+                                    color: state.showMediaInfo
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Colors.white,
                                     size: 22,
                                   ),
                                 ),
@@ -1605,13 +1641,13 @@ class _QualityListState extends State<_QualityList> {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ 构建选项列表：自动 + 所有可选分辨率
+    // ✅ 构建选项列表：所有可选分辨率 + 自动（自动在最下面）
     final options = [
-      {'label': '自动', 'value': null}, // ✅ null 表示自动
       ...widget.state.qualityOptions.map((q) => {
             'label': q['label'] as String,
             'value': q['label'] as String,
           }),
+      {'label': '自动', 'value': null}, // ✅ null 表示自动，放在最后
     ];
 
     return Positioned(
@@ -2579,5 +2615,393 @@ class _VolumeIndicator extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// ✅ 媒体信息面板
+class _MediaInfoPanel extends ConsumerWidget {
+  const _MediaInfoPanel({required this.state});
+
+  final PlayerControlsState state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Positioned(
+      left: 32, // ✅ 离左边更远
+      top: 60, // ✅ 在返回按钮下方，再往上一点
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            width: 280, // ✅ 宽度更小
+            constraints: const BoxConstraints(maxHeight: 500),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDarkModeFromContext(context, ref)
+                    ? [
+                        Colors.grey.shade900.withValues(alpha: 0.85),
+                        Colors.grey.shade800.withValues(alpha: 0.75),
+                      ]
+                    : [
+                        Colors.white.withValues(alpha: 0.3),
+                        Colors.white.withValues(alpha: 0.2),
+                      ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Stack(
+              children: [
+                // ✅ 内容区域
+                SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // ✅ 流媒体信息
+                      _buildCompactSection('流媒体', _getStreamMediaInfo()),
+                      const SizedBox(height: 8),
+
+                      // ✅ 视频信息
+                      if (state.itemDetails != null)
+                        _buildCompactSection('视频', _getVideoInfo()),
+                      if (state.itemDetails != null) const SizedBox(height: 8),
+
+                      // ✅ 音频信息
+                      if (state.audioStreams.isNotEmpty &&
+                          state.selectedAudioStreamIndex != null)
+                        _buildCompactSection('音频', _getAudioInfo()),
+                    ],
+                  ),
+                ),
+                // ✅ 右上角关闭按钮
+                Positioned(
+                  right: 4,
+                  top: 4,
+                  child: CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    minSize: 0,
+                    onPressed: state.onToggleMediaInfo,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ 紧凑的分段显示（标题 + 单行信息）
+  Widget _buildCompactSection(String title, String info) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          info,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            height: 1.3,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _getContainerFormat() {
+    // ✅ 从 itemDetails 获取容器格式
+    if (state.itemDetails != null) {
+      final mediaSources = state.itemDetails!.mediaSources;
+      if (mediaSources != null && mediaSources.isNotEmpty) {
+        final mediaSource = mediaSources[0];
+        final container = mediaSource['Container'];
+        if (container != null) {
+          return container.toString().toUpperCase();
+        }
+      }
+    }
+    return 'Unknown';
+  }
+
+  bool _isTranscoding() {
+    // ✅ 判断是否正在转码
+    if (state.itemDetails != null) {
+      final mediaSources = state.itemDetails!.mediaSources;
+      if (mediaSources != null && mediaSources.isNotEmpty) {
+        final mediaSource = mediaSources[0];
+
+        // 检查是否有 TranscodingUrl、TranscodingContainer 或 TranscodingSubProtocol
+        if (mediaSource['TranscodingUrl'] != null ||
+            mediaSource['TranscodingContainer'] != null ||
+            mediaSource['TranscodingSubProtocol'] != null) {
+          return true;
+        }
+
+        // 检查 SupportsDirectPlay 和 SupportsDirectStream
+        final supportsDirectPlay = mediaSource['SupportsDirectPlay'] as bool?;
+        final supportsDirectStream =
+            mediaSource['SupportsDirectStream'] as bool?;
+
+        // 如果两者都为 false，说明需要转码
+        if (supportsDirectPlay == false && supportsDirectStream == false) {
+          return true;
+        }
+
+        // 如果有 DirectStreamUrl 或 Path，说明是直接播放
+        if (mediaSource['DirectStreamUrl'] != null ||
+            mediaSource['Path'] != null) {
+          return false;
+        }
+      }
+    }
+    // 默认假设是直接播放
+    return false;
+  }
+
+  String _getPlaybackMethod() {
+    return _isTranscoding() ? '转码' : '直接播放';
+  }
+
+  String _getVideoResolution() {
+    if (state.itemDetails != null) {
+      final mediaSources = state.itemDetails!.mediaSources;
+      if (mediaSources != null && mediaSources.isNotEmpty) {
+        final streams = mediaSources[0]['MediaStreams'] as List?;
+        if (streams != null) {
+          for (final stream in streams) {
+            if (stream is Map && stream['Type'] == 'Video') {
+              final width = stream['Width'];
+              final height = stream['Height'];
+              if (width != null && height != null) {
+                return '${width}x${height}';
+              }
+            }
+          }
+        }
+      }
+    }
+    return '未知';
+  }
+
+  String _getVideoCodec() {
+    if (state.itemDetails != null) {
+      final mediaSources = state.itemDetails!.mediaSources;
+      if (mediaSources != null && mediaSources.isNotEmpty) {
+        final streams = mediaSources[0]['MediaStreams'] as List?;
+        if (streams != null) {
+          for (final stream in streams) {
+            if (stream is Map && stream['Type'] == 'Video') {
+              final codec = stream['Codec']?.toString().toUpperCase();
+              final profile = stream['Profile'];
+              final level = stream['Level'];
+              if (codec != null) {
+                String result = codec;
+                if (profile != null) result += ' $profile';
+                if (level != null) {
+                  // ✅ Level 格式化：42 -> L4.2, 50 -> L5.0
+                  final levelStr = level.toString();
+                  if (levelStr.length >= 2) {
+                    final major = levelStr.substring(0, levelStr.length - 1);
+                    final minor = levelStr.substring(levelStr.length - 1);
+                    result += ' L$major.$minor';
+                  } else {
+                    result += ' L$level';
+                  }
+                }
+                return result;
+              }
+            }
+          }
+        }
+      }
+    }
+    return '未知';
+  }
+
+  String _getVideoFrameRate() {
+    if (state.itemDetails != null) {
+      final mediaSources = state.itemDetails!.mediaSources;
+      if (mediaSources != null && mediaSources.isNotEmpty) {
+        final streams = mediaSources[0]['MediaStreams'] as List?;
+        if (streams != null) {
+          for (final stream in streams) {
+            if (stream is Map && stream['Type'] == 'Video') {
+              final fps = stream['RealFrameRate'] ?? stream['AverageFrameRate'];
+              if (fps != null) {
+                return '${fps.toStringAsFixed(2)} fps';
+              }
+            }
+          }
+        }
+      }
+    }
+    return '未知';
+  }
+
+  String _getAudioCodec() {
+    if (state.selectedAudioStreamIndex != null &&
+        state.selectedAudioStreamIndex! >= 0 &&
+        state.selectedAudioStreamIndex! < state.audioStreams.length) {
+      final stream = state.audioStreams[state.selectedAudioStreamIndex!];
+      final codec = stream['Codec']?.toString().toUpperCase();
+      return codec ?? '未知';
+    }
+    return '未知';
+  }
+
+  String _getAudioChannels() {
+    if (state.selectedAudioStreamIndex != null &&
+        state.selectedAudioStreamIndex! >= 0 &&
+        state.selectedAudioStreamIndex! < state.audioStreams.length) {
+      final stream = state.audioStreams[state.selectedAudioStreamIndex!];
+      final channels = stream['Channels'] as int?;
+      if (channels != null) {
+        if (channels == 2) return '2.0 (立体声)';
+        if (channels == 6) return '5.1 (环绕声)';
+        if (channels == 8) return '7.1 (环绕声)';
+        return '$channels 声道';
+      }
+    }
+    return '未知';
+  }
+
+  // ✅ 获取流媒体信息（紧凑格式）
+  // 示例：MP4 (8.5 Mbps)
+  //      → 直接播放
+  // 或：  HLS (10.0 Mbps)
+  //      → 转码 🟢
+  String _getStreamMediaInfo() {
+    final format = _getContainerFormat();
+    final method = _getPlaybackMethod();
+    final isTranscoding = _isTranscoding();
+
+    // 获取实际的媒体源比特率
+    String bitrate = '未知';
+    if (state.itemDetails != null) {
+      final mediaSources = state.itemDetails!.mediaSources;
+      if (mediaSources != null && mediaSources.isNotEmpty) {
+        final mediaSource = mediaSources[0];
+        final sourceBitrate = mediaSource['Bitrate'] as int?;
+        if (sourceBitrate != null) {
+          // 转换为 Mbps
+          final mbps = (sourceBitrate / 1000000).toStringAsFixed(1);
+          bitrate = '$mbps Mbps';
+        }
+      }
+    }
+
+    // 如果是转码，添加硬件加速图标
+    final hwIcon = isTranscoding ? ' 🟢' : '';
+    return '$format ($bitrate)\n→ $method$hwIcon';
+  }
+
+  // ✅ 获取视频信息（紧凑格式）
+  // 示例：1920x1080 H264
+  //      High L4.2 25.00 fps
+  //      → 直接播放
+  //      显示模式: 2608/120.00
+  String _getVideoInfo() {
+    final resolution = _getVideoResolution();
+    final codec = _getVideoCodec();
+    final fps = _getVideoFrameRate();
+    final isTranscoding = _isTranscoding();
+
+    // 分离编码名称和详细信息
+    String codecName = codec;
+    String codecDetails = '';
+
+    // 如果编码包含详细信息（如 "H264 High L4.2"），分离出来
+    final codecParts = codec.split(' ');
+    if (codecParts.length > 1) {
+      codecName = codecParts[0]; // H264
+      codecDetails = codecParts.sublist(1).join(' '); // High L4.2
+    }
+
+    // 如果是转码，添加硬件加速图标
+    final method = _getPlaybackMethod();
+    final hwIcon = isTranscoding ? ' 🟢' : '';
+    String result =
+        '$resolution $codecName\n$codecDetails $fps\n→ $method$hwIcon';
+
+    if (state.qualityLabel != null) {
+      result += '\n显示模式: ${state.qualityLabel}';
+    }
+
+    return result;
+  }
+
+  // ✅ 获取音频信息（紧凑格式）
+  // 示例：English AAC stereo (默认)
+  //      192kbps 48000 Hz
+  //      → 直接播放
+  String _getAudioInfo() {
+    if (state.selectedAudioStreamIndex == null ||
+        state.selectedAudioStreamIndex! < 0 ||
+        state.selectedAudioStreamIndex! >= state.audioStreams.length) {
+      return '未知';
+    }
+
+    final stream = state.audioStreams[state.selectedAudioStreamIndex!];
+
+    // 获取语言（优先使用 DisplayLanguage，它包含完整名称如 "English"）
+    final language = stream['DisplayLanguage'] as String? ??
+        stream['DisplayTitle'] as String? ??
+        stream['Language'] as String? ??
+        'Unknown';
+
+    // 获取编码
+    final codec = _getAudioCodec();
+
+    // 获取声道布局
+    final channelLayout = stream['ChannelLayout'] as String?;
+    String channels = channelLayout?.toLowerCase() ?? _getAudioChannels();
+
+    // 是否默认
+    final isDefault = stream['IsDefault'] as bool? ?? false;
+    final defaultTag = isDefault ? ' (默认)' : '';
+
+    // 第一行：语言 编码 声道布局 (默认)
+    String line1 = '$language $codec $channels$defaultTag';
+
+    // 获取音频码率和采样率
+    final audioBitrate = stream['BitRate'] as int?;
+    final sampleRate = stream['SampleRate'] as int?;
+
+    String line2 = '';
+    if (audioBitrate != null) {
+      line2 += '${(audioBitrate / 1000).toStringAsFixed(0)}kbps';
+    }
+    if (sampleRate != null) {
+      if (line2.isNotEmpty) line2 += ' ';
+      line2 += '$sampleRate Hz';
+    }
+
+    return '$line1\n$line2\n→ 直接播放';
   }
 }
