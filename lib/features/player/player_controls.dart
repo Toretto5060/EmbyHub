@@ -81,6 +81,7 @@ class PlayerControlsState {
   final String? itemType; // ✅ 影片类型（Movie, Episode等）
   final String? logoUrl; // ✅ Logo图片URL
   final ItemInfo? itemDetails; // ✅ 影片详细信息
+  final Map<String, dynamic>? sessionInfo; // ✅ 实时会话信息（包含转码状态）
   final ItemInfo? previousEpisode; // ✅ 上一集
   final ItemInfo? nextEpisode; // ✅ 下一集
   final VoidCallback? onPlayPreviousEpisode; // ✅ 播放上一集
@@ -160,6 +161,7 @@ class PlayerControlsState {
     this.itemType,
     this.logoUrl,
     this.itemDetails,
+    this.sessionInfo, // ✅ 实时会话信息
     this.previousEpisode,
     this.nextEpisode,
     this.onPlayPreviousEpisode,
@@ -2627,14 +2629,14 @@ class _MediaInfoPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Positioned(
-      left: 32, // ✅ 离左边更远
+      left: 48, // ✅ 离左边更远
       top: 60, // ✅ 在返回按钮下方，再往上一点
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
           child: Container(
-            width: 280, // ✅ 宽度更小
+            width: 260, // ✅ 宽度更小
             constraints: const BoxConstraints(maxHeight: 500),
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -2666,8 +2668,7 @@ class _MediaInfoPanel extends ConsumerWidget {
                       const SizedBox(height: 8),
 
                       // ✅ 视频信息
-                      if (state.itemDetails != null)
-                        _buildCompactSection('视频', _getVideoInfo()),
+                      if (state.itemDetails != null) _buildVideoSection(),
                       if (state.itemDetails != null) const SizedBox(height: 8),
 
                       // ✅ 音频信息
@@ -2750,33 +2751,35 @@ class _MediaInfoPanel extends ConsumerWidget {
   }
 
   bool _isTranscoding() {
-    // ✅ 判断是否正在转码
+    // ✅ 优先使用 sessionInfo 中的 PlayMethod（最准确）
+    if (state.sessionInfo != null) {
+      final playState =
+          state.sessionInfo!['PlayState'] as Map<String, dynamic>?;
+      if (playState != null) {
+        final playMethod = playState['PlayMethod'] as String?;
+        return playMethod == 'Transcode';
+      }
+    }
+
+    // ✅ 备用方案：从 itemDetails 判断
     if (state.itemDetails != null) {
       final mediaSources = state.itemDetails!.mediaSources;
       if (mediaSources != null && mediaSources.isNotEmpty) {
         final mediaSource = mediaSources[0];
 
-        // 检查是否有 TranscodingUrl、TranscodingContainer 或 TranscodingSubProtocol
+        // 1. 检查 Container 是否为 ts（HLS 转码）
+        final container = mediaSource['Container'] as String?;
+        if (container != null &&
+            (container.toLowerCase() == 'ts' ||
+                container.toLowerCase() == 'hls')) {
+          return true;
+        }
+
+        // 2. 检查是否有 TranscodingUrl、TranscodingContainer 或 TranscodingSubProtocol
         if (mediaSource['TranscodingUrl'] != null ||
             mediaSource['TranscodingContainer'] != null ||
             mediaSource['TranscodingSubProtocol'] != null) {
           return true;
-        }
-
-        // 检查 SupportsDirectPlay 和 SupportsDirectStream
-        final supportsDirectPlay = mediaSource['SupportsDirectPlay'] as bool?;
-        final supportsDirectStream =
-            mediaSource['SupportsDirectStream'] as bool?;
-
-        // 如果两者都为 false，说明需要转码
-        if (supportsDirectPlay == false && supportsDirectStream == false) {
-          return true;
-        }
-
-        // 如果有 DirectStreamUrl 或 Path，说明是直接播放
-        if (mediaSource['DirectStreamUrl'] != null ||
-            mediaSource['Path'] != null) {
-          return false;
         }
       }
     }
@@ -2784,8 +2787,53 @@ class _MediaInfoPanel extends ConsumerWidget {
     return false;
   }
 
-  String _getPlaybackMethod() {
-    return _isTranscoding() ? '转码' : '直接播放';
+  // ✅ 获取转码原因
+  String? _getTranscodeReason() {
+    if (!_isTranscoding()) return null;
+
+    if (state.sessionInfo != null) {
+      final transcodingInfo =
+          state.sessionInfo!['TranscodingInfo'] as Map<String, dynamic>?;
+      if (transcodingInfo != null) {
+        final reasons = transcodingInfo['TranscodeReasons'] as List?;
+        if (reasons != null && reasons.isNotEmpty) {
+          // 翻译转码原因
+          final reason = reasons[0].toString();
+          switch (reason) {
+            case 'ContainerBitrateExceedsLimit':
+              return '因质量设置而降低比特率';
+            case 'VideoCodecNotSupported':
+              return '视频编码不支持';
+            case 'AudioCodecNotSupported':
+              return '正在转换音频为兼容的编解码器';
+            case 'SubtitleCodecNotSupported':
+              return '字幕编码不支持';
+            case 'ContainerNotSupported':
+              return '容器格式不支持';
+            case 'VideoResolutionNotSupported':
+              return '视频分辨率不支持';
+            default:
+              return reason;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  // ✅ 判断是否因字幕而转码
+  bool _isSubtitleBurning() {
+    if (state.sessionInfo != null) {
+      final transcodingInfo =
+          state.sessionInfo!['TranscodingInfo'] as Map<String, dynamic>?;
+      if (transcodingInfo != null) {
+        final reasons = transcodingInfo['TranscodeReasons'] as List?;
+        if (reasons != null && reasons.isNotEmpty) {
+          return reasons.contains('SubtitleCodecNotSupported');
+        }
+      }
+    }
+    return false;
   }
 
   String _getVideoResolution() {
@@ -2892,74 +2940,297 @@ class _MediaInfoPanel extends ConsumerWidget {
   }
 
   // ✅ 获取流媒体信息（紧凑格式）
-  // 示例：MP4 (8.5 Mbps)
+  // 示例：MP4 (8.1 Mbps)
   //      → 直接播放
-  // 或：  HLS (10.0 Mbps)
-  //      → 转码 🟢
+  // 或：  MP4 (8.1 Mbps)
+  //      → HLS (4.0 Mbps 25 fps)
+  //      因质量设置而降低比特率
   String _getStreamMediaInfo() {
-    final format = _getContainerFormat();
-    final method = _getPlaybackMethod();
     final isTranscoding = _isTranscoding();
 
-    // 获取实际的媒体源比特率
-    String bitrate = '未知';
+    // 获取原始格式和比特率
+    String originalFormat = _getContainerFormat();
+    String originalBitrate = '未知';
     if (state.itemDetails != null) {
       final mediaSources = state.itemDetails!.mediaSources;
       if (mediaSources != null && mediaSources.isNotEmpty) {
         final mediaSource = mediaSources[0];
         final sourceBitrate = mediaSource['Bitrate'] as int?;
         if (sourceBitrate != null) {
-          // 转换为 Mbps
           final mbps = (sourceBitrate / 1000000).toStringAsFixed(1);
-          bitrate = '$mbps Mbps';
+          originalBitrate = '$mbps Mbps';
         }
       }
     }
 
-    // 如果是转码，添加硬件加速图标
-    final hwIcon = isTranscoding ? ' 🟢' : '';
-    return '$format ($bitrate)\n→ $method$hwIcon';
-  }
+    String result = '$originalFormat ($originalBitrate)';
 
-  // ✅ 获取视频信息（紧凑格式）
-  // 示例：1920x1080 H264
-  //      High L4.2 25.00 fps
-  //      → 直接播放
-  //      显示模式: 2608/120.00
-  String _getVideoInfo() {
-    final resolution = _getVideoResolution();
-    final codec = _getVideoCodec();
-    final fps = _getVideoFrameRate();
-    final isTranscoding = _isTranscoding();
+    // ✅ 如果是转码，显示转码后的信息
+    if (isTranscoding && state.sessionInfo != null) {
+      final transcodingInfo =
+          state.sessionInfo!['TranscodingInfo'] as Map<String, dynamic>?;
+      if (transcodingInfo != null) {
+        // 获取转码后的协议（SubProtocol）
+        final subProtocol = transcodingInfo['SubProtocol'] as String?;
+        final transFormat = subProtocol?.toUpperCase() ?? 'HLS';
 
-    // 分离编码名称和详细信息
-    String codecName = codec;
-    String codecDetails = '';
+        // 获取转码后的比特率
+        String transBitrate = '未知';
+        final transcodeBitrate = transcodingInfo['Bitrate'] as int?;
+        if (transcodeBitrate != null) {
+          final mbps = (transcodeBitrate / 1000000).toStringAsFixed(1);
+          transBitrate = '$mbps Mbps';
+        }
 
-    // 如果编码包含详细信息（如 "H264 High L4.2"），分离出来
-    final codecParts = codec.split(' ');
-    if (codecParts.length > 1) {
-      codecName = codecParts[0]; // H264
-      codecDetails = codecParts.sublist(1).join(' '); // High L4.2
-    }
+        // 获取实时帧率（从 TranscodingInfo 获取）
+        String fps = '';
+        final videoFps = transcodingInfo['Framerate'] as num?;
+        if (videoFps != null) {
+          fps = ' ${videoFps.toStringAsFixed(0)} fps';
+        }
 
-    // 如果是转码，添加硬件加速图标
-    final method = _getPlaybackMethod();
-    final hwIcon = isTranscoding ? ' 🟢' : '';
-    String result =
-        '$resolution $codecName\n$codecDetails $fps\n→ $method$hwIcon';
+        result += '\n→ $transFormat ($transBitrate$fps)';
 
-    if (state.qualityLabel != null) {
-      result += '\n显示模式: ${state.qualityLabel}';
+        // ✅ 如果是字幕压制，显示提示
+        if (_isSubtitleBurning()) {
+          result += '\n正在直接转换字幕进视频';
+        } else {
+          // 添加转码原因
+          final transcodeReason = _getTranscodeReason();
+          if (transcodeReason != null) {
+            result += '\n$transcodeReason';
+          }
+        }
+      }
+    } else {
+      result += '\n→ 直接播放';
     }
 
     return result;
   }
 
+  // ✅ 构建视频信息区域（支持图标）
+  // 示例：1280x720 H264
+  //      High L4.0 25.00 fps
+  //      → 转码 (H264 4.0 Mbps) 🔧
+  //      显示模式: 1280x720
+  //      High L4.2 8.0 Mbps 25.00 fps (原视频)
+  Widget _buildVideoSection() {
+    // ✅ 判断视频是否转码：使用 TranscodingInfo.IsVideoDirect
+    bool isVideoTranscoding = false;
+    if (state.sessionInfo != null) {
+      final transcodingInfo =
+          state.sessionInfo!['TranscodingInfo'] as Map<String, dynamic>?;
+      if (transcodingInfo != null) {
+        final isVideoDirect = transcodingInfo['IsVideoDirect'] as bool?;
+        isVideoTranscoding = isVideoDirect == false;
+      }
+    }
+
+    // 获取原始视频信息
+    final originalResolution = _getVideoResolution();
+    final originalCodec = _getVideoCodec();
+    final originalFps = _getVideoFrameRate();
+
+    // 分离编码名称和详细信息
+    String codecName = originalCodec;
+    String codecDetails = '';
+
+    final codecParts = originalCodec.split(' ');
+    if (codecParts.length > 1) {
+      codecName = codecParts[0];
+      codecDetails = codecParts.sublist(1).join(' ');
+    }
+
+    // 获取原始视频比特率
+    String originalBitrate = '';
+    if (state.itemDetails != null) {
+      final mediaSources = state.itemDetails!.mediaSources;
+      if (mediaSources != null && mediaSources.isNotEmpty) {
+        final streams = mediaSources[0]['MediaStreams'] as List?;
+        if (streams != null) {
+          for (final stream in streams) {
+            if (stream is Map && stream['Type'] == 'Video') {
+              final bitrate = stream['BitRate'] as int?;
+              if (bitrate != null) {
+                final mbps = (bitrate / 1000000).toStringAsFixed(1);
+                originalBitrate = ' $mbps Mbps';
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    final widgets = <Widget>[
+      const Text(
+        '视频',
+        style: TextStyle(
+          color: Colors.white70,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(height: 4),
+    ];
+
+    // 如果视频转码，显示转码后的信息
+    if (isVideoTranscoding && state.sessionInfo != null) {
+      final transcodingInfo =
+          state.sessionInfo!['TranscodingInfo'] as Map<String, dynamic>?;
+      if (transcodingInfo != null) {
+        // 转码后的分辨率（格式化为 "1080p" 格式）
+        final transHeight = transcodingInfo['Height'] as int?;
+        String transResolution = originalResolution;
+        if (transHeight != null) {
+          transResolution = '${transHeight}p';
+        }
+
+        // 转码后的编码
+        final transVideoCodec = transcodingInfo['VideoCodec'] as String?;
+        final transCodecName = transVideoCodec?.toUpperCase() ?? codecName;
+
+        // 第一行：分辨率 + 编码 + 芯片图标
+        widgets.add(Row(
+          children: [
+            Text(
+              '$transResolution $transCodecName',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.memory,
+              color: Colors.green,
+              size: 16,
+            ),
+          ],
+        ));
+
+        // 显示原视频信息
+        widgets.add(Text(
+          '$codecDetails$originalBitrate $originalFps',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            height: 1.3,
+          ),
+        ));
+
+        // 转码后的比特率
+        String transBitrate = '';
+        final transVideoBitrate = transcodingInfo['VideoBitrate'] as int?;
+        if (transVideoBitrate != null) {
+          final mbps = (transVideoBitrate / 1000000).toStringAsFixed(1);
+          transBitrate = ' ($transCodecName $mbps Mbps)';
+        }
+
+        widgets.add(Row(
+          children: [
+            Text(
+              '→ 转码$transBitrate',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.memory,
+              color: Colors.green,
+              size: 16,
+            ),
+          ],
+        ));
+
+        // ✅ 如果是字幕压制，显示提示
+        if (_isSubtitleBurning()) {
+          widgets.add(const Text(
+            '→ 字幕压制',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              height: 1.3,
+            ),
+          ));
+        }
+
+        if (state.qualityLabel != null) {
+          widgets.add(Text(
+            '显示模式: ${state.qualityLabel}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              height: 1.3,
+            ),
+          ));
+        }
+      }
+    } else {
+      // 直接播放 - 格式化为 "1080p" 格式
+      String formattedResolution = originalResolution;
+      if (originalResolution.contains('x')) {
+        final parts = originalResolution.split('x');
+        if (parts.length == 2) {
+          formattedResolution = '${parts[1]}p';
+        }
+      }
+
+      widgets.add(Text(
+        '$formattedResolution $codecName',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 13,
+          height: 1.3,
+        ),
+      ));
+
+      widgets.add(Text(
+        '$codecDetails$originalBitrate $originalFps',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 13,
+          height: 1.3,
+        ),
+      ));
+
+      widgets.add(const Text(
+        '→ 直接播放',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 13,
+          height: 1.3,
+        ),
+      ));
+
+      if (state.qualityLabel != null) {
+        widgets.add(Text(
+          '显示模式: ${state.qualityLabel}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            height: 1.3,
+          ),
+        ));
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: widgets,
+    );
+  }
+
   // ✅ 获取音频信息（紧凑格式）
   // 示例：English AAC stereo (默认)
   //      192kbps 48000 Hz
-  //      → 直接播放
+  //      → 直接播放 / 转码
   String _getAudioInfo() {
     if (state.selectedAudioStreamIndex == null ||
         state.selectedAudioStreamIndex! < 0 ||
@@ -3002,6 +3273,19 @@ class _MediaInfoPanel extends ConsumerWidget {
       line2 += '$sampleRate Hz';
     }
 
-    return '$line1\n$line2\n→ 直接播放';
+    // ✅ 判断音频是否转码：使用 TranscodingInfo.IsAudioDirect
+    bool isAudioTranscoding = false;
+    if (state.sessionInfo != null) {
+      final transcodingInfo =
+          state.sessionInfo!['TranscodingInfo'] as Map<String, dynamic>?;
+      if (transcodingInfo != null) {
+        final isAudioDirect = transcodingInfo['IsAudioDirect'] as bool?;
+        isAudioTranscoding = isAudioDirect == false;
+      }
+    }
+
+    String line3 = isAudioTranscoding ? '→ 转码' : '→ 直接播放';
+
+    return '$line1\n$line2\n$line3';
   }
 }

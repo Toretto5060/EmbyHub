@@ -256,6 +256,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   String? _mediaSourceId;
   String? _playSessionId; // ✅ PlaySessionId，用于调用 /Sessions/Playing
 
+  // ✅ 实时会话信息（包含转码状态）
+  Map<String, dynamic>? _sessionInfo;
+  Timer? _sessionInfoUpdateTimer; // ✅ 弹窗打开时的实时更新定时器
+
   Duration? get _initialSeekPosition {
     final ticks = widget.initialPositionTicks;
     _playerLogImportant('🎬 [Player] Initial position ticks: $ticks');
@@ -369,6 +373,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
 
     _loadStreamSelections();
+  }
+
+  /// ✅ 获取会话信息（在需要时调用）
+  Future<void> _fetchSessionInfo() async {
+    try {
+      final api = await EmbyApi.create();
+      final sessionInfo = await api.getCurrentSession();
+      if (mounted && sessionInfo != null) {
+        setState(() {
+          _sessionInfo = sessionInfo;
+        });
+      }
+    } catch (e) {
+      _playerLog('⚠️ [Player] Failed to get session info: $e');
+    }
+  }
+
+  /// ✅ 启动会话信息实时更新定时器（弹窗打开时）
+  void _startSessionInfoUpdateTimer() {
+    _sessionInfoUpdateTimer?.cancel();
+    _sessionInfoUpdateTimer =
+        Timer.periodic(const Duration(seconds: 5), (timer) async {
+      if (!mounted || !_showMediaInfo) {
+        timer.cancel();
+        return;
+      }
+      await _fetchSessionInfo();
+    });
+  }
+
+  /// ✅ 停止会话信息实时更新定时器（弹窗关闭时）
+  void _stopSessionInfoUpdateTimer() {
+    _sessionInfoUpdateTimer?.cancel();
+    _sessionInfoUpdateTimer = null;
   }
 
   /// ✅ 禁用字幕显示（在创建播放器后立即调用）
@@ -1282,6 +1320,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _longPressTimer?.cancel(); // ✅ 取消长按定时器
     _speedAccelerationTimer?.cancel(); // ✅ 取消倍速加速定时器
     _retryTimer?.cancel(); // ✅ 取消重试定时器
+    _sessionInfoUpdateTimer?.cancel(); // ✅ 取消会话信息更新定时器
     _speedListScrollController.dispose(); // ✅ 释放速度列表滚动控制器
     _qualityListScrollController.dispose(); // ✅ 释放分辨率列表滚动控制器
     _controlsAnimationController.dispose();
@@ -1972,6 +2011,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       }
 
       _playerLogImportant('✅ [Player] Quality changed successfully');
+
+      // ✅ 切换清晰度后，获取最新的会话信息
+      await _fetchSessionInfo();
     } catch (e) {
       _playerLog('❌ [Player] Failed to change quality: $e');
     }
@@ -3013,15 +3055,26 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   itemType: _itemType,
                   logoUrl: _logoUrl,
                   itemDetails: _itemDetails,
+                  sessionInfo: _sessionInfo, // ✅ 传递实时会话信息
                   previousEpisode: _previousEpisode,
                   nextEpisode: _nextEpisode,
                   onPlayPreviousEpisode: _playPreviousEpisode,
                   onPlayNextEpisode: _playNextEpisode,
                   showMediaInfo: _showMediaInfo,
-                  onToggleMediaInfo: () {
+                  onToggleMediaInfo: () async {
                     setState(() {
                       _showMediaInfo = !_showMediaInfo;
                     });
+
+                    if (_showMediaInfo) {
+                      // ✅ 打开详情弹窗时，立即获取一次会话信息
+                      await _fetchSessionInfo();
+                      // ✅ 启动定时器，每5秒更新一次（用于实时更新HLS帧率等信息）
+                      _startSessionInfoUpdateTimer();
+                    } else {
+                      // ✅ 关闭详情弹窗时，停止定时器
+                      _stopSessionInfoUpdateTimer();
+                    }
                   },
                 ),
               ),

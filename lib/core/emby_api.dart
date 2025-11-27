@@ -2097,6 +2097,28 @@ class EmbyApi {
     }
   }
 
+  // ✅ 获取当前设备的会话信息（包含实时的转码状态）
+  Future<Map<String, dynamic>?> getCurrentSession() async {
+    try {
+      final prefs = await sp.SharedPreferences.getInstance();
+      final deviceId = await _ensureDeviceId(prefs);
+
+      final res = await _dio.get('/Sessions', queryParameters: {
+        'DeviceId': deviceId,
+      });
+
+      final sessions = res.data as List?;
+      if (sessions != null && sessions.isNotEmpty) {
+        // 返回第一个会话（当前设备的会话）
+        return sessions[0] as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      _apiLog('⚠️ [API] Failed to get current session: $e');
+      return null;
+    }
+  }
+
   Future<void> updateUserItemData(
     String userId,
     String itemId, {
