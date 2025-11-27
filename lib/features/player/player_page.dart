@@ -98,6 +98,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const int _maxRetryCount = 3;
   Timer? _retryTimer;
 
+  // ✅ 音频轨道自动切换
+  Set<int> _triedAudioIndices = {}; // 已尝试过的音频轨道索引
+  bool _showAudioSwitchHint = false; // ✅ 是否显示音频切换提示
+  String _audioSwitchHintText = ''; // ✅ 音频切换提示文本
+  Timer? _audioSwitchHintTimer; // ✅ 音频切换提示自动隐藏定时器
+
   // ✅ 应用生命周期
   bool _wasPlayingBeforeBackground = false;
 
@@ -789,6 +795,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   Future<void> _load() async {
     try {
+      // ✅ 重置音频轨道尝试记录
+      _triedAudioIndices.clear();
+
       if (mounted) {
         setState(() {
           _isBuffering = true;
@@ -1321,6 +1330,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _speedAccelerationTimer?.cancel(); // ✅ 取消倍速加速定时器
     _retryTimer?.cancel(); // ✅ 取消重试定时器
     _sessionInfoUpdateTimer?.cancel(); // ✅ 取消会话信息更新定时器
+    _audioSwitchHintTimer?.cancel(); // ✅ 取消音频切换提示定时器
     _speedListScrollController.dispose(); // ✅ 释放速度列表滚动控制器
     _qualityListScrollController.dispose(); // ✅ 释放分辨率列表滚动控制器
     _controlsAnimationController.dispose();
@@ -3078,6 +3088,49 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                   },
                 ),
               ),
+
+              // ✅ 音频切换提示（类似裁切提示的样式，显示在底部进度条上方右侧）
+              if (_showAudioSwitchHint)
+                Positioned(
+                  bottom: 90, // ✅ 在进度条上方，距离更近一些
+                  right: 30, // ✅ 往左移动一些，不要太靠右
+                  child: AnimatedOpacity(
+                    opacity: _showAudioSwitchHint ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Colors.grey.shade900.withValues(alpha: 0.6),
+                                Colors.grey.shade800.withValues(alpha: 0.4),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            _audioSwitchHintText,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -4519,10 +4572,65 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Future<void> _handlePlaybackError(String error) async {
     _errorCount++;
 
-    // 网络错误可以重试
-    if (error.toLowerCase().contains('network') ||
-        error.toLowerCase().contains('timeout') ||
-        error.toLowerCase().contains('connection')) {
+    final errorLower = error.toLowerCase();
+
+    // ✅ 检查是否是可能与音频相关的错误（HTTP 500、Source error 等）
+    // 这些错误通常是服务器转码失败，很可能是音频编解码器不支持导致
+    final isPossibleAudioError = errorLower.contains('source error') ||
+        errorLower.contains('500') ||
+        errorLower.contains('secondaryaudionotsupported') ||
+        errorLower.contains('audio') && errorLower.contains('not supported');
+
+    if (isPossibleAudioError) {
+      _playerLog('🎵 [Player] Possible audio error detected: $error');
+
+      // ✅ 记录当前尝试的音频轨道
+      if (_selectedAudioStreamIndex != null &&
+          _selectedAudioStreamIndex! >= 0) {
+        _triedAudioIndices.add(_selectedAudioStreamIndex!);
+      }
+
+      // ✅ 检查是否还有未尝试的音频轨道
+      final hasMoreAudioTracks =
+          _audioStreams.length > _triedAudioIndices.length;
+
+      if (hasMoreAudioTracks) {
+        // ✅ 尝试切换到下一个音频轨道
+        if (await _tryNextAudioTrack()) {
+          _playerLog('✅ [Player] Switched to next audio track, retrying...');
+
+          // ✅ 标记为用户手动选择（自动切换成功后视作手动选择）
+          _hasManuallySelectedAudio = true;
+
+          // ✅ 持久化保存音频选择
+          await _saveStreamSelections();
+
+          // 切换成功，重新加载播放器
+          try {
+            await _reloadPlayer();
+            _errorRetryCount = 0;
+            return;
+          } catch (e) {
+            _playerLog('❌ [Player] Reload with new audio failed: $e');
+            // 不递归调用，等待播放器自己报错后再次触发 _handlePlaybackError
+            return;
+          }
+        }
+      }
+
+      // ✅ 所有音频轨道都尝试过了，显示错误
+      _playerLog(
+          '❌ [Player] All audio tracks tried (${_triedAudioIndices.length}/${_audioStreams.length}), showing error dialog');
+      _showErrorDialog(
+          '所有音频轨道都不支持\n\n已尝试 ${_triedAudioIndices.length} 个音频轨道\n\n请尝试：\n1. 更新服务器\n2. 检查音频编解码器支持\n3. 使用其他播放器');
+      _triedAudioIndices.clear(); // 重置已尝试列表
+      return;
+    }
+
+    // 其他网络错误可以重试
+    if (errorLower.contains('network') ||
+        errorLower.contains('timeout') ||
+        errorLower.contains('connection')) {
       if (_errorRetryCount < _maxRetryCount) {
         _errorRetryCount++;
         _playerLog(
@@ -4542,13 +4650,77 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         });
       } else {
         // 达到最大重试次数，显示错误提示
-        _showErrorDialog('播放失败，请检查网络连接');
+        _showErrorDialog('播放失败，已重试 $_maxRetryCount 次\n\n错误：$error');
         _errorRetryCount = 0; // 重置计数
       }
     } else {
       // 其他错误直接提示
       _showErrorDialog('播放出错：$error');
     }
+  }
+
+  // ✅ 尝试切换到下一个可用的音频轨道
+  Future<bool> _tryNextAudioTrack() async {
+    if (_audioStreams.isEmpty) {
+      _playerLog('⚠️ [Player] No audio streams available');
+      return false;
+    }
+
+    // ✅ 找到下一个未尝试过的音频轨道
+    for (int i = 0; i < _audioStreams.length; i++) {
+      if (!_triedAudioIndices.contains(i)) {
+        final audioStream = _audioStreams[i];
+        final language = audioStream['DisplayLanguage'] ??
+            audioStream['Language'] ??
+            'Unknown';
+        final codec =
+            audioStream['Codec']?.toString().toUpperCase() ?? 'Unknown';
+        final channelLayout = audioStream['ChannelLayout'] ?? '';
+
+        _playerLog('🎵 [Player] Trying audio track $i: $language ($codec)');
+
+        // ✅ 显示音频切换提示
+        _showAudioSwitchToast('音频不支持，正在切换\n$language $codec $channelLayout');
+
+        if (mounted) {
+          setState(() {
+            _selectedAudioStreamIndex = i;
+          });
+          _playerLog(
+              '✅ [Player] Updated _selectedAudioStreamIndex to $i (UI will sync)');
+        } else {
+          _selectedAudioStreamIndex = i;
+          _playerLog(
+              '✅ [Player] Updated _selectedAudioStreamIndex to $i (not mounted)');
+        }
+
+        return true;
+      }
+    }
+
+    _playerLog('⚠️ [Player] All audio tracks have been tried');
+    return false;
+  }
+
+  // ✅ 显示音频切换提示
+  void _showAudioSwitchToast(String message) {
+    _audioSwitchHintTimer?.cancel();
+
+    if (mounted) {
+      setState(() {
+        _audioSwitchHintText = message;
+        _showAudioSwitchHint = true;
+      });
+    }
+
+    // ✅ 3秒后自动隐藏
+    _audioSwitchHintTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() {
+          _showAudioSwitchHint = false;
+        });
+      }
+    });
   }
 
   // ✅ 显示错误对话框
