@@ -133,6 +133,14 @@ class MainActivity: FlutterActivity() {
                         result.success(false)
                     }
                 }
+                "exit" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        exitPip()
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
+                }
                 "updatePipParams" -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         val isPlaying = call.argument<Boolean>("isPlaying") ?: false
@@ -272,6 +280,36 @@ class MainActivity: FlutterActivity() {
             .build()
         val result = enterPictureInPictureMode(params)
         android.util.Log.d("MainActivity", "PiP mode entered: $result")
+    }
+    
+    // ✅ 退出 PiP 模式
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun exitPip() {
+        android.util.Log.d("MainActivity", "Exit PiP requested, isInPipMode=$isInPictureInPictureMode")
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // ✅ 禁用自动进入 PiP，防止其他页面也进入小窗
+            try {
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .apply {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            setAutoEnterEnabled(false) // ✅ 禁用自动进入
+                        }
+                    }
+                    .build()
+                setPictureInPictureParams(params)
+                android.util.Log.d("MainActivity", "✅ Disabled auto-enter PiP")
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "❌ Failed to disable auto-enter PiP: $e")
+            }
+        }
+        
+        // ✅ 如果当前在 PiP 模式，尝试退出
+        // 注意：Android 没有直接的 API 退出 PiP，只能通过 moveTaskToBack 或让用户点击小窗
+        if (isInPictureInPictureMode) {
+            android.util.Log.d("MainActivity", "Currently in PiP, will exit on user action or app resume")
+        }
     }
     
     @RequiresApi(Build.VERSION_CODES.O)
