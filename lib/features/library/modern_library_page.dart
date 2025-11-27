@@ -86,21 +86,24 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
           children: [
             // 标题
             titleWidget,
-            // loading 定位在标题右侧（使用 Positioned.fill 的技巧）
-            if (isLoading)
-              Positioned(
-                left: null, // 不限制左侧
-                right: -24, // 相对于标题右边缘向右24px（8px间距 + 16px loading）
-                top: 0,
-                bottom: 0,
-                child: const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Padding(
-                    padding: EdgeInsets.only(left: 8),
-                    child: CupertinoActivityIndicator(radius: 8),
+            // loading 定位在标题右侧（使用动画淡入淡出）
+            Positioned(
+              left: null, // 不限制左侧
+              right: -24, // 相对于标题右边缘向右24px（8px间距 + 16px loading）
+              top: 0,
+              bottom: 0,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: AnimatedOpacity(
+                    opacity: isLoading ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const CupertinoActivityIndicator(radius: 8),
                   ),
                 ),
               ),
+            ),
           ],
         ),
       ),
@@ -379,6 +382,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               padding: EdgeInsets.only(
                 top: MediaQuery.of(context).padding.top + 44,
               ),
+              // ✅ 性能优化：提前缓存屏幕外3屏的内容，提升滚动流畅度
+              cacheExtent: MediaQuery.of(context).size.height * 3,
               children: [
                 // My Libraries Section
                 views.when(
@@ -427,12 +432,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                       ],
                     );
                   },
-                  loading: () => const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32),
-                      child: CupertinoActivityIndicator(),
-                    ),
-                  ),
+                  loading: () => _buildSkeletonLoading(context),
                   error: (e, st) {
                     // 网络错误时显示错误提示和重试按钮
                     return Center(
@@ -547,6 +547,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         itemCount: views.length,
+        // ✅ 性能优化：禁用自动保活，减少内存占用
+        addAutomaticKeepAlives: false,
+        // ✅ 性能优化：提前缓存左右各2个卡片
+        cacheExtent: 320, // 约2个卡片的宽度
         itemBuilder: (context, index) {
           final view = views[index];
           return _buildLibraryCard(context, view);
@@ -558,24 +562,26 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   Widget _buildLibraryCard(BuildContext context, ViewInfo view) {
     final isDark = isDarkModeFromContext(context, ref);
 
-    return GestureDetector(
-      onTap: view.id != null && view.id!.isNotEmpty
-          ? () {
-              if (view.collectionType == 'livetv') {
-                context.push(
-                    '/livetv/${view.id}?name=${Uri.encodeComponent(view.name)}');
-              } else if (view.collectionType == 'music') {
-                context.push(
-                    '/music/${view.id}?name=${Uri.encodeComponent(view.name)}');
-              } else {
-                context.push(
-                    '/library/${view.id}?name=${Uri.encodeComponent(view.name)}');
+    // ✅ 体验优化：使用 Material InkWell 提供点击水波纹效果
+    return Container(
+      width: 150,
+      margin: const EdgeInsets.only(left: 6, right: 6),
+      child: InkWell(
+        onTap: view.id != null && view.id!.isNotEmpty
+            ? () {
+                if (view.collectionType == 'livetv') {
+                  context.push(
+                      '/livetv/${view.id}?name=${Uri.encodeComponent(view.name)}');
+                } else if (view.collectionType == 'music') {
+                  context.push(
+                      '/music/${view.id}?name=${Uri.encodeComponent(view.name)}');
+                } else {
+                  context.push(
+                      '/library/${view.id}?name=${Uri.encodeComponent(view.name)}');
+                }
               }
-            }
-          : null,
-      child: Container(
-        width: 150,
-        margin: const EdgeInsets.only(left: 6, right: 6),
+            : null,
+        borderRadius: BorderRadius.circular(12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -584,23 +590,34 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               height: 100,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: FutureBuilder<EmbyApi>(
-                  future: EmbyApi.create(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData || view.id == null) {
+                child: Builder(
+                  builder: (context) {
+                    if (view.id == null) {
                       return _buildLibraryPlaceholder();
                     }
 
-                    final url = snapshot.data!
-                        .buildImageUrl(itemId: view.id!, type: 'Primary');
-                    if (url.isEmpty) {
-                      return _buildLibraryPlaceholder();
-                    }
+                    // ✅ 性能优化：使用 Provider 而不是 FutureBuilder
+                    final apiAsync = ref.watch(embyApiProvider);
 
-                    return EmbyFadeInImage(
-                      imageUrl: url,
-                      fit: BoxFit.cover,
-                      placeholder: _buildLibraryPlaceholder(),
+                    return apiAsync.when(
+                      data: (api) {
+                        final url = api.buildImageUrl(
+                          itemId: view.id!,
+                          type: 'Primary',
+                          maxWidth: 300, // 媒体库卡片使用较低分辨率
+                        );
+                        if (url.isEmpty) {
+                          return _buildLibraryPlaceholder();
+                        }
+
+                        return EmbyFadeInImage(
+                          imageUrl: url,
+                          fit: BoxFit.cover,
+                          placeholder: _buildLibraryPlaceholder(),
+                        );
+                      },
+                      loading: () => _buildLibraryPlaceholder(),
+                      error: (_, __) => _buildLibraryPlaceholder(),
                     );
                   },
                 ),
@@ -688,6 +705,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         itemCount: items.length,
+        // ✅ 性能优化：禁用自动保活，减少内存占用
+        addAutomaticKeepAlives: false,
+        // ✅ 性能优化：提前缓存左右各2个卡片
+        cacheExtent: 340, // 约2个卡片的宽度
         itemBuilder: (context, index) {
           final item = items[index];
           // ✅ 使用 item.id 作为 key，确保卡片稳定性
@@ -905,31 +926,35 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                                   ),
                                 ),
                                 const SizedBox(height: 4),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(999),
-                                  // ✅ 使用 progress 作为 key，只有进度变化时才重新动画
-                                  key: ValueKey(
-                                      'progress_bar_${item.id}_$progress'),
-                                  child: TweenAnimationBuilder<double>(
-                                    tween: Tween<double>(
-                                      begin: 0.0,
-                                      end: progress.clamp(0.0, 1.0),
+                                // ✅ 性能优化：使用 RepaintBoundary 隔离进度条重绘
+                                RepaintBoundary(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(999),
+                                    // ✅ 使用 progress 作为 key，只有进度变化时才重新动画
+                                    key: ValueKey(
+                                        'progress_bar_${item.id}_$progress'),
+                                    child: TweenAnimationBuilder<double>(
+                                      tween: Tween<double>(
+                                        begin: 0.0,
+                                        end: progress.clamp(0.0, 1.0),
+                                      ),
+                                      duration:
+                                          const Duration(milliseconds: 600),
+                                      curve: Curves.easeOut,
+                                      builder: (context, animatedValue, child) {
+                                        return LinearProgressIndicator(
+                                          value: animatedValue.clamp(0.0, 1.0),
+                                          minHeight: 3,
+                                          backgroundColor: Colors.white
+                                              .withValues(alpha: 0.2),
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                            const Color(0xFFFFB74D)
+                                                .withValues(alpha: 0.95),
+                                          ),
+                                        );
+                                      },
                                     ),
-                                    duration: const Duration(milliseconds: 600),
-                                    curve: Curves.easeOut,
-                                    builder: (context, animatedValue, child) {
-                                      return LinearProgressIndicator(
-                                        value: animatedValue.clamp(0.0, 1.0),
-                                        minHeight: 3,
-                                        backgroundColor:
-                                            Colors.white.withValues(alpha: 0.2),
-                                        valueColor:
-                                            AlwaysStoppedAnimation<Color>(
-                                          const Color(0xFFFFB74D)
-                                              .withValues(alpha: 0.95),
-                                        ),
-                                      );
-                                    },
                                   ),
                                 ),
                               ],
@@ -977,6 +1002,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         itemCount: items.length,
+        // ✅ 性能优化：禁用自动保活，减少内存占用
+        addAutomaticKeepAlives: false,
+        // ✅ 性能优化：提前缓存左右各2个卡片
+        cacheExtent: 380, // 约2个卡片的宽度
         itemBuilder: (context, index) {
           final item = items[index];
           // ✅ 使用 item.id 作为 key，确保卡片稳定性
@@ -1192,29 +1221,32 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(999),
-                                // ✅ 使用 progress 作为 key，只有进度变化时才重新动画
-                                key: ValueKey(
-                                    'progress_${item.id}_$normalizedProgress'),
-                                child: TweenAnimationBuilder<double>(
-                                  tween: Tween<double>(
-                                    begin: 0.0,
-                                    end: normalizedProgress,
+                              // ✅ 性能优化：使用 RepaintBoundary 隔离进度条重绘
+                              RepaintBoundary(
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(999),
+                                  // ✅ 使用 progress 作为 key，只有进度变化时才重新动画
+                                  key: ValueKey(
+                                      'progress_${item.id}_$normalizedProgress'),
+                                  child: TweenAnimationBuilder<double>(
+                                    tween: Tween<double>(
+                                      begin: 0.0,
+                                      end: normalizedProgress,
+                                    ),
+                                    duration: const Duration(milliseconds: 600),
+                                    curve: Curves.easeOut,
+                                    builder: (context, animatedValue, child) {
+                                      return LinearProgressIndicator(
+                                        value: animatedValue.clamp(0.0, 1.0),
+                                        minHeight: 3,
+                                        backgroundColor:
+                                            Colors.white.withValues(alpha: 0.2),
+                                        valueColor: AlwaysStoppedAnimation(
+                                            const Color(0xFFFFB74D)
+                                                .withValues(alpha: 0.95)),
+                                      );
+                                    },
                                   ),
-                                  duration: const Duration(milliseconds: 600),
-                                  curve: Curves.easeOut,
-                                  builder: (context, animatedValue, child) {
-                                    return LinearProgressIndicator(
-                                      value: animatedValue.clamp(0.0, 1.0),
-                                      minHeight: 3,
-                                      backgroundColor:
-                                          Colors.white.withValues(alpha: 0.2),
-                                      valueColor: AlwaysStoppedAnimation(
-                                          const Color(0xFFFFB74D)
-                                              .withValues(alpha: 0.95)),
-                                    );
-                                  },
                                 ),
                               ),
                             ],
@@ -1399,10 +1431,11 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
         String? url;
         for (final candidate in candidates) {
+          // ✅ 性能优化：继续观看的横幅图使用更高分辨率（16:9比例）
           url = api.buildImageUrl(
             itemId: candidate.id,
             type: candidate.type,
-            maxWidth: 720,
+            maxWidth: 540, // 优化：适配 180px 宽度卡片的 3x 分辨率
             imageIndex: candidate.index,
             tag: candidate.tag,
           );
@@ -1440,18 +1473,17 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
       );
     }
 
-    return FutureBuilder<EmbyApi>(
-      future: EmbyApi.create(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return Container(color: CupertinoColors.systemGrey5);
-        }
+    // ✅ 性能优化：使用 Provider 而不是 FutureBuilder，避免重复创建 Future
+    final apiAsync = ref.watch(embyApiProvider);
 
-        final api = snapshot.data!;
+    return apiAsync.when(
+      data: (api) {
+        // ✅ 性能优化：根据实际显示尺寸请求合适的图片分辨率
+        // 横版海报用更高分辨率（16:9），竖版海报用较低分辨率（2:3）
         final url = api.buildImageUrl(
           itemId: item.id!,
           type: 'Primary',
-          maxWidth: hasBackdrop ? 720 : 300,
+          maxWidth: hasBackdrop ? 480 : 300, // 优化：降低横版分辨率从720到480
         );
 
         if (url.isEmpty) {
@@ -1468,6 +1500,131 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
           fit: BoxFit.cover,
         );
       },
+      loading: () => Container(color: CupertinoColors.systemGrey5),
+      error: (_, __) => Container(
+        color: CupertinoColors.systemGrey5,
+        child: const Icon(CupertinoIcons.photo, size: 32),
+      ),
+    );
+  }
+
+  // ✅ 骨架屏加载状态（提升感知性能）
+  Widget _buildSkeletonLoading(BuildContext context) {
+    final isDark = isDarkModeFromContext(context, ref);
+    final shimmerBaseColor =
+        isDark ? Colors.grey.shade800 : Colors.grey.shade300;
+    final shimmerHighlightColor =
+        isDark ? Colors.grey.shade700 : Colors.grey.shade100;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 我的媒体骨架屏
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Container(
+            width: 100,
+            height: 20,
+            decoration: BoxDecoration(
+              color: shimmerBaseColor,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ),
+        const SizedBox(height: 5),
+        SizedBox(
+          height: 125,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: 3,
+            itemBuilder: (context, index) {
+              return Container(
+                width: 150,
+                margin: const EdgeInsets.only(left: 6, right: 6),
+                child: Column(
+                  children: [
+                    Container(
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: shimmerBaseColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      height: 14,
+                      width: 100,
+                      decoration: BoxDecoration(
+                        color: shimmerHighlightColor,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 5),
+        // 继续观看骨架屏
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Container(
+            width: 80,
+            height: 20,
+            decoration: BoxDecoration(
+              color: shimmerBaseColor,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ),
+        const SizedBox(height: 5),
+        SizedBox(
+          height: 141,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: 2,
+            itemBuilder: (context, index) {
+              return Container(
+                width: 180,
+                margin: const EdgeInsets.only(left: 6, right: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      height: 101,
+                      decoration: BoxDecoration(
+                        color: shimmerBaseColor,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      height: 14,
+                      width: 120,
+                      decoration: BoxDecoration(
+                        color: shimmerHighlightColor,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      height: 12,
+                      width: 80,
+                      decoration: BoxDecoration(
+                        color: shimmerHighlightColor,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
