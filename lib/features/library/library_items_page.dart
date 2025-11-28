@@ -1188,12 +1188,16 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
                   Expanded(
                     child: i < rowItems.length
                         ? (libraryType == 'Movie'
-                            ? _buildResumeMovieCard(context, ref, rowItems[i],
+                            ? _ResumeMovieCard(
                                 key: ValueKey(
-                                    'resume_movie_card_${rowItems[i].id}'))
-                            : _buildResumeEpisodeCard(context, ref, rowItems[i],
+                                    'resume_movie_card_${rowItems[i].id}'),
+                                item: rowItems[i],
+                              )
+                            : _ResumeEpisodeCard(
                                 key: ValueKey(
-                                    'resume_episode_card_${rowItems[i].id}')))
+                                    'resume_episode_card_${rowItems[i].id}'),
+                                item: rowItems[i],
+                              ))
                         : const SizedBox.shrink(),
                   ),
                 ],
@@ -1202,489 +1206,6 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
           ),
         );
       },
-    );
-  }
-
-  // ✅ 构建继续观看电影卡片（类似首页样式）
-  Widget _buildResumeMovieCard(
-      BuildContext context, WidgetRef ref, ItemInfo item,
-      {Key? key}) {
-    final isDark = isDarkModeFromContext(context, ref);
-
-    final progress =
-        (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
-    final normalizedProgress = (progress / 100).clamp(0.0, 1.0);
-    final positionTicks =
-        (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
-    final totalTicks = item.runTimeTicks ?? 0;
-    final remainingTicks =
-        totalTicks > positionTicks ? totalTicks - positionTicks : 0;
-    final remainingDuration = totalTicks > 0
-        ? Duration(microseconds: remainingTicks ~/ 10)
-        : Duration.zero;
-
-    String formatRemaining(Duration duration) {
-      if (duration <= Duration.zero) return '0s';
-      if (duration.inHours >= 1) {
-        final minutes = duration.inMinutes.remainder(60);
-        return minutes > 0
-            ? '${duration.inHours}h ${minutes}m'
-            : '${duration.inHours}h';
-      }
-      if (duration.inMinutes >= 1) {
-        return '${duration.inMinutes}m';
-      }
-      return '${duration.inSeconds}s';
-    }
-
-    return RepaintBoundary(
-      child: CupertinoButton(
-        key: key,
-        padding: EdgeInsets.zero,
-        onPressed: item.id != null && item.id!.isNotEmpty
-            ? () {
-                context.push('/item/${item.id}');
-              }
-            : null,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _buildResumeMoviePoster(context, ref, item),
-                    if (totalTicks > 0 && normalizedProgress > 0)
-                      Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 6),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
-                              colors: [
-                                Colors.black.withOpacity(0.8),
-                                Colors.black.withOpacity(0.0),
-                              ],
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '剩余 ${formatRemaining(remainingDuration)}',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.85),
-                                  fontSize: 11,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(999),
-                                child: TweenAnimationBuilder<double>(
-                                  tween: Tween<double>(
-                                    begin: 0.0,
-                                    end: normalizedProgress,
-                                  ),
-                                  duration: const Duration(milliseconds: 600),
-                                  curve: Curves.easeOut,
-                                  builder: (context, animatedValue, child) {
-                                    return LinearProgressIndicator(
-                                      value: animatedValue.clamp(0.0, 1.0),
-                                      minHeight: 3,
-                                      backgroundColor:
-                                          Colors.white.withValues(alpha: 0.2),
-                                      valueColor: AlwaysStoppedAnimation(
-                                          const Color(0xFFFFB74D)
-                                              .withValues(alpha: 0.95)),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Center(
-              child: Text(
-                item.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w400,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ✅ 构建继续观看剧集卡片（类似首页样式）
-  Widget _buildResumeEpisodeCard(
-      BuildContext context, WidgetRef ref, ItemInfo item,
-      {Key? key}) {
-    final isDark = isDarkModeFromContext(context, ref);
-
-    final progress =
-        (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
-    final normalizedProgress = (progress / 100).clamp(0.0, 1.0);
-    final positionTicks =
-        (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
-    final totalTicks = item.runTimeTicks ?? 0;
-    final remainingTicks =
-        totalTicks > positionTicks ? totalTicks - positionTicks : 0;
-    final remainingDuration = totalTicks > 0
-        ? Duration(microseconds: remainingTicks ~/ 10)
-        : Duration.zero;
-
-    String formatRemaining(Duration duration) {
-      if (duration <= Duration.zero) return '0s';
-      if (duration.inHours >= 1) {
-        final minutes = duration.inMinutes.remainder(60);
-        return minutes > 0
-            ? '${duration.inHours}h ${minutes}m'
-            : '${duration.inHours}h';
-      }
-      if (duration.inMinutes >= 1) {
-        return '${duration.inMinutes}m';
-      }
-      return '${duration.inSeconds}s';
-    }
-
-    // 构建标题文本（与首页逻辑一致）
-    String titleText;
-    String? subtitleText;
-
-    try {
-      titleText = item.seriesName ?? item.name;
-      // 如果是剧集，添加季数信息（如果大于1季）
-      if (item.seriesName != null &&
-          item.parentIndexNumber != null &&
-          item.parentIndexNumber! > 1) {
-        titleText += ' 第${item.parentIndexNumber}季';
-      }
-
-      // 构建副标题文本（集数信息）
-      if (item.seriesName != null && item.indexNumber != null) {
-        final episodeName = item.name;
-        final episodeNum = item.indexNumber!;
-        // 检查集名是否和集数重复（例如："第6集")
-        if (episodeName.contains('$episodeNum') ||
-            episodeName.contains('${episodeNum}集')) {
-          subtitleText = '第${episodeNum}集';
-        } else {
-          subtitleText = '第${episodeNum}集 $episodeName';
-        }
-      }
-    } catch (e) {
-      // 解析失败，显示原始格式
-      titleText = item.seriesName ?? item.name;
-      if (item.seriesName != null) {
-        subtitleText =
-            'S${item.parentIndexNumber ?? 0}E${item.indexNumber ?? 0} ${item.name}';
-      }
-    }
-
-    final subtitle = subtitleText;
-
-    return RepaintBoundary(
-      child: CupertinoButton(
-        key: key,
-        padding: EdgeInsets.zero,
-        onPressed: item.id != null && item.id!.isNotEmpty
-            ? () {
-                context.push('/item/${item.id}');
-              }
-            : null,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _buildResumeEpisodePoster(context, ref, item),
-                    if (totalTicks > 0 && normalizedProgress > 0)
-                      Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 6),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
-                              colors: [
-                                Colors.black.withOpacity(0.8),
-                                Colors.black.withOpacity(0.0),
-                              ],
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '剩余 ${formatRemaining(remainingDuration)}',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.85),
-                                  fontSize: 11,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(999),
-                                child: TweenAnimationBuilder<double>(
-                                  tween: Tween<double>(
-                                    begin: 0.0,
-                                    end: normalizedProgress,
-                                  ),
-                                  duration: const Duration(milliseconds: 600),
-                                  curve: Curves.easeOut,
-                                  builder: (context, animatedValue, child) {
-                                    return LinearProgressIndicator(
-                                      value: animatedValue.clamp(0.0, 1.0),
-                                      minHeight: 3,
-                                      backgroundColor:
-                                          Colors.white.withValues(alpha: 0.2),
-                                      valueColor: AlwaysStoppedAnimation(
-                                          const Color(0xFFFFB74D)
-                                              .withValues(alpha: 0.95)),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Center(
-              child: Text(
-                titleText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w400,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            if (subtitle != null)
-              Center(
-                child: Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                    color: isDark ? Colors.white70 : Colors.black54,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ✅ 构建继续观看电影海报
-  Widget _buildResumeMoviePoster(
-      BuildContext context, WidgetRef ref, ItemInfo item) {
-    final apiAsync = ref.watch(embyApiProvider);
-
-    Widget placeholder() => Container(
-          color: CupertinoColors.systemGrey5,
-          child: const Center(
-            child: Icon(CupertinoIcons.film, size: 48),
-          ),
-        );
-
-    final itemId = item.id;
-    if (itemId == null || itemId.isEmpty) {
-      return placeholder();
-    }
-
-    return apiAsync.when(
-      data: (api) {
-        // ✅ 优先使用电影背景图，然后是主图
-        String? imageUrl;
-        final imageTags = item.imageTags ?? const <String, String>{};
-        final backdropTags = item.backdropImageTags ?? const <String>[];
-
-        // 1. 电影背景图
-        if (backdropTags.isNotEmpty) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Backdrop',
-            tag: backdropTags.first,
-            imageIndex: 0,
-            maxWidth: 800, // ✅ 限制最大宽度
-          );
-        }
-        // 2. 电影主图
-        else if (imageTags['Primary'] != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Primary',
-            tag: imageTags['Primary']!,
-            maxWidth: 800, // ✅ 限制最大宽度
-          );
-        }
-
-        if (imageUrl == null) {
-          return placeholder();
-        }
-
-        // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
-        return EmbyFadeInImage(
-          key: ValueKey('resume_movie_poster_${item.id}_$imageUrl'),
-          imageUrl: imageUrl,
-          placeholder: placeholder(),
-          fit: BoxFit.cover,
-        );
-      },
-      loading: () => placeholder(),
-      error: (_, __) => placeholder(),
-    );
-  }
-
-  // ✅ 构建继续观看剧集海报
-  Widget _buildResumeEpisodePoster(
-      BuildContext context, WidgetRef ref, ItemInfo item) {
-    final apiAsync = ref.watch(embyApiProvider);
-
-    Widget placeholder() => Container(
-          color: CupertinoColors.systemGrey5,
-          child: const Center(
-            child: Icon(CupertinoIcons.tv, size: 48),
-          ),
-        );
-
-    final itemId = item.id;
-    if (itemId == null || itemId.isEmpty) {
-      return placeholder();
-    }
-
-    return apiAsync.when(
-      data: (api) {
-        // ✅ 优先使用剧集的缩略图，然后是背景图，最后是季/剧集的海报
-        String? imageUrl;
-        final imageTags = item.imageTags ?? const <String, String>{};
-        final backdropTags = item.backdropImageTags ?? const <String>[];
-
-        // 1. 剧集缩略图
-        if (imageTags['Thumb'] != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Thumb',
-            tag: imageTags['Thumb']!,
-            maxWidth: 800, // ✅ 限制最大宽度
-          );
-        }
-        // 2. 剧集背景图
-        else if (backdropTags.isNotEmpty) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Backdrop',
-            tag: backdropTags.first,
-            imageIndex: 0,
-            maxWidth: 800, // ✅ 限制最大宽度
-          );
-        }
-        // 3. 剧集主图
-        else if (imageTags['Primary'] != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Primary',
-            tag: imageTags['Primary']!,
-            maxWidth: 800, // ✅ 限制最大宽度
-          );
-        }
-        // 4. 季缩略图
-        else if (item.parentThumbItemId != null &&
-            item.parentThumbImageTag != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: item.parentThumbItemId!,
-            type: 'Thumb',
-            tag: item.parentThumbImageTag!,
-            maxWidth: 800, // ✅ 限制最大宽度
-          );
-        }
-        // 5. 季背景图
-        else if (item.parentBackdropItemId != null &&
-            (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
-          imageUrl = api.buildImageUrl(
-            itemId: item.parentBackdropItemId!,
-            type: 'Backdrop',
-            tag: item.parentBackdropImageTags!.first,
-            imageIndex: 0,
-            maxWidth: 800, // ✅ 限制最大宽度
-          );
-        }
-        // 6. 季主图
-        else if (item.seasonId != null && item.seasonPrimaryImageTag != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: item.seasonId!,
-            type: 'Primary',
-            tag: item.seasonPrimaryImageTag!,
-            maxWidth: 800, // ✅ 限制最大宽度
-          );
-        }
-        // 7. 剧集主图
-        else if (item.seriesId != null && item.seriesPrimaryImageTag != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: item.seriesId!,
-            type: 'Primary',
-            tag: item.seriesPrimaryImageTag!,
-            maxWidth: 800, // ✅ 限制最大宽度
-          );
-        }
-
-        if (imageUrl == null) {
-          return placeholder();
-        }
-
-        return EmbyFadeInImage(
-          key: ValueKey('resume_episode_poster_${item.id}_$imageUrl'),
-          imageUrl: imageUrl,
-          placeholder: placeholder(),
-          fit: BoxFit.cover,
-        );
-      },
-      loading: () => placeholder(),
-      error: (_, __) => placeholder(),
     );
   }
 
@@ -2189,9 +1710,89 @@ class _ItemTile extends ConsumerStatefulWidget {
 class _ItemTileState extends ConsumerState<_ItemTile>
     with AutomaticKeepAliveClientMixin {
   ItemInfo get item => widget.item;
+  bool _hasPreloadedDetailImages = false; // ✅ 标记是否已预加载详情页图片
 
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    // ✅ 在组件初始化时预加载详情页图片（背景图和Logo）
+    _preloadDetailImages();
+  }
+
+  /// ✅ 预加载详情页需要的图片（背景图、Logo、季海报）
+  Future<void> _preloadDetailImages() async {
+    if (_hasPreloadedDetailImages) return;
+    _hasPreloadedDetailImages = true;
+
+    try {
+      final api = await ref.read(embyApiProvider.future);
+
+      // 1. 预加载背景图
+      final backdropUrl = item.getBackdropUrl(api);
+      if (backdropUrl != null && backdropUrl.isNotEmpty) {
+        preloadImage(backdropUrl).catchError((e) {
+          // 忽略预加载错误，不影响主流程
+        });
+      }
+
+      // 2. 预加载 Logo
+      final logoUrl = item.getLogoUrl(api);
+      if (logoUrl != null && logoUrl.isNotEmpty) {
+        preloadImage(logoUrl).catchError((e) {
+          // 忽略预加载错误，不影响主流程
+        });
+      }
+
+      // 3. 如果是电视剧类型，预加载季海报
+      if (item.type == 'Series' && item.id != null) {
+        _preloadSeasonPosters(api, item.id!);
+      }
+    } catch (e) {
+      // 忽略预加载错误，不影响主流程
+    }
+  }
+
+  /// ✅ 预加载季海报（异步，不阻塞主流程）
+  Future<void> _preloadSeasonPosters(EmbyApi api, String seriesId) async {
+    try {
+      final auth = ref.read(authStateProvider).value;
+      if (auth == null || !auth.isLoggedIn) return;
+
+      // 获取季列表
+      final seasons = await api.getSeasons(
+        userId: auth.userId!,
+        seriesId: seriesId,
+      );
+
+      // 预加载每个季的海报
+      for (final season in seasons) {
+        if (season.id == null) continue;
+
+        final imageTags = season.imageTags ?? const <String, String>{};
+        final primaryTag = imageTags['Primary'];
+
+        if (primaryTag != null && primaryTag.isNotEmpty) {
+          final posterUrl = api.buildImageUrl(
+            itemId: season.id!,
+            type: 'Primary',
+            tag: primaryTag,
+            maxWidth: 400,
+          );
+
+          if (posterUrl.isNotEmpty) {
+            preloadImage(posterUrl).catchError((e) {
+              // 忽略预加载错误
+            });
+          }
+        }
+      }
+    } catch (e) {
+      // 忽略预加载错误，不影响主流程
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2892,6 +2493,609 @@ class _OptimizedRow extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+// ✅ 继续观看电影卡片（带预加载功能）
+class _ResumeMovieCard extends ConsumerStatefulWidget {
+  const _ResumeMovieCard({
+    super.key,
+    required this.item,
+  });
+
+  final ItemInfo item;
+
+  @override
+  ConsumerState<_ResumeMovieCard> createState() => _ResumeMovieCardState();
+}
+
+class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
+  bool _hasPreloadedDetailImages = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _preloadDetailImages();
+  }
+
+  /// ✅ 预加载详情页需要的图片（背景图和Logo）
+  Future<void> _preloadDetailImages() async {
+    if (_hasPreloadedDetailImages) return;
+    _hasPreloadedDetailImages = true;
+
+    try {
+      final api = await ref.read(embyApiProvider.future);
+
+      // 1. 预加载背景图
+      final backdropUrl = widget.item.getBackdropUrl(api);
+      if (backdropUrl != null && backdropUrl.isNotEmpty) {
+        preloadImage(backdropUrl).catchError((e) {
+          // 忽略预加载错误
+        });
+      }
+
+      // 2. 预加载 Logo
+      final logoUrl = widget.item.getLogoUrl(api);
+      if (logoUrl != null && logoUrl.isNotEmpty) {
+        preloadImage(logoUrl).catchError((e) {
+          // 忽略预加载错误
+        });
+      }
+    } catch (e) {
+      // 忽略预加载错误
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = isDarkModeFromContext(context, ref);
+    final item = widget.item;
+
+    final progress =
+        (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
+    final normalizedProgress = (progress / 100).clamp(0.0, 1.0);
+    final positionTicks =
+        (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+    final totalTicks = item.runTimeTicks ?? 0;
+    final remainingTicks =
+        totalTicks > positionTicks ? totalTicks - positionTicks : 0;
+    final remainingDuration = totalTicks > 0
+        ? Duration(microseconds: remainingTicks ~/ 10)
+        : Duration.zero;
+
+    String formatRemaining(Duration duration) {
+      if (duration <= Duration.zero) return '0s';
+      if (duration.inHours >= 1) {
+        final minutes = duration.inMinutes.remainder(60);
+        return minutes > 0
+            ? '${duration.inHours}h ${minutes}m'
+            : '${duration.inHours}h';
+      }
+      if (duration.inMinutes >= 1) {
+        return '${duration.inMinutes}m';
+      }
+      return '${duration.inSeconds}s';
+    }
+
+    return RepaintBoundary(
+      child: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: item.id != null && item.id!.isNotEmpty
+            ? () {
+                context.push('/item/${item.id}');
+              }
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _buildResumeMoviePoster(context, ref, item),
+                    if (totalTicks > 0 && normalizedProgress > 0)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.8),
+                                Colors.black.withOpacity(0.0),
+                              ],
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '剩余 ${formatRemaining(remainingDuration)}',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.85),
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(
+                                    begin: 0.0,
+                                    end: normalizedProgress,
+                                  ),
+                                  duration: const Duration(milliseconds: 600),
+                                  curve: Curves.easeOut,
+                                  builder: (context, animatedValue, child) {
+                                    return LinearProgressIndicator(
+                                      value: animatedValue.clamp(0.0, 1.0),
+                                      minHeight: 3,
+                                      backgroundColor:
+                                          Colors.white.withValues(alpha: 0.2),
+                                      valueColor: AlwaysStoppedAnimation(
+                                          const Color(0xFFFFB74D)
+                                              .withValues(alpha: 0.95)),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                item.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResumeMoviePoster(
+      BuildContext context, WidgetRef ref, ItemInfo item) {
+    final apiAsync = ref.watch(embyApiProvider);
+
+    Widget placeholder() => Container(
+          color: CupertinoColors.systemGrey5,
+          child: const Center(
+            child: Icon(CupertinoIcons.film, size: 48),
+          ),
+        );
+
+    final itemId = item.id;
+    if (itemId == null || itemId.isEmpty) {
+      return placeholder();
+    }
+
+    return apiAsync.when(
+      data: (api) {
+        String? imageUrl;
+        final imageTags = item.imageTags ?? const <String, String>{};
+        final backdropTags = item.backdropImageTags ?? const <String>[];
+
+        if (backdropTags.isNotEmpty) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Backdrop',
+            tag: backdropTags.first,
+            imageIndex: 0,
+            maxWidth: 800,
+          );
+        } else if (imageTags['Primary'] != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Primary',
+            tag: imageTags['Primary']!,
+            maxWidth: 800,
+          );
+        }
+
+        if (imageUrl == null) {
+          return placeholder();
+        }
+
+        return EmbyFadeInImage(
+          key: ValueKey('resume_movie_poster_${item.id}_$imageUrl'),
+          imageUrl: imageUrl,
+          placeholder: placeholder(),
+          fit: BoxFit.cover,
+        );
+      },
+      loading: () => placeholder(),
+      error: (_, __) => placeholder(),
+    );
+  }
+}
+
+// ✅ 继续观看剧集卡片（带预加载功能）
+class _ResumeEpisodeCard extends ConsumerStatefulWidget {
+  const _ResumeEpisodeCard({
+    super.key,
+    required this.item,
+  });
+
+  final ItemInfo item;
+
+  @override
+  ConsumerState<_ResumeEpisodeCard> createState() => _ResumeEpisodeCardState();
+}
+
+class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
+  bool _hasPreloadedDetailImages = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _preloadDetailImages();
+  }
+
+  /// ✅ 预加载详情页需要的图片（背景图、Logo、季海报）
+  Future<void> _preloadDetailImages() async {
+    if (_hasPreloadedDetailImages) return;
+    _hasPreloadedDetailImages = true;
+
+    try {
+      final api = await ref.read(embyApiProvider.future);
+
+      // 1. 预加载背景图
+      final backdropUrl = widget.item.getBackdropUrl(api);
+      if (backdropUrl != null && backdropUrl.isNotEmpty) {
+        preloadImage(backdropUrl).catchError((e) {
+          // 忽略预加载错误
+        });
+      }
+
+      // 2. 预加载 Logo
+      final logoUrl = widget.item.getLogoUrl(api);
+      if (logoUrl != null && logoUrl.isNotEmpty) {
+        preloadImage(logoUrl).catchError((e) {
+          // 忽略预加载错误
+        });
+      }
+
+      // 3. 如果是剧集类型，预加载季海报
+      if (widget.item.type == 'Episode' &&
+          widget.item.seriesId != null &&
+          widget.item.seriesId!.isNotEmpty) {
+        _preloadSeasonPosters(api, widget.item.seriesId!);
+      }
+    } catch (e) {
+      // 忽略预加载错误
+    }
+  }
+
+  /// ✅ 预加载季海报（异步，不阻塞主流程）
+  Future<void> _preloadSeasonPosters(EmbyApi api, String seriesId) async {
+    try {
+      final auth = ref.read(authStateProvider).value;
+      if (auth == null || !auth.isLoggedIn) return;
+
+      // 获取季列表
+      final seasons = await api.getSeasons(
+        userId: auth.userId!,
+        seriesId: seriesId,
+      );
+
+      // 预加载每个季的海报
+      for (final season in seasons) {
+        if (season.id == null) continue;
+
+        final imageTags = season.imageTags ?? const <String, String>{};
+        final primaryTag = imageTags['Primary'];
+
+        if (primaryTag != null && primaryTag.isNotEmpty) {
+          final posterUrl = api.buildImageUrl(
+            itemId: season.id!,
+            type: 'Primary',
+            tag: primaryTag,
+            maxWidth: 400,
+          );
+
+          if (posterUrl.isNotEmpty) {
+            preloadImage(posterUrl).catchError((e) {
+              // 忽略预加载错误
+            });
+          }
+        }
+      }
+    } catch (e) {
+      // 忽略预加载错误，不影响主流程
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = isDarkModeFromContext(context, ref);
+    final item = widget.item;
+
+    final progress =
+        (item.userData?['PlayedPercentage'] as num?)?.toDouble() ?? 0.0;
+    final normalizedProgress = (progress / 100).clamp(0.0, 1.0);
+    final positionTicks =
+        (item.userData?['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
+    final totalTicks = item.runTimeTicks ?? 0;
+    final remainingTicks =
+        totalTicks > positionTicks ? totalTicks - positionTicks : 0;
+    final remainingDuration = totalTicks > 0
+        ? Duration(microseconds: remainingTicks ~/ 10)
+        : Duration.zero;
+
+    String formatRemaining(Duration duration) {
+      if (duration <= Duration.zero) return '0s';
+      if (duration.inHours >= 1) {
+        final minutes = duration.inMinutes.remainder(60);
+        return minutes > 0
+            ? '${duration.inHours}h ${minutes}m'
+            : '${duration.inHours}h';
+      }
+      if (duration.inMinutes >= 1) {
+        return '${duration.inMinutes}m';
+      }
+      return '${duration.inSeconds}s';
+    }
+
+    // 构建标题文本
+    String titleText;
+    String? subtitleText;
+
+    try {
+      titleText = item.seriesName ?? item.name;
+      if (item.seriesName != null &&
+          item.parentIndexNumber != null &&
+          item.parentIndexNumber! > 1) {
+        titleText += ' 第${item.parentIndexNumber}季';
+      }
+
+      if (item.seriesName != null && item.indexNumber != null) {
+        final episodeName = item.name;
+        final episodeNum = item.indexNumber!;
+        if (episodeName.contains('$episodeNum') ||
+            episodeName.contains('${episodeNum}集')) {
+          subtitleText = '第${episodeNum}集';
+        } else {
+          subtitleText = '第${episodeNum}集 $episodeName';
+        }
+      }
+    } catch (e) {
+      titleText = item.seriesName ?? item.name;
+      if (item.seriesName != null) {
+        subtitleText =
+            'S${item.parentIndexNumber ?? 0}E${item.indexNumber ?? 0} ${item.name}';
+      }
+    }
+
+    return RepaintBoundary(
+      child: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: item.id != null && item.id!.isNotEmpty
+            ? () {
+                context.push('/item/${item.id}');
+              }
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _buildResumeEpisodePoster(context, ref, item),
+                    if (totalTicks > 0 && normalizedProgress > 0)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.8),
+                                Colors.black.withOpacity(0.0),
+                              ],
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '剩余 ${formatRemaining(remainingDuration)}',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.85),
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(
+                                    begin: 0.0,
+                                    end: normalizedProgress,
+                                  ),
+                                  duration: const Duration(milliseconds: 600),
+                                  curve: Curves.easeOut,
+                                  builder: (context, animatedValue, child) {
+                                    return LinearProgressIndicator(
+                                      value: animatedValue.clamp(0.0, 1.0),
+                                      minHeight: 3,
+                                      backgroundColor:
+                                          Colors.white.withValues(alpha: 0.2),
+                                      valueColor: AlwaysStoppedAnimation(
+                                          const Color(0xFFFFB74D)
+                                              .withValues(alpha: 0.95)),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                titleText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            if (subtitleText != null)
+              Center(
+                child: Text(
+                  subtitleText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w400,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResumeEpisodePoster(
+      BuildContext context, WidgetRef ref, ItemInfo item) {
+    final apiAsync = ref.watch(embyApiProvider);
+
+    Widget placeholder() => Container(
+          color: CupertinoColors.systemGrey5,
+          child: const Center(
+            child: Icon(CupertinoIcons.tv, size: 48),
+          ),
+        );
+
+    final itemId = item.id;
+    if (itemId == null || itemId.isEmpty) {
+      return placeholder();
+    }
+
+    return apiAsync.when(
+      data: (api) {
+        String? imageUrl;
+        final imageTags = item.imageTags ?? const <String, String>{};
+        final backdropTags = item.backdropImageTags ?? const <String>[];
+
+        // 优先级：缩略图 > 背景图 > 主图 > 季缩略图 > 季背景图 > 季主图 > 剧集主图
+        if (imageTags['Thumb'] != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Thumb',
+            tag: imageTags['Thumb']!,
+            maxWidth: 800,
+          );
+        } else if (backdropTags.isNotEmpty) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Backdrop',
+            tag: backdropTags.first,
+            imageIndex: 0,
+            maxWidth: 800,
+          );
+        } else if (imageTags['Primary'] != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: itemId,
+            type: 'Primary',
+            tag: imageTags['Primary']!,
+            maxWidth: 800,
+          );
+        } else if (item.parentThumbItemId != null &&
+            item.parentThumbImageTag != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: item.parentThumbItemId!,
+            type: 'Thumb',
+            tag: item.parentThumbImageTag!,
+            maxWidth: 800,
+          );
+        } else if (item.parentBackdropItemId != null &&
+            (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+          imageUrl = api.buildImageUrl(
+            itemId: item.parentBackdropItemId!,
+            type: 'Backdrop',
+            tag: item.parentBackdropImageTags!.first,
+            imageIndex: 0,
+            maxWidth: 800,
+          );
+        } else if (item.seasonId != null &&
+            item.seasonPrimaryImageTag != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: item.seasonId!,
+            type: 'Primary',
+            tag: item.seasonPrimaryImageTag!,
+            maxWidth: 800,
+          );
+        } else if (item.seriesId != null &&
+            item.seriesPrimaryImageTag != null) {
+          imageUrl = api.buildImageUrl(
+            itemId: item.seriesId!,
+            type: 'Primary',
+            tag: item.seriesPrimaryImageTag!,
+            maxWidth: 800,
+          );
+        }
+
+        if (imageUrl == null) {
+          return placeholder();
+        }
+
+        return EmbyFadeInImage(
+          key: ValueKey('resume_episode_poster_${item.id}_$imageUrl'),
+          imageUrl: imageUrl,
+          placeholder: placeholder(),
+          fit: BoxFit.cover,
+        );
+      },
+      loading: () => placeholder(),
+      error: (_, __) => placeholder(),
     );
   }
 }

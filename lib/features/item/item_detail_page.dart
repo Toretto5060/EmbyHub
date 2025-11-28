@@ -791,14 +791,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
 
               String? backdropUrl;
 
-              if ((item.backdropImageTags?.isNotEmpty ?? false) ||
-                  (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
-                backdropUrl = api.buildImageUrl(
-                  itemId: item.id!,
-                  type: 'Backdrop',
-                  maxWidth: 1920,
-                );
-              }
+              // ✅ 使用 getBackdropUrl 方法，确保与预加载的 URL 一致
+              backdropUrl = item.getBackdropUrl(api);
 
               if (backdropUrl == null || backdropUrl.isEmpty) {
                 final primaryTag = item.imageTags?['Primary'] ?? '';
@@ -1127,12 +1121,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
           );
         }
         final api = snapshot.data!;
-        final logoUrl = api.buildImageUrl(
-          itemId: data.id!,
-          type: 'Logo',
-          tag: logoTag,
-          maxWidth: 600,
-        );
+        // ✅ 使用 getLogoUrl 方法，确保与预加载的 URL 一致
+        final logoUrl = data.getLogoUrl(api) ?? '';
         if (logoUrl.isEmpty) {
           return Text(
             data.name,
@@ -2774,15 +2764,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     if (item != null) {
       final api = await EmbyApi.create();
 
-      // 优先使用 Backdrop
-      if ((item.backdropImageTags?.isNotEmpty ?? false) ||
-          (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
-        backdropUrl = api.buildImageUrl(
-          itemId: itemId,
-          type: 'Backdrop',
-          maxWidth: 1920,
-        );
-      }
+      // ✅ 使用 getBackdropUrl 方法，确保与预加载的 URL 一致
+      backdropUrl = item.getBackdropUrl(api);
 
       // Fallback 到 Primary（与详情页显示逻辑一致）
       if (backdropUrl == null || backdropUrl.isEmpty) {

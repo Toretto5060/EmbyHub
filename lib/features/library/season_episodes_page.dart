@@ -895,14 +895,8 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                     final api = snapshot.data!;
                     String? backdropUrl;
 
-                    // ✅ 优先使用季的背景图
-                    if ((season.backdropImageTags?.isNotEmpty ?? false)) {
-                      backdropUrl = api.buildImageUrl(
-                        itemId: season.id!,
-                        type: 'Backdrop',
-                        maxWidth: 1920,
-                      );
-                    }
+                    // ✅ 使用 getBackdropUrl 方法，确保与预加载的 URL 一致
+                    backdropUrl = season.getBackdropUrl(api);
 
                     // ✅ 如果没有季的背景图，使用系列的背景图
                     if (backdropUrl == null || backdropUrl.isEmpty) {
@@ -910,15 +904,8 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
                           ref.read(seriesProvider(widget.seriesId));
                       return seriesAsync.when(
                         data: (series) {
-                          if ((series.backdropImageTags?.isNotEmpty ?? false) ||
-                              (series.parentBackdropImageTags?.isNotEmpty ??
-                                  false)) {
-                            backdropUrl = api.buildImageUrl(
-                              itemId: widget.seriesId,
-                              type: 'Backdrop',
-                              maxWidth: 1920,
-                            );
-                          }
+                          // ✅ 使用 getBackdropUrl 方法
+                          backdropUrl = series.getBackdropUrl(api);
                           if (backdropUrl == null ||
                               (backdropUrl?.isEmpty ?? true)) {
                             final primaryTag =
@@ -1365,25 +1352,13 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
     if (season != null) {
       final api = await EmbyApi.create();
 
-      // 1. 优先使用季的背景图
-      if (season.backdropImageTags?.isNotEmpty ?? false) {
-        backdropUrl = api.buildImageUrl(
-          itemId: widget.seasonId,
-          type: 'Backdrop',
-          maxWidth: 1920,
-        );
-      }
+      // ✅ 使用 getBackdropUrl 方法，确保与预加载的 URL 一致
+      backdropUrl = season.getBackdropUrl(api);
 
       // 2. 使用系列的背景图
       if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
-        if ((series.backdropImageTags?.isNotEmpty ?? false) ||
-            (series.parentBackdropImageTags?.isNotEmpty ?? false)) {
-          backdropUrl = api.buildImageUrl(
-            itemId: widget.seriesId,
-            type: 'Backdrop',
-            maxWidth: 1920,
-          );
-        }
+        // ✅ 使用 getBackdropUrl 方法
+        backdropUrl = series.getBackdropUrl(api);
       }
 
       // 3. Fallback 到系列的 Primary
@@ -1798,25 +1773,13 @@ class _EpisodeTile extends ConsumerWidget {
     if (season != null) {
       final api = await EmbyApi.create();
 
-      // 1. 优先使用季的背景图
-      if (season.backdropImageTags?.isNotEmpty ?? false) {
-        backdropUrl = api.buildImageUrl(
-          itemId: seasonId,
-          type: 'Backdrop',
-          maxWidth: 1920,
-        );
-      }
+      // ✅ 使用 getBackdropUrl 方法，确保与预加载的 URL 一致
+      backdropUrl = season.getBackdropUrl(api);
 
       // 2. 使用系列的背景图
       if ((backdropUrl == null || backdropUrl.isEmpty) && series != null) {
-        if ((series.backdropImageTags?.isNotEmpty ?? false) ||
-            (series.parentBackdropImageTags?.isNotEmpty ?? false)) {
-          backdropUrl = api.buildImageUrl(
-            itemId: seriesId,
-            type: 'Backdrop',
-            maxWidth: 1920,
-          );
-        }
+        // ✅ 使用 getBackdropUrl 方法
+        backdropUrl = series.getBackdropUrl(api);
       }
 
       // 3. Fallback 到系列的 Primary

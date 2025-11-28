@@ -1035,14 +1035,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
                     final api = snapshot.data!;
                     String? backdropUrl;
 
-                    if ((item.backdropImageTags?.isNotEmpty ?? false) ||
-                        (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
-                      backdropUrl = api.buildImageUrl(
-                        itemId: item.id!,
-                        type: 'Backdrop',
-                        maxWidth: 1920,
-                      );
-                    }
+                    // ✅ 使用 getBackdropUrl 方法，确保与预加载的 URL 一致
+                    backdropUrl = item.getBackdropUrl(api);
 
                     if (backdropUrl == null || backdropUrl.isEmpty) {
                       final primaryTag = item.imageTags?['Primary'] ?? '';
@@ -1869,21 +1863,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     if (series != null) {
       final api = await EmbyApi.create();
 
-      // 优先使用 Backdrop
-      if (series.backdropImageTags?.isNotEmpty ?? false) {
-        backdropUrl = api.buildImageUrl(
-          itemId: widget.seriesId,
-          type: 'Backdrop',
-          maxWidth: 1920,
-          tag: series.backdropImageTags!.first,
-        );
-      } else if (series.parentBackdropImageTags?.isNotEmpty ?? false) {
-        backdropUrl = api.buildImageUrl(
-          itemId: widget.seriesId,
-          type: 'Backdrop',
-          maxWidth: 1920,
-        );
-      }
+      // ✅ 使用 getBackdropUrl 方法，确保与预加载的 URL 一致
+      backdropUrl = series.getBackdropUrl(api);
 
       // Fallback 到 Primary（与详情页显示逻辑一致）
       if (backdropUrl == null || backdropUrl.isEmpty) {
@@ -2238,12 +2219,8 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
           return const SizedBox.shrink();
         }
         final api = snapshot.data!;
-        final logoUrl = api.buildImageUrl(
-          itemId: data.id!,
-          type: 'Logo',
-          tag: logoTag,
-          maxWidth: 600,
-        );
+        // ✅ 使用 getLogoUrl 方法，确保与预加载的 URL 一致
+        final logoUrl = data.getLogoUrl(api) ?? '';
         if (logoUrl.isEmpty) {
           return const SizedBox.shrink();
         }
