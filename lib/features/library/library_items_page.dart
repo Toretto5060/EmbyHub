@@ -1992,7 +1992,10 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          _Poster(itemId: item.id, itemType: item.type),
+                          _Poster(
+                              itemId: item.id,
+                              itemType: item.type,
+                              hasHorizontalArtwork: false),
                           // 电影播放完成标记
                           if (item.type == 'Movie' && played)
                             Positioned(
@@ -2142,7 +2145,10 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          _Poster(itemId: item.id, itemType: item.type),
+                          _Poster(
+                              itemId: item.id,
+                              itemType: item.type,
+                              hasHorizontalArtwork: true),
                           // 电影播放完成标记
                           if (item.type == 'Movie' && played)
                             Positioned(
@@ -2310,9 +2316,11 @@ class _ItemTileState extends ConsumerState<_ItemTile>
 }
 
 class _Poster extends ConsumerWidget {
-  const _Poster({required this.itemId, this.itemType});
+  const _Poster(
+      {required this.itemId, this.itemType, this.hasHorizontalArtwork = false});
   final String? itemId;
   final String? itemType;
+  final bool hasHorizontalArtwork; // ✅ 是否是16:9横向海报
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2324,12 +2332,14 @@ class _Poster extends ConsumerWidget {
 
     return apiAsync.when(
       data: (api) {
-        // ✅ 优化图片URL构建，添加尺寸限制减少内存占用
+        // ✅ 如果是16:9海报，使用800宽度；否则使用400
+        final maxWidth = hasHorizontalArtwork ? 800 : 400;
         final url = api.buildImageUrl(
           itemId: itemId!,
           type: 'Primary',
-          maxWidth: 400, // ✅ 限制最大宽度，减少内存占用
+          maxWidth: maxWidth,
         );
+
         if (url.isEmpty) {
           return _PosterSkeleton(itemType: itemType);
         }

@@ -3984,24 +3984,13 @@ class _SimilarCard extends StatelessWidget {
           );
         }
         final api = snapshot.data!;
-        String? url;
-        if ((item.imageTags?['Primary'] ?? '').isNotEmpty) {
-          // ✅ 统一海报图片尺寸为400，与列表页保持一致，提高缓存命中率
-          url = api.buildImageUrl(
-            itemId: item.id!,
-            type: 'Primary',
-            maxWidth: 400,
-          );
-        }
-
-        if ((url == null || url.isEmpty) && hasHorizontalArtwork) {
-          // ✅ 统一 Backdrop 图片尺寸为800，与列表页保持一致，提高缓存命中率
-          url = api.buildImageUrl(
-            itemId: item.id!,
-            type: 'Backdrop',
-            maxWidth: 800,
-          );
-        }
+        // ✅ 与列表页判断逻辑保持一致：16:9使用800，9:16使用400
+        final maxWidth = hasHorizontalArtwork ? 400 : 800;
+        final url = api.buildImageUrl(
+          itemId: item.id!,
+          type: 'Primary',
+          maxWidth: maxWidth,
+        );
 
         if (url == null || url.isEmpty) {
           return Container(
