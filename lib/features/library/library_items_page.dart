@@ -924,60 +924,11 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
       child: isResumeTab
           ? _buildResumeList(context, ref, items, pageScrollController,
               libraryType: libraryType)
-          : ListView.builder(
-              controller: pageScrollController,
-              // ✅ padding顶部需要加上header的完整高度（180），让内容在header下方显示
-              // 减少顶部间距，让内容更靠近筛选行
-              padding: EdgeInsets.only(
-                top: headerHeight + 6, // ✅ 从12改为6，让内容更靠近筛选行
-                left: 12,
-                right: 12,
-                bottom: 12,
-              ),
-              itemCount: _buildRows(items).length,
-              itemBuilder: (context, rowIndex) {
-                final rows = _buildRows(items);
-                final row = rows[rowIndex];
-                return Padding(
-                  padding: EdgeInsets.only(
-                    bottom: rowIndex == rows.length - 1 ? 0 : 16,
-                  ),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final hasHorizontal =
-                          row.any((entry) => entry.hasHorizontalArtwork);
-                      final columns = hasHorizontal ? 3 : 2;
-                      final spacing = columns > 1 ? 16.0 : 0.0;
-                      final availableWidth = constraints.maxWidth;
-                      final totalSpacing = spacing * (columns - 1);
-                      final cardWidth =
-                          (availableWidth - totalSpacing) / columns;
-
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (var i = 0; i < columns; i++) ...[
-                            if (i > 0) SizedBox(width: spacing),
-                            SizedBox(
-                              width: cardWidth,
-                              child: i < row.length
-                                  ? _ItemTile(
-                                      key: ValueKey(
-                                          'item_tile_${row[i].item.id}'),
-                                      item: row[i].item,
-                                      hasHorizontalArtwork:
-                                          row[i].hasHorizontalArtwork,
-                                      cardWidth: cardWidth,
-                                    )
-                                  : const SizedBox.shrink(),
-                            ),
-                          ],
-                        ],
-                      );
-                    },
-                  ),
-                );
-              },
+          : _OptimizedItemList(
+              scrollController: pageScrollController,
+              items: items,
+              headerHeight: headerHeight,
+              buildRows: _buildRows,
             ),
     );
   }
@@ -1018,32 +969,37 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
           right: 12,
           bottom: 12,
         ),
+        // ✅ 添加缓存范围，提升滚动性能
+        cacheExtent: 500,
         itemCount: (genres.length / 3).ceil(),
         itemBuilder: (context, rowIndex) {
           final startIndex = rowIndex * 3;
           final endIndex = (startIndex + 3).clamp(0, genres.length);
           final rowGenres = genres.sublist(startIndex, endIndex);
 
-          return Padding(
-            padding: EdgeInsets.only(
-              bottom: rowIndex == (genres.length / 3).ceil() - 1 ? 0 : 12,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: List.generate(3, (colIndex) {
-                if (colIndex >= rowGenres.length) {
-                  return Expanded(child: Container());
-                }
-                final genre = rowGenres[colIndex];
-                return Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      right: colIndex < 2 ? 8 : 0,
+          return RepaintBoundary(
+            key: ValueKey('genre_row_$rowIndex'),
+            child: Padding(
+              padding: EdgeInsets.only(
+                bottom: rowIndex == (genres.length / 3).ceil() - 1 ? 0 : 12,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: List.generate(3, (colIndex) {
+                  if (colIndex >= rowGenres.length) {
+                    return Expanded(child: Container());
+                  }
+                  final genre = rowGenres[colIndex];
+                  return Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: colIndex < 2 ? 8 : 0,
+                      ),
+                      child: _buildGenreTile(context, ref, genre),
                     ),
-                    child: _buildGenreTile(context, ref, genre),
-                  ),
-                );
-              }),
+                  );
+                }),
+              ),
             ),
           );
         },
@@ -1055,60 +1011,63 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   Widget _buildGenreTile(BuildContext context, WidgetRef ref, GenreInfo genre) {
     final apiAsync = ref.watch(embyApiProvider);
 
-    return GestureDetector(
-      onTap: () {
-        // ✅ 跳转到类型内容页面（使用query参数避免编码问题）
-        context.push(
-          '/library/${widget.viewId}/genre?name=${Uri.encodeComponent(genre.name)}',
-        );
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 120, // ✅ 固定高度
-            width: double.infinity, // ✅ 正方形
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: apiAsync.when(
-                data: (api) {
-                  String? imageUrl;
-                  if (genre.id.isNotEmpty) {
-                    imageUrl = api.buildImageUrl(
-                      itemId: genre.id,
-                      type: 'Primary',
-                      maxWidth: 400,
-                      tag: genre.imageTags?['Primary'],
+    return RepaintBoundary(
+      child: GestureDetector(
+        onTap: () {
+          // ✅ 跳转到类型内容页面（使用query参数避免编码问题）
+          context.push(
+            '/library/${widget.viewId}/genre?name=${Uri.encodeComponent(genre.name)}',
+          );
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: 120, // ✅ 固定高度
+              width: double.infinity, // ✅ 正方形
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: apiAsync.when(
+                  data: (api) {
+                    String? imageUrl;
+                    if (genre.id.isNotEmpty) {
+                      imageUrl = api.buildImageUrl(
+                        itemId: genre.id,
+                        type: 'Primary',
+                        maxWidth: 400,
+                        tag: genre.imageTags?['Primary'],
+                      );
+                    }
+                    if (imageUrl == null || imageUrl.isEmpty) {
+                      return _buildGenrePlaceholder();
+                    }
+                    return EmbyFadeInImage(
+                      key: ValueKey('genre_${genre.id}_$imageUrl'),
+                      imageUrl: imageUrl,
+                      fit: BoxFit.cover,
+                      placeholder: _buildGenrePlaceholder(),
                     );
-                  }
-                  if (imageUrl == null || imageUrl.isEmpty) {
-                    return _buildGenrePlaceholder();
-                  }
-                  return EmbyFadeInImage(
-                    imageUrl: imageUrl,
-                    fit: BoxFit.cover,
-                    placeholder: _buildGenrePlaceholder(),
-                  );
-                },
-                loading: () => _buildGenrePlaceholder(),
-                error: (_, __) => _buildGenrePlaceholder(),
+                  },
+                  loading: () => _buildGenrePlaceholder(),
+                  error: (_, __) => _buildGenrePlaceholder(),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              genre.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                genre.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1141,34 +1100,39 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
         right: 12,
         bottom: 12,
       ),
+      // ✅ 添加缓存范围，提升滚动性能
+      cacheExtent: 500,
       itemCount: (items.length / 2).ceil(),
       itemBuilder: (context, rowIndex) {
         final startIndex = rowIndex * 2;
         final endIndex = (startIndex + 2).clamp(0, items.length);
         final rowItems = items.sublist(startIndex, endIndex);
 
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: rowIndex == (items.length / 2).ceil() - 1 ? 0 : 16,
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var i = 0; i < 2; i++) ...[
-                if (i > 0) const SizedBox(width: 12),
-                Expanded(
-                  child: i < rowItems.length
-                      ? (libraryType == 'Movie'
-                          ? _buildResumeMovieCard(context, ref, rowItems[i],
-                              key: ValueKey(
-                                  'resume_movie_card_${rowItems[i].id}'))
-                          : _buildResumeEpisodeCard(context, ref, rowItems[i],
-                              key: ValueKey(
-                                  'resume_episode_card_${rowItems[i].id}')))
-                      : const SizedBox.shrink(),
-                ),
+        return RepaintBoundary(
+          key: ValueKey('resume_row_$rowIndex'),
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: rowIndex == (items.length / 2).ceil() - 1 ? 0 : 16,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < 2; i++) ...[
+                  if (i > 0) const SizedBox(width: 12),
+                  Expanded(
+                    child: i < rowItems.length
+                        ? (libraryType == 'Movie'
+                            ? _buildResumeMovieCard(context, ref, rowItems[i],
+                                key: ValueKey(
+                                    'resume_movie_card_${rowItems[i].id}'))
+                            : _buildResumeEpisodeCard(context, ref, rowItems[i],
+                                key: ValueKey(
+                                    'resume_episode_card_${rowItems[i].id}')))
+                        : const SizedBox.shrink(),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         );
       },
@@ -1207,100 +1171,102 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
       return '${duration.inSeconds}s';
     }
 
-    return CupertinoButton(
-      key: key,
-      padding: EdgeInsets.zero,
-      onPressed: item.id != null && item.id!.isNotEmpty
-          ? () {
-              context.push('/item/${item.id}');
-            }
-          : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _buildResumeMoviePoster(context, ref, item),
-                  if (totalTicks > 0 && normalizedProgress > 0)
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 6),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [
-                              Colors.black.withOpacity(0.8),
-                              Colors.black.withOpacity(0.0),
+    return RepaintBoundary(
+      child: CupertinoButton(
+        key: key,
+        padding: EdgeInsets.zero,
+        onPressed: item.id != null && item.id!.isNotEmpty
+            ? () {
+                context.push('/item/${item.id}');
+              }
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _buildResumeMoviePoster(context, ref, item),
+                    if (totalTicks > 0 && normalizedProgress > 0)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.8),
+                                Colors.black.withOpacity(0.0),
+                              ],
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '剩余 ${formatRemaining(remainingDuration)}',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.85),
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(
+                                    begin: 0.0,
+                                    end: normalizedProgress,
+                                  ),
+                                  duration: const Duration(milliseconds: 600),
+                                  curve: Curves.easeOut,
+                                  builder: (context, animatedValue, child) {
+                                    return LinearProgressIndicator(
+                                      value: animatedValue.clamp(0.0, 1.0),
+                                      minHeight: 3,
+                                      backgroundColor:
+                                          Colors.white.withValues(alpha: 0.2),
+                                      valueColor: AlwaysStoppedAnimation(
+                                          const Color(0xFFFFB74D)
+                                              .withValues(alpha: 0.95)),
+                                    );
+                                  },
+                                ),
+                              ),
                             ],
                           ),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '剩余 ${formatRemaining(remainingDuration)}',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.85),
-                                fontSize: 11,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(999),
-                              child: TweenAnimationBuilder<double>(
-                                tween: Tween<double>(
-                                  begin: 0.0,
-                                  end: normalizedProgress,
-                                ),
-                                duration: const Duration(milliseconds: 600),
-                                curve: Curves.easeOut,
-                                builder: (context, animatedValue, child) {
-                                  return LinearProgressIndicator(
-                                    value: animatedValue.clamp(0.0, 1.0),
-                                    minHeight: 3,
-                                    backgroundColor:
-                                        Colors.white.withValues(alpha: 0.2),
-                                    valueColor: AlwaysStoppedAnimation(
-                                        const Color(0xFFFFB74D)
-                                            .withValues(alpha: 0.95)),
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              item.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-                color: isDark ? Colors.white : Colors.black87,
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                item.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1373,114 +1339,116 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
     final subtitle = subtitleText;
 
-    return CupertinoButton(
-      key: key,
-      padding: EdgeInsets.zero,
-      onPressed: item.id != null && item.id!.isNotEmpty
-          ? () {
-              context.push('/item/${item.id}');
-            }
-          : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _buildResumeEpisodePoster(context, ref, item),
-                  if (totalTicks > 0 && normalizedProgress > 0)
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 6),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [
-                              Colors.black.withOpacity(0.8),
-                              Colors.black.withOpacity(0.0),
+    return RepaintBoundary(
+      child: CupertinoButton(
+        key: key,
+        padding: EdgeInsets.zero,
+        onPressed: item.id != null && item.id!.isNotEmpty
+            ? () {
+                context.push('/item/${item.id}');
+              }
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _buildResumeEpisodePoster(context, ref, item),
+                    if (totalTicks > 0 && normalizedProgress > 0)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.8),
+                                Colors.black.withOpacity(0.0),
+                              ],
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '剩余 ${formatRemaining(remainingDuration)}',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.85),
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(
+                                    begin: 0.0,
+                                    end: normalizedProgress,
+                                  ),
+                                  duration: const Duration(milliseconds: 600),
+                                  curve: Curves.easeOut,
+                                  builder: (context, animatedValue, child) {
+                                    return LinearProgressIndicator(
+                                      value: animatedValue.clamp(0.0, 1.0),
+                                      minHeight: 3,
+                                      backgroundColor:
+                                          Colors.white.withValues(alpha: 0.2),
+                                      valueColor: AlwaysStoppedAnimation(
+                                          const Color(0xFFFFB74D)
+                                              .withValues(alpha: 0.95)),
+                                    );
+                                  },
+                                ),
+                              ),
                             ],
                           ),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '剩余 ${formatRemaining(remainingDuration)}',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.85),
-                                fontSize: 11,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(999),
-                              child: TweenAnimationBuilder<double>(
-                                tween: Tween<double>(
-                                  begin: 0.0,
-                                  end: normalizedProgress,
-                                ),
-                                duration: const Duration(milliseconds: 600),
-                                curve: Curves.easeOut,
-                                builder: (context, animatedValue, child) {
-                                  return LinearProgressIndicator(
-                                    value: animatedValue.clamp(0.0, 1.0),
-                                    minHeight: 3,
-                                    backgroundColor:
-                                        Colors.white.withValues(alpha: 0.2),
-                                    valueColor: AlwaysStoppedAnimation(
-                                        const Color(0xFFFFB74D)
-                                            .withValues(alpha: 0.95)),
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              titleText,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          if (subtitle != null)
+            const SizedBox(height: 8),
             Center(
               child: Text(
-                subtitle,
+                titleText,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 14,
                   fontWeight: FontWeight.w400,
-                  color: isDark ? Colors.white70 : Colors.black54,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
                 textAlign: TextAlign.center,
               ),
             ),
-        ],
+            if (subtitle != null)
+              Center(
+                child: Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w400,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1516,6 +1484,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             type: 'Backdrop',
             tag: backdropTags.first,
             imageIndex: 0,
+            maxWidth: 800, // ✅ 限制最大宽度
           );
         }
         // 2. 电影主图
@@ -1524,6 +1493,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             itemId: itemId,
             type: 'Primary',
             tag: imageTags['Primary']!,
+            maxWidth: 800, // ✅ 限制最大宽度
           );
         }
 
@@ -1574,6 +1544,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             itemId: itemId,
             type: 'Thumb',
             tag: imageTags['Thumb']!,
+            maxWidth: 800, // ✅ 限制最大宽度
           );
         }
         // 2. 剧集背景图
@@ -1583,6 +1554,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             type: 'Backdrop',
             tag: backdropTags.first,
             imageIndex: 0,
+            maxWidth: 800, // ✅ 限制最大宽度
           );
         }
         // 3. 剧集主图
@@ -1591,6 +1563,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             itemId: itemId,
             type: 'Primary',
             tag: imageTags['Primary']!,
+            maxWidth: 800, // ✅ 限制最大宽度
           );
         }
         // 4. 季缩略图
@@ -1600,6 +1573,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             itemId: item.parentThumbItemId!,
             type: 'Thumb',
             tag: item.parentThumbImageTag!,
+            maxWidth: 800, // ✅ 限制最大宽度
           );
         }
         // 5. 季背景图
@@ -1610,6 +1584,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             type: 'Backdrop',
             tag: item.parentBackdropImageTags!.first,
             imageIndex: 0,
+            maxWidth: 800, // ✅ 限制最大宽度
           );
         }
         // 6. 季主图
@@ -1618,6 +1593,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             itemId: item.seasonId!,
             type: 'Primary',
             tag: item.seasonPrimaryImageTag!,
+            maxWidth: 800, // ✅ 限制最大宽度
           );
         }
         // 7. 剧集主图
@@ -1626,6 +1602,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             itemId: item.seriesId!,
             type: 'Primary',
             tag: item.seriesPrimaryImageTag!,
+            maxWidth: 800, // ✅ 限制最大宽度
           );
         }
 
@@ -1634,6 +1611,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
         }
 
         return EmbyFadeInImage(
+          key: ValueKey('resume_episode_poster_${item.id}_$imageUrl'),
           imageUrl: imageUrl,
           placeholder: placeholder(),
           fit: BoxFit.cover,
@@ -1995,6 +1973,8 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             _buildNavigationBar(context, ref, displayItemsList, filteredCount),
         child: PageView.builder(
           controller: _pageController,
+          // ✅ 添加缓存范围，预加载相邻页面
+          allowImplicitScrolling: true,
           onPageChanged: (index) {
             // ✅ 如果正在动画（程序触发的切换），不更新_selectedTab，避免tab阴影跳来跳去
             if (_isPageAnimating) {
@@ -2025,8 +2005,12 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             // ✅ 根据tab筛选数据
             final pageItems = _filterItems(
                 displayItemsList, tabs[pageIndex], libraryType, ref);
-            return _buildTabContent(
-                context, ref, pageItems, tabs[pageIndex], pageIndex);
+            // ✅ 添加RepaintBoundary减少重绘范围
+            return RepaintBoundary(
+              key: ValueKey('page_$pageIndex'),
+              child: _buildTabContent(
+                  context, ref, pageItems, tabs[pageIndex], pageIndex),
+            );
           },
         ),
       );
@@ -2047,6 +2031,8 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
               _buildNavigationBar(context, ref, itemsList, filteredCount),
           child: PageView.builder(
             controller: _pageController,
+            // ✅ 添加缓存范围，预加载相邻页面
+            allowImplicitScrolling: true,
             onPageChanged: (index) {
               // ✅ 如果正在动画（程序触发的切换），不更新_selectedTab，避免tab阴影跳来跳去
               if (_isPageAnimating) {
@@ -2073,8 +2059,12 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
             itemBuilder: (context, pageIndex) {
               final pageItems =
                   _filterItems(itemsList, tabs[pageIndex], libraryType, ref);
-              return _buildTabContent(
-                  context, ref, pageItems, tabs[pageIndex], pageIndex);
+              // ✅ 添加RepaintBoundary减少重绘范围
+              return RepaintBoundary(
+                key: ValueKey('page_$pageIndex'),
+                child: _buildTabContent(
+                    context, ref, pageItems, tabs[pageIndex], pageIndex),
+              );
             },
           ),
         );
@@ -2667,7 +2657,12 @@ class _Poster extends ConsumerWidget {
 
     return apiAsync.when(
       data: (api) {
-        final url = api.buildImageUrl(itemId: itemId!, type: 'Primary');
+        // ✅ 优化图片URL构建，添加尺寸限制减少内存占用
+        final url = api.buildImageUrl(
+          itemId: itemId!,
+          type: 'Primary',
+          maxWidth: 400, // ✅ 限制最大宽度，减少内存占用
+        );
         if (url.isEmpty) {
           return _PosterSkeleton(itemType: itemType);
         }
@@ -2717,4 +2712,120 @@ class _RowEntry {
 
   final ItemInfo item;
   final bool hasHorizontalArtwork;
+}
+
+// ✅ 优化的列表组件 - 使用缓存和优化的构建策略
+class _OptimizedItemList extends StatefulWidget {
+  const _OptimizedItemList({
+    required this.scrollController,
+    required this.items,
+    required this.headerHeight,
+    required this.buildRows,
+  });
+
+  final ScrollController scrollController;
+  final List<ItemInfo> items;
+  final double headerHeight;
+  final List<List<_RowEntry>> Function(List<ItemInfo>) buildRows;
+
+  @override
+  State<_OptimizedItemList> createState() => _OptimizedItemListState();
+}
+
+class _OptimizedItemListState extends State<_OptimizedItemList> {
+  late List<List<_RowEntry>> _cachedRows;
+  late List<ItemInfo> _lastItems;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastItems = widget.items;
+    _cachedRows = widget.buildRows(widget.items);
+  }
+
+  @override
+  void didUpdateWidget(_OptimizedItemList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // ✅ 只有在items实际改变时才重新计算rows
+    if (widget.items != _lastItems) {
+      _lastItems = widget.items;
+      _cachedRows = widget.buildRows(widget.items);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      controller: widget.scrollController,
+      padding: EdgeInsets.only(
+        top: widget.headerHeight + 6,
+        left: 12,
+        right: 12,
+        bottom: 12,
+      ),
+      // ✅ 添加缓存范围，提升滚动性能
+      cacheExtent: 500,
+      itemCount: _cachedRows.length,
+      itemBuilder: (context, rowIndex) {
+        final row = _cachedRows[rowIndex];
+        return RepaintBoundary(
+          key: ValueKey('row_$rowIndex'),
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: rowIndex == _cachedRows.length - 1 ? 0 : 16,
+            ),
+            child: _OptimizedRow(
+              row: row,
+              rowIndex: rowIndex,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ✅ 优化的行组件 - 减少不必要的重建
+class _OptimizedRow extends StatelessWidget {
+  const _OptimizedRow({
+    required this.row,
+    required this.rowIndex,
+  });
+
+  final List<_RowEntry> row;
+  final int rowIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final hasHorizontal = row.any((entry) => entry.hasHorizontalArtwork);
+        final columns = hasHorizontal ? 3 : 2;
+        final spacing = columns > 1 ? 16.0 : 0.0;
+        final availableWidth = constraints.maxWidth;
+        final totalSpacing = spacing * (columns - 1);
+        final cardWidth = (availableWidth - totalSpacing) / columns;
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < columns; i++) ...[
+              if (i > 0) SizedBox(width: spacing),
+              SizedBox(
+                width: cardWidth,
+                child: i < row.length
+                    ? _ItemTile(
+                        key: ValueKey('item_tile_${row[i].item.id}'),
+                        item: row[i].item,
+                        hasHorizontalArtwork: row[i].hasHorizontalArtwork,
+                        cardWidth: cardWidth,
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
 }

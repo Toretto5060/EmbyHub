@@ -247,7 +247,6 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
   int _currentRetry = 0;
   String? _currentUrl; // 记录当前显示的图片URL
   bool _isVisible = false; // 是否在可视范围内
-  bool _hasStartedLoading = false; // 是否已经开始加载过
   bool _shouldFadeIn = false; // 是否需要淡入效果（仅网络加载的图片需要）
   bool _isCancelled = false; // 是否已取消加载
   bool _isFirstBuild = true; // 是否是第一次构建
@@ -265,7 +264,6 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       _log('✅ Image from memory cache (initState): ${widget.imageUrl}');
       _image = memoryCached;
       _shouldFadeIn = false; // 缓存图片不需要淡入
-      _hasStartedLoading = true;
       _isFirstBuild = false;
       // 延迟调用回调，避免在 build 期间调用
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -299,7 +297,6 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
         _shouldFadeIn = false;
         _isLoading = false;
         _hasError = false;
-        _hasStartedLoading = true;
         _isFirstBuild = false;
       } else {
         setState(() {
@@ -308,7 +305,6 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
           _isLoading = false;
           _hasError = false;
         });
-        _hasStartedLoading = true;
       }
 
       widget.onImageReady?.call(diskCached);
@@ -328,7 +324,6 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       _cancelLoading();
 
       _currentUrl = widget.imageUrl;
-      _hasStartedLoading = false;
       _isCancelled = false;
 
       // ✅ 优先检查内存缓存（同步操作，立即显示，无需淡入）
@@ -344,7 +339,6 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
               _isLoading = false;
               _hasError = false;
             });
-            _hasStartedLoading = true;
             widget.onImageReady?.call(memoryCached);
           }
         });
@@ -372,11 +366,16 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       _cancelLoading();
     }
 
-    // 从不可见变为可见，且还未开始加载
-    if (!wasVisible && _isVisible && !_hasStartedLoading) {
-      _log('👁️ Image became visible, start loading: ${widget.imageUrl}');
-      _isCancelled = false;
-      _loadImageWithCache();
+    // 从不可见变为可见，需要加载图片
+    // ✅ 修复：不仅检查 _hasStartedLoading，还要检查图片是否真的加载成功
+    // 如果图片被取消后再次进入可视区域，应该重新加载
+    if (!wasVisible && _isVisible) {
+      // 如果图片还没加载成功，且不在加载中，则开始加载
+      if (_image == null && !_isLoading) {
+        _log('👁️ Image became visible, start loading: ${widget.imageUrl}');
+        _isCancelled = false;
+        _loadImageWithCache();
+      }
     }
   }
 
@@ -394,9 +393,6 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
 
   Future<void> _loadImageWithCache({bool keepOldImage = false}) async {
     if (_isCancelled) return;
-
-    // 标记已经开始加载
-    _hasStartedLoading = true;
 
     // ✅ 重置重试计数器（每次加载新URL时）
     _currentRetry = 0;
@@ -712,7 +708,9 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
   @override
   void dispose() {
     // ✅ 组件销毁时取消加载
-    _cancelLoading();
+    _log('🚫 Cancelling image load: $_currentUrl');
+    _isCancelled = true;
+    _isLoading = false;
 
     // 不要 dispose 缓存的图片，因为可能被其他 widget 使用
     // _image?.dispose();
