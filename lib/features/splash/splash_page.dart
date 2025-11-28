@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/emby_api.dart';
 import '../../utils/status_bar_manager.dart';
+import '../../services/server_cache_manager.dart';
 
 class SplashPage extends ConsumerStatefulWidget {
   const SplashPage({super.key});

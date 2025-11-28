@@ -10,6 +10,7 @@ import '../../providers/settings_provider.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/theme_utils.dart';
 import '../home/bottom_nav_wrapper.dart';
+import '../../services/server_cache_manager.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -850,6 +851,12 @@ class SettingsPage extends ConsumerWidget {
                                       ),
                                     );
                                     if (confirm == true) {
+                                      // ✅ 清除该服务器的所有缓存（图片和数据）
+                                      final uri = Uri.parse(serverUrl);
+                                      await ServerCacheManager
+                                          .deleteServerCache(uri.host);
+
+                                      // 删除账号记录
                                       final accountsToDelete = freshAllAccounts
                                           .where(
                                               (a) => a.serverUrl == serverUrl)
