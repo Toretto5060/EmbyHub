@@ -69,24 +69,60 @@ Future<void> _fetchAndCacheItemDetail(String userId, String itemId) async {
 
 final similarItemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, itemId) async {
-  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     return const [];
   }
+
+  // ✅ 优化2：先尝试从缓存加载
+  final cachedItems = await CacheService.loadSimilarItems(auth.userId!, itemId);
+  if (cachedItems != null) {
+    // ✅ 有缓存，立即返回，同时后台更新
+    _fetchAndCacheSimilarItems(auth.userId!, itemId);
+    return cachedItems;
+  }
+
+  // ✅ 无缓存，从 API 获取并保存
   final api = await ref.watch(embyApiProvider.future);
   final items = await api.getSimilarItems(auth.userId!, itemId, limit: 12);
+  await CacheService.saveSimilarItems(auth.userId!, itemId, items);
   return items;
 });
+
+/// ✅ 后台获取并缓存相似影片数据
+Future<void> _fetchAndCacheSimilarItems(String userId, String itemId) async {
+  try {
+    final key = 'similar_items_${userId}_$itemId';
+    if (!DebounceHelper.shouldExecute(key)) {
+      return;
+    }
+
+    final api = await EmbyApi.create();
+    final items = await api.getSimilarItems(userId, itemId, limit: 12);
+    await CacheService.saveSimilarItems(userId, itemId, items);
+  } catch (e) {
+    // 后台更新失败不影响用户体验
+  }
+}
 
 // ✅ 获取合集内的影片
 final collectionItemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, collectionId) async {
-  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     return const [];
   }
+
+  // ✅ 优化7：先尝试从缓存加载
+  final cachedItems =
+      await CacheService.loadCollectionItems(auth.userId!, collectionId);
+  if (cachedItems != null) {
+    // ✅ 有缓存，立即返回，同时后台更新
+    _fetchAndCacheCollectionItems(auth.userId!, collectionId);
+    return cachedItems;
+  }
+
+  // ✅ 无缓存，从 API 获取并保存
   final api = await ref.watch(embyApiProvider.future);
   try {
     final items = await api.getItemsByParent(
@@ -95,11 +131,34 @@ final collectionItemsProvider =
       includeItemTypes: 'Movie',
       limit: 100,
     );
+    await CacheService.saveCollectionItems(auth.userId!, collectionId, items);
     return items;
   } catch (e) {
     return const [];
   }
 });
+
+/// ✅ 后台获取并缓存合集影片数据
+Future<void> _fetchAndCacheCollectionItems(
+    String userId, String collectionId) async {
+  try {
+    final key = 'collection_items_${userId}_$collectionId';
+    if (!DebounceHelper.shouldExecute(key)) {
+      return;
+    }
+
+    final api = await EmbyApi.create();
+    final items = await api.getItemsByParent(
+      userId: userId,
+      parentId: collectionId,
+      includeItemTypes: 'Movie',
+      limit: 100,
+    );
+    await CacheService.saveCollectionItems(userId, collectionId, items);
+  } catch (e) {
+    // 后台更新失败不影响用户体验
+  }
+}
 
 class ItemDetailPage extends ConsumerStatefulWidget {
   const ItemDetailPage({required this.itemId, super.key});
@@ -130,7 +189,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   );
 
   late SystemUiOverlayStyle _statusBarStyle;
-  final Map<String, SystemUiOverlayStyle> _imageStyleCache = {};
+  final _LRUCache<String, SystemUiOverlayStyle> _imageStyleCache =
+      _LRUCache(50);
   late ValueNotifier<SystemUiOverlayStyle?> _navSyncedStyleNotifier;
   late ValueNotifier<double> _scrollOffsetNotifier; // ✅ 用于实时更新毛玻璃效果
   int? _selectedAudioStreamIndex;
@@ -303,8 +363,23 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
 
   void _scheduleRefresh() {
     // ✅ 使用 microtask 立即刷新，而不是等待下一帧
-    Future.microtask(() {
+    Future.microtask(() async {
       if (!mounted) return;
+
+      // ✅ 清除防抖记录，确保能立即刷新
+      final auth = ref.read(authStateProvider).value;
+      if (auth != null && auth.isLoggedIn) {
+        DebounceHelper.clear('item_detail_${auth.userId}_${widget.itemId}');
+        DebounceHelper.clear('similar_items_${auth.userId}_${widget.itemId}');
+
+        // ✅ 清除缓存，强制从API获取最新数据
+        await CacheService.saveItemDetail(
+            auth.userId!,
+            widget.itemId,
+            await EmbyApi.create()
+                .then((api) => api.getItem(auth.userId!, widget.itemId)));
+      }
+
       // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载
       // ignore: unused_result
       ref.refresh(itemProvider(widget.itemId));
@@ -314,6 +389,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       final itemAsync = ref.read(itemProvider(widget.itemId));
       itemAsync.whenData((item) {
         if (item.type == 'BoxSet' && item.id != null && item.id!.isNotEmpty) {
+          DebounceHelper.clear('collection_items_${auth?.userId}_${item.id}');
           // ignore: unused_result
           ref.refresh(collectionItemsProvider(item.id!));
         }
@@ -1682,14 +1758,16 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
   }
 
   Future<void> _handleBackdropImage(ui.Image image, String cacheKey) async {
-    if (_imageStyleCache.containsKey(cacheKey)) {
-      _applyStatusBarStyle(_imageStyleCache[cacheKey]!);
+    // ✅ 优化10：使用 LRU 缓存，避免内存泄漏
+    final cachedStyle = _imageStyleCache.get(cacheKey);
+    if (cachedStyle != null) {
+      _applyStatusBarStyle(cachedStyle);
       return;
     }
 
     final bool isDark = await _isTopAreaDark(image);
     final style = isDark ? _lightStatusBar : _darkStatusBar;
-    _imageStyleCache[cacheKey] = style;
+    _imageStyleCache.put(cacheKey, style);
     _applyStatusBarStyle(style);
   }
 
@@ -4290,4 +4368,36 @@ String _mergeFormatSizeDate(String format, String size, String date) {
   if (size.isNotEmpty) pieces.add(size);
   if (date.isNotEmpty) pieces.add(date);
   return pieces.join(' · ');
+}
+
+/// ✅ 优化10：LRU 缓存，避免无限增长导致内存泄漏
+class _LRUCache<K, V> {
+  final int maxSize;
+  final Map<K, V> _cache = {};
+  final List<K> _keys = [];
+
+  _LRUCache(this.maxSize);
+
+  V? get(K key) {
+    if (!_cache.containsKey(key)) return null;
+
+    // 移动到最前面（最近使用）
+    _keys.remove(key);
+    _keys.add(key);
+    return _cache[key];
+  }
+
+  void put(K key, V value) {
+    if (_cache.containsKey(key)) {
+      // 已存在，更新位置
+      _keys.remove(key);
+    } else if (_cache.length >= maxSize) {
+      // 缓存满了，移除最旧的
+      final oldestKey = _keys.removeAt(0);
+      _cache.remove(oldestKey);
+    }
+
+    _cache[key] = value;
+    _keys.add(key);
+  }
 }

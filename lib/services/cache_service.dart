@@ -10,6 +10,8 @@ class CacheService {
   static const String _kLatestItemsPrefix = 'cache_latest_items_';
   static const String _kLibraryItemsPrefix = 'cache_library_items_';
   static const String _kItemDetailPrefix = 'cache_item_detail_';
+  static const String _kSimilarItemsPrefix = 'cache_similar_items_';
+  static const String _kCollectionItemsPrefix = 'cache_collection_items_';
 
   // 缓存有效期（永久有效，设置为极大值）
   static const Duration _cacheExpiry = Duration(days: 365 * 100); // 100年，相当于永久
@@ -252,6 +254,88 @@ class CacheService {
       }
     } catch (e) {
       print('❌ Failed to clear cache: $e');
+    }
+  }
+
+  /// 保存相似影片数据
+  static Future<void> saveSimilarItems(
+      String userId, String itemId, List<ItemInfo> items) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_kSimilarItemsPrefix${userId}_$itemId';
+      final data = {
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'items': items.map((item) => item.toJson()).toList(),
+      };
+      await prefs.setString(key, jsonEncode(data));
+    } catch (e) {
+      // 缓存失败不影响主流程
+    }
+  }
+
+  /// 读取相似影片数据
+  static Future<List<ItemInfo>?> loadSimilarItems(
+      String userId, String itemId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_kSimilarItemsPrefix${userId}_$itemId';
+      final jsonStr = prefs.getString(key);
+      if (jsonStr == null) return null;
+
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final timestamp = data['timestamp'] as int;
+
+      // 检查缓存是否过期
+      final cacheTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      if (DateTime.now().difference(cacheTime) > _cacheExpiry) {
+        return null;
+      }
+
+      final itemsJson = data['items'] as List;
+      return itemsJson.map((json) => ItemInfo.fromJson(json)).toList();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 保存合集影片数据
+  static Future<void> saveCollectionItems(
+      String userId, String collectionId, List<ItemInfo> items) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_kCollectionItemsPrefix${userId}_$collectionId';
+      final data = {
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'items': items.map((item) => item.toJson()).toList(),
+      };
+      await prefs.setString(key, jsonEncode(data));
+    } catch (e) {
+      // 缓存失败不影响主流程
+    }
+  }
+
+  /// 读取合集影片数据
+  static Future<List<ItemInfo>?> loadCollectionItems(
+      String userId, String collectionId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_kCollectionItemsPrefix${userId}_$collectionId';
+      final jsonStr = prefs.getString(key);
+      if (jsonStr == null) return null;
+
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final timestamp = data['timestamp'] as int;
+
+      // 检查缓存是否过期
+      final cacheTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      if (DateTime.now().difference(cacheTime) > _cacheExpiry) {
+        return null;
+      }
+
+      final itemsJson = data['items'] as List;
+      return itemsJson.map((json) => ItemInfo.fromJson(json)).toList();
+    } catch (e) {
+      return null;
     }
   }
 

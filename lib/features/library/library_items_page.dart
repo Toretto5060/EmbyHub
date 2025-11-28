@@ -674,8 +674,18 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   }
 
   void _scheduleRefresh() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+
+      // ✅ 清除防抖记录，确保能立即刷新
+      final auth = ref.read(authStateProvider).value;
+      if (auth != null && auth.isLoggedIn) {
+        final sortState = ref.read(sortStateProvider(widget.viewId));
+        final key =
+            'library_items_${auth.userId}_${widget.viewId}_${sortState.sortBy.value}_${sortState.ascending}';
+        DebounceHelper.clear(key);
+      }
+
       // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
       // ignore: unused_result
       ref.refresh(itemsProvider(widget.viewId));
