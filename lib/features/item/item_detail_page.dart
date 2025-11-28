@@ -3984,10 +3984,11 @@ class _SimilarCard extends StatelessWidget {
         final api = snapshot.data!;
         String? url;
         if ((item.imageTags?['Primary'] ?? '').isNotEmpty) {
+          // ✅ 统一海报图片尺寸为400，与列表页保持一致，提高缓存命中率
           url = api.buildImageUrl(
             itemId: item.id!,
             type: 'Primary',
-            maxWidth: hasHorizontalArtwork ? 480 : 320,
+            maxWidth: 400,
           );
         }
 

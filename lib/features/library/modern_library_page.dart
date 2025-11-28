@@ -1421,11 +1421,11 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
         String? url;
         for (final candidate in candidates) {
-          // ✅ 性能优化：继续观看的横幅图使用更高分辨率（16:9比例）
+          // ✅ 统一继续观看图片尺寸为800，与列表页保持一致，提高缓存命中率
           url = api.buildImageUrl(
             itemId: candidate.id,
             type: candidate.type,
-            maxWidth: 540, // 优化：适配 180px 宽度卡片的 3x 分辨率
+            maxWidth: 800,
             imageIndex: candidate.index,
             tag: candidate.tag,
           );
@@ -1462,12 +1462,11 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
 
     return apiAsync.when(
       data: (api) {
-        // ✅ 性能优化：根据实际显示尺寸请求合适的图片分辨率
-        // 横版海报用更高分辨率（16:9），竖版海报用较低分辨率（2:3）
+        // ✅ 统一海报图片尺寸为400，与列表页保持一致，提高缓存命中率
         final url = api.buildImageUrl(
           itemId: item.id!,
           type: 'Primary',
-          maxWidth: hasBackdrop ? 480 : 300, // 优化：降低横版分辨率从720到480
+          maxWidth: 400,
         );
 
         if (url.isEmpty) {

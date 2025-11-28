@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/account_history_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/fade_in_image.dart';
+import '../../widgets/custom_toast.dart';
 import '../../utils/theme_utils.dart';
 import '../home/bottom_nav_wrapper.dart';
 import '../../services/server_cache_manager.dart';
@@ -198,6 +200,24 @@ class SettingsPage extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: const _QualityStrategySelector(),
+                    ),
+                  ],
+                ),
+                _buildSection(
+                  context,
+                  title: '缓存管理',
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const _CacheManager(),
                     ),
                   ],
                 ),
@@ -1433,5 +1453,232 @@ class _QualityStrategySelectorState extends State<_QualityStrategySelector> {
         ),
       ),
     );
+  }
+}
+
+// ✅ 缓存管理器组件
+class _CacheManager extends StatefulWidget {
+  const _CacheManager();
+
+  @override
+  State<_CacheManager> createState() => _CacheManagerState();
+}
+
+class _CacheManagerState extends State<_CacheManager> {
+  String _imageCacheSize = '计算中...';
+  String _dataCacheSize = '计算中...';
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCacheSize();
+  }
+
+  Future<void> _loadCacheSize() async {
+    final imageSize = await ServerCacheManager.getImageCacheSize();
+    final dataSize = await ServerCacheManager.getDataCacheSize();
+
+    if (mounted) {
+      setState(() {
+        _imageCacheSize = ServerCacheManager.formatCacheSize(imageSize);
+        _dataCacheSize = ServerCacheManager.formatCacheSize(dataSize);
+      });
+    }
+  }
+
+  Future<void> _clearImageCache() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('清除图片缓存'),
+        content: const Text('确定要清除所有图片缓存吗？\n\n清除后图片将重新从服务器加载。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    setState(() => _isLoading = true);
+
+    await ServerCacheManager.clearImageCache();
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+      await _loadCacheSize();
+
+      CustomToast.showSuccess(context, '图片缓存已清除');
+    }
+  }
+
+  Future<void> _clearDataCache() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('清除数据缓存'),
+        content: const Text('确定要清除所有数据缓存吗？\n\n清除后页面数据将重新从服务器加载。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    setState(() => _isLoading = true);
+
+    await ServerCacheManager.clearDataCache();
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+      await _loadCacheSize();
+
+      CustomToast.showSuccess(context, '数据缓存已清除');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return VisibilityDetector(
+        key: const Key('cache_manager_visibility'),
+        onVisibilityChanged: (info) {
+          // ✅ 当组件可见时（底部导航切换到设置页），刷新缓存大小
+          if (info.visibleFraction > 0 && mounted) {
+            _loadCacheSize();
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 图片缓存
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.image_rounded,
+                              size: 20,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              '图片缓存',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _imageCacheSize,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Theme.of(context).textTheme.bodySmall?.color,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  OutlinedButton(
+                    onPressed: _isLoading ? null : _clearImageCache,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.orange,
+                      side: BorderSide(color: Colors.orange.withOpacity(0.5)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                    ),
+                    child: const Text('清除'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Divider(height: 1),
+              const SizedBox(height: 16),
+              // 数据缓存
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.storage_rounded,
+                              size: 20,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              '数据缓存',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _dataCacheSize,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Theme.of(context).textTheme.bodySmall?.color,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  OutlinedButton(
+                    onPressed: _isLoading ? null : _clearDataCache,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.orange,
+                      side: BorderSide(color: Colors.orange.withOpacity(0.5)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                    ),
+                    child: const Text('清除'),
+                  ),
+                ],
+              ),
+              if (_isLoading) ...[
+                const SizedBox(height: 16),
+                const Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ));
   }
 }

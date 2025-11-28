@@ -71,9 +71,9 @@ class _ImageCache {
   // 初始化缓存目录
   static Future<void> init() async {
     if (_cacheDir == null) {
-      // ✅ 使用应用支持目录，确保持久化缓存（不会被系统自动清理）
-      final appDir = await getApplicationSupportDirectory();
-      _cacheDir = Directory('${appDir.path}/image_cache');
+      // ✅ 使用应用缓存目录，允许系统/用户清理
+      final cacheDir = await getApplicationCacheDirectory();
+      _cacheDir = Directory('${cacheDir.path}/image_cache');
       if (!_cacheDir!.existsSync()) {
         _cacheDir!.createSync(recursive: true);
       }

@@ -104,8 +104,8 @@ class ServerCacheManager {
   /// ✅ 清除图片缓存
   static Future<void> _clearImageCache(String serverId) async {
     try {
-      final appDir = await getApplicationSupportDirectory();
-      final imageCacheDir = Directory('${appDir.path}/image_cache');
+      final cacheDir = await getApplicationCacheDirectory();
+      final imageCacheDir = Directory('${cacheDir.path}/image_cache');
 
       if (!imageCacheDir.existsSync()) {
         return;
@@ -113,7 +113,7 @@ class ServerCacheManager {
 
       // ✅ 删除整个图片缓存目录
       // 因为图片缓存是基于 URL 的 MD5，无法区分服务器
-      // 所以切换服务器时清除所有图片缓存
+      // 所以删除服务器时清除所有图片缓存
       await imageCacheDir.delete(recursive: true);
       print('✅ [ServerCache] Image cache cleared');
     } catch (e) {
@@ -203,8 +203,8 @@ class ServerCacheManager {
 
     // 1. 清除所有图片缓存
     try {
-      final appDir = await getApplicationSupportDirectory();
-      final imageCacheDir = Directory('${appDir.path}/image_cache');
+      final cacheDir = await getApplicationCacheDirectory();
+      final imageCacheDir = Directory('${cacheDir.path}/image_cache');
 
       if (imageCacheDir.existsSync()) {
         await imageCacheDir.delete(recursive: true);
@@ -260,8 +260,8 @@ class ServerCacheManager {
 
     try {
       // 1. 图片缓存大小
-      final appDir = await getApplicationSupportDirectory();
-      final imageCacheDir = Directory('${appDir.path}/image_cache');
+      final cacheDir = await getApplicationCacheDirectory();
+      final imageCacheDir = Directory('${cacheDir.path}/image_cache');
 
       if (imageCacheDir.existsSync()) {
         await for (final entity in imageCacheDir.list(recursive: true)) {
@@ -287,6 +287,127 @@ class ServerCacheManager {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     } else {
       return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    }
+  }
+
+  /// ✅ 获取图片缓存大小
+  static Future<int> getImageCacheSize() async {
+    int totalSize = 0;
+
+    try {
+      final cacheDir = await getApplicationCacheDirectory();
+      final imageCacheDir = Directory('${cacheDir.path}/image_cache');
+
+      if (imageCacheDir.existsSync()) {
+        await for (final entity in imageCacheDir.list(recursive: true)) {
+          if (entity is File) {
+            totalSize += await entity.length();
+          }
+        }
+      }
+    } catch (e) {
+      print('❌ [ServerCache] Failed to get image cache size: $e');
+    }
+
+    return totalSize;
+  }
+
+  /// ✅ 获取数据缓存大小（估算 SharedPreferences 中的缓存数据大小）
+  static Future<int> getDataCacheSize() async {
+    int totalSize = 0;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys();
+
+      final cacheKeyPrefixes = [
+        'cache_views',
+        'cache_latest_items_',
+        'cache_library_items_',
+        'cache_item_detail_',
+        'cache_similar_items_',
+        'cache_series_detail_',
+        'cache_seasons_',
+        'cache_season_detail_',
+        'cache_episodes_',
+        'cache_next_up_episode_',
+        'cache_similar_items_',
+        'cache_season_resume_episode_',
+      ];
+
+      for (final key in keys) {
+        for (final prefix in cacheKeyPrefixes) {
+          if (key.startsWith(prefix)) {
+            final value = prefs.getString(key);
+            if (value != null) {
+              // 估算字符串大小（UTF-8 编码）
+              totalSize += utf8.encode(value).length;
+            }
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      print('❌ [ServerCache] Failed to get data cache size: $e');
+    }
+
+    return totalSize;
+  }
+
+  /// ✅ 只清除图片缓存
+  static Future<void> clearImageCache() async {
+    print('🗑️ [ServerCache] Cleaning image cache');
+
+    try {
+      final cacheDir = await getApplicationCacheDirectory();
+      final imageCacheDir = Directory('${cacheDir.path}/image_cache');
+
+      if (imageCacheDir.existsSync()) {
+        await imageCacheDir.delete(recursive: true);
+        print('✅ [ServerCache] Image cache cleared');
+      }
+    } catch (e) {
+      print('❌ [ServerCache] Failed to clear image cache: $e');
+    }
+  }
+
+  /// ✅ 只清除数据缓存
+  static Future<void> clearDataCache() async {
+    print('🗑️ [ServerCache] Cleaning data cache');
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys();
+
+      final cacheKeyPrefixes = [
+        'cache_views',
+        'cache_latest_items_',
+        'cache_library_items_',
+        'cache_item_detail_',
+        'cache_similar_items_',
+        'cache_series_detail_',
+        'cache_seasons_',
+        'cache_season_detail_',
+        'cache_episodes_',
+        'cache_next_up_episode_',
+        'cache_similar_items_',
+        'cache_season_resume_episode_',
+      ];
+
+      int removedCount = 0;
+      for (final key in keys) {
+        for (final prefix in cacheKeyPrefixes) {
+          if (key.startsWith(prefix)) {
+            await prefs.remove(key);
+            removedCount++;
+            break;
+          }
+        }
+      }
+
+      print('✅ [ServerCache] Data cache cleared: $removedCount keys removed');
+    } catch (e) {
+      print('❌ [ServerCache] Failed to clear data cache: $e');
     }
   }
 }
