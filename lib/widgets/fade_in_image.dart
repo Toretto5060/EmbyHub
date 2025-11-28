@@ -67,13 +67,40 @@ class _ImageCache {
   static int _activeRequests = 0;
   static const int _maxConcurrentRequests = 5; // 最大并发请求数
   static Directory? _cacheDir;
+  static String? _currentUserId; // ✅ 当前用户ID
+  static String? _currentServerId; // ✅ 当前服务器ID
 
-  // 初始化缓存目录
+  // ✅ 设置当前用户ID和服务器ID（在登录时调用）
+  static void setCurrentUserAndServer(String? userId, String? serverId) {
+    if (_currentUserId != userId || _currentServerId != serverId) {
+      _currentUserId = userId;
+      _currentServerId = serverId;
+      _cacheDir = null; // 重置缓存目录，下次init时会创建新的目录
+      _memoryCache.clear(); // 清除内存缓存
+    }
+  }
+
+  // 初始化缓存目录（按服务器+用户隔离）
   static Future<void> init() async {
     if (_cacheDir == null) {
       // ✅ 使用应用缓存目录，允许系统/用户清理
       final cacheDir = await getApplicationCacheDirectory();
-      _cacheDir = Directory('${cacheDir.path}/image_cache');
+
+      // ✅ 目录结构：image_cache/{serverId}/{userId}/
+      if (_currentServerId != null && _currentServerId!.isNotEmpty) {
+        if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+          _cacheDir = Directory(
+              '${cacheDir.path}/image_cache/$_currentServerId/$_currentUserId');
+        } else {
+          // ✅ 有服务器但未登录
+          _cacheDir = Directory(
+              '${cacheDir.path}/image_cache/$_currentServerId/default');
+        }
+      } else {
+        // ✅ 未连接服务器时使用默认目录
+        _cacheDir = Directory('${cacheDir.path}/image_cache/default/default');
+      }
+
       if (!_cacheDir!.existsSync()) {
         _cacheDir!.createSync(recursive: true);
       }
@@ -880,6 +907,12 @@ class _ShimmerPlaceholderState extends ConsumerState<_ShimmerPlaceholder>
       },
     );
   }
+}
+
+/// ✅ 公共方法：设置当前用户ID和服务器ID（用于缓存隔离）
+/// 在用户登录/切换时调用
+void setImageCacheUserAndServer(String? userId, String? serverId) {
+  _ImageCache.setCurrentUserAndServer(userId, serverId);
 }
 
 /// ✅ 公共方法：从内存缓存获取图片

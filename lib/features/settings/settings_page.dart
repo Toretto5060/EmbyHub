@@ -463,6 +463,17 @@ class SettingsPage extends ConsumerWidget {
                                             ),
                                           );
                                           if (confirm == true) {
+                                            // ✅ 清除该用户的缓存（图片和数据）
+                                            if (account.userId != null &&
+                                                account.userId!.isNotEmpty) {
+                                              final uri = Uri.parse(serverUrl);
+                                              await ServerCacheManager
+                                                  .deleteUserCache(
+                                                      account.userId!,
+                                                      uri.host);
+                                            }
+
+                                            // 删除账号记录
                                             await ref
                                                 .read(accountHistoryProvider
                                                     .notifier)
@@ -1485,8 +1496,14 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
     _isLoadingCacheSize = true;
 
     try {
-      final imageSize = await ServerCacheManager.getImageCacheSize();
-      final dataSize = await ServerCacheManager.getDataCacheSize();
+      // ✅ 获取当前用户ID
+      final auth = ref.read(authStateProvider).value;
+      final userId = auth?.userId;
+
+      final imageSize =
+          await ServerCacheManager.getImageCacheSize(userId: userId);
+      final dataSize =
+          await ServerCacheManager.getDataCacheSize(userId: userId);
 
       if (mounted) {
         setState(() {
@@ -1504,7 +1521,7 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('清除图片缓存'),
-        content: const Text('确定要清除所有图片缓存吗？\n\n清除后图片将重新从服务器加载。'),
+        content: const Text('确定要清除当前用户的图片缓存吗？\n\n清除后图片将重新从服务器加载。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -1523,7 +1540,11 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
 
     setState(() => _isLoading = true);
 
-    await ServerCacheManager.clearImageCache();
+    // ✅ 获取当前用户ID
+    final auth = ref.read(authStateProvider).value;
+    final userId = auth?.userId;
+
+    await ServerCacheManager.clearImageCache(userId: userId);
 
     if (mounted) {
       setState(() => _isLoading = false);
@@ -1538,7 +1559,7 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('清除数据缓存'),
-        content: const Text('确定要清除所有数据缓存吗？\n\n清除后页面数据将重新从服务器加载。'),
+        content: const Text('确定要清除当前用户的数据缓存吗？\n\n清除后页面数据将重新从服务器加载。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -1557,7 +1578,11 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
 
     setState(() => _isLoading = true);
 
-    await ServerCacheManager.clearDataCache();
+    // ✅ 获取当前用户ID
+    final auth = ref.read(authStateProvider).value;
+    final userId = auth?.userId;
+
+    await ServerCacheManager.clearDataCache(userId: userId);
 
     if (mounted) {
       setState(() => _isLoading = false);

@@ -88,6 +88,37 @@ class ServerCacheManager {
     await _removeFromServerList(serverId);
   }
 
+  /// ✅ 删除指定用户的缓存（在删除用户账号时调用）
+  static Future<void> deleteUserCache(String userId, String serverUrl) async {
+    print(
+        '🗑️ [ServerCache] Deleting user cache: $userId on server: $serverUrl');
+
+    try {
+      // 计算服务器ID
+      final hostWithoutPort = _removePort(serverUrl);
+      final bytes = utf8.encode(hostWithoutPort.toLowerCase());
+      final digest = md5.convert(bytes);
+      final serverId = digest.toString();
+
+      // 1. 清除用户的图片缓存（该服务器下的该用户）
+      final cacheDir = await getApplicationCacheDirectory();
+      final userImageCacheDir =
+          Directory('${cacheDir.path}/image_cache/$serverId/$userId');
+      if (userImageCacheDir.existsSync()) {
+        await userImageCacheDir.delete(recursive: true);
+        print(
+            '✅ [ServerCache] User image cache deleted: $userId on server: $serverId');
+      }
+
+      // 2. 清除用户的数据缓存
+      await clearDataCache(userId: userId);
+
+      print('✅ [ServerCache] User cache deleted: $userId');
+    } catch (e) {
+      print('❌ [ServerCache] Failed to delete user cache: $e');
+    }
+  }
+
   /// ✅ 清除指定服务器的所有缓存
   static Future<void> _clearServerCache(String serverId) async {
     print('🗑️ [ServerCache] Cleaning cache for server: $serverId');
@@ -101,52 +132,53 @@ class ServerCacheManager {
     print('✅ [ServerCache] Cache cleaned for server: $serverId');
   }
 
-  /// ✅ 清除图片缓存
+  /// ✅ 清除图片缓存（删除服务器时清除该服务器下所有用户的图片缓存）
   static Future<void> _clearImageCache(String serverId) async {
     try {
       final cacheDir = await getApplicationCacheDirectory();
-      final imageCacheDir = Directory('${cacheDir.path}/image_cache');
+      final serverImageCacheDir =
+          Directory('${cacheDir.path}/image_cache/$serverId');
 
-      if (!imageCacheDir.existsSync()) {
+      if (!serverImageCacheDir.existsSync()) {
+        print('⚠️  [ServerCache] No image cache found for server: $serverId');
         return;
       }
 
-      // ✅ 删除整个图片缓存目录
-      // 因为图片缓存是基于 URL 的 MD5，无法区分服务器
-      // 所以删除服务器时清除所有图片缓存
-      await imageCacheDir.delete(recursive: true);
-      print('✅ [ServerCache] Image cache cleared');
+      // ✅ 删除该服务器的图片缓存目录（包含该服务器下所有用户的缓存）
+      await serverImageCacheDir.delete(recursive: true);
+      print(
+          '✅ [ServerCache] Image cache cleared for server: $serverId (all users)');
     } catch (e) {
       print('❌ [ServerCache] Failed to clear image cache: $e');
     }
   }
 
-  /// ✅ 清除数据缓存（SharedPreferences）
+  /// ✅ 清除数据缓存（SharedPreferences）- 只清除指定服务器的数据
   static Future<void> _clearDataCache(String serverId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final keys = prefs.getKeys();
 
-      // ✅ 清除所有缓存相关的键
+      // ✅ 清除所有缓存相关的键（新格式：cache_xxx_{serverId}_...）
       final cacheKeyPrefixes = [
-        'cache_views',
+        'cache_resume_items_',
+        'cache_views_',
         'cache_latest_items_',
         'cache_library_items_',
         'cache_item_detail_',
         'cache_similar_items_',
+        'cache_collection_items_',
         'cache_series_detail_',
         'cache_seasons_',
         'cache_season_detail_',
         'cache_episodes_',
-        'cache_next_up_episode_',
-        'cache_similar_items_',
-        'cache_season_resume_episode_',
       ];
 
       int removedCount = 0;
       for (final key in keys) {
         for (final prefix in cacheKeyPrefixes) {
-          if (key.startsWith(prefix)) {
+          // ✅ 检查key是否包含serverId（格式：cache_xxx_{serverId}_...）
+          if (key.startsWith(prefix) && key.contains('_${serverId}_')) {
             await prefs.remove(key);
             removedCount++;
             break;
@@ -154,7 +186,8 @@ class ServerCacheManager {
         }
       }
 
-      print('✅ [ServerCache] Data cache cleared: $removedCount keys removed');
+      print(
+          '✅ [ServerCache] Data cache cleared for server $serverId: $removedCount keys removed');
     } catch (e) {
       print('❌ [ServerCache] Failed to clear data cache: $e');
     }
@@ -290,18 +323,40 @@ class ServerCacheManager {
     }
   }
 
-  /// ✅ 获取图片缓存大小
-  static Future<int> getImageCacheSize() async {
+  /// ✅ 获取图片缓存大小（当前服务器+当前用户）
+  static Future<int> getImageCacheSize({String? userId}) async {
     int totalSize = 0;
 
     try {
       final cacheDir = await getApplicationCacheDirectory();
-      final imageCacheDir = Directory('${cacheDir.path}/image_cache');
 
-      if (imageCacheDir.existsSync()) {
-        await for (final entity in imageCacheDir.list(recursive: true)) {
-          if (entity is File) {
-            totalSize += await entity.length();
+      // 获取当前服务器ID
+      final serverId = await getCurrentServerId();
+      if (serverId.isEmpty) {
+        return 0;
+      }
+
+      final serverImageCacheDir =
+          Directory('${cacheDir.path}/image_cache/$serverId');
+
+      if (serverImageCacheDir.existsSync()) {
+        if (userId != null && userId.isNotEmpty) {
+          // ✅ 只统计当前服务器+当前用户的图片缓存
+          final userCacheDir = Directory('${serverImageCacheDir.path}/$userId');
+          if (userCacheDir.existsSync()) {
+            await for (final entity in userCacheDir.list(recursive: true)) {
+              if (entity is File) {
+                totalSize += await entity.length();
+              }
+            }
+          }
+        } else {
+          // ✅ 统计当前服务器所有用户的图片缓存
+          await for (final entity
+              in serverImageCacheDir.list(recursive: true)) {
+            if (entity is File) {
+              totalSize += await entity.length();
+            }
           }
         }
       }
@@ -312,32 +367,46 @@ class ServerCacheManager {
     return totalSize;
   }
 
-  /// ✅ 获取数据缓存大小（估算 SharedPreferences 中的缓存数据大小）
-  static Future<int> getDataCacheSize() async {
+  /// ✅ 获取数据缓存大小（当前服务器+当前用户）
+  static Future<int> getDataCacheSize({String? userId}) async {
     int totalSize = 0;
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final keys = prefs.getKeys();
 
+      // 获取当前服务器ID
+      final serverId = await getCurrentServerId();
+      if (serverId.isEmpty) {
+        return 0;
+      }
+
       final cacheKeyPrefixes = [
-        'cache_views',
+        'cache_resume_items_',
+        'cache_views_',
         'cache_latest_items_',
         'cache_library_items_',
         'cache_item_detail_',
         'cache_similar_items_',
+        'cache_collection_items_',
         'cache_series_detail_',
         'cache_seasons_',
         'cache_season_detail_',
         'cache_episodes_',
-        'cache_next_up_episode_',
-        'cache_similar_items_',
-        'cache_season_resume_episode_',
       ];
 
       for (final key in keys) {
         for (final prefix in cacheKeyPrefixes) {
-          if (key.startsWith(prefix)) {
+          // ✅ 检查key是否包含serverId（格式：cache_xxx_{serverId}_...）
+          if (key.startsWith(prefix) && key.contains('_${serverId}_')) {
+            // ✅ 如果指定了userId，还要检查是否包含该userId
+            if (userId != null && userId.isNotEmpty) {
+              if (!key.contains('_${serverId}_${userId}_') &&
+                  !key.contains('_${serverId}_$userId')) {
+                continue;
+              }
+            }
+
             final value = prefs.getString(key);
             if (value != null) {
               // 估算字符串大小（UTF-8 编码）
@@ -354,58 +423,108 @@ class ServerCacheManager {
     return totalSize;
   }
 
-  /// ✅ 只清除图片缓存
-  static Future<void> clearImageCache() async {
-    print('🗑️ [ServerCache] Cleaning image cache');
+  /// ✅ 清除当前服务器+当前用户的图片缓存
+  static Future<void> clearImageCache({String? userId}) async {
+    print('🗑️ [ServerCache] Cleaning image cache for user: $userId');
 
     try {
       final cacheDir = await getApplicationCacheDirectory();
-      final imageCacheDir = Directory('${cacheDir.path}/image_cache');
 
-      if (imageCacheDir.existsSync()) {
-        await imageCacheDir.delete(recursive: true);
-        print('✅ [ServerCache] Image cache cleared');
+      // 获取当前服务器ID
+      final serverId = await getCurrentServerId();
+      if (serverId.isEmpty) {
+        print('⚠️  [ServerCache] No server ID found');
+        return;
+      }
+
+      final serverImageCacheDir =
+          Directory('${cacheDir.path}/image_cache/$serverId');
+
+      if (!serverImageCacheDir.existsSync()) {
+        return;
+      }
+
+      if (userId == null || userId.isEmpty) {
+        // ✅ 如果没有指定用户，清除当前服务器的所有图片缓存
+        await serverImageCacheDir.delete(recursive: true);
+        print('✅ [ServerCache] All image cache cleared for server: $serverId');
+      } else {
+        // ✅ 清除当前服务器+当前用户的图片缓存
+        final userCacheDir = Directory('${serverImageCacheDir.path}/$userId');
+        if (userCacheDir.existsSync()) {
+          await userCacheDir.delete(recursive: true);
+          print(
+              '✅ [ServerCache] Image cache cleared for user: $userId on server: $serverId');
+        } else {
+          print(
+              '⚠️  [ServerCache] No image cache found for user: $userId on server: $serverId');
+        }
       }
     } catch (e) {
       print('❌ [ServerCache] Failed to clear image cache: $e');
     }
   }
 
-  /// ✅ 只清除数据缓存
-  static Future<void> clearDataCache() async {
-    print('🗑️ [ServerCache] Cleaning data cache');
+  /// ✅ 清除当前服务器+当前用户的数据缓存
+  static Future<void> clearDataCache({String? userId}) async {
+    print('🗑️ [ServerCache] Cleaning data cache for user: $userId');
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final keys = prefs.getKeys();
 
+      // 获取当前服务器ID
+      final serverId = await getCurrentServerId();
+      if (serverId.isEmpty) {
+        print('⚠️  [ServerCache] No server ID found');
+        return;
+      }
+
       final cacheKeyPrefixes = [
-        'cache_views',
+        'cache_resume_items_',
+        'cache_views_',
         'cache_latest_items_',
         'cache_library_items_',
         'cache_item_detail_',
         'cache_similar_items_',
+        'cache_collection_items_',
         'cache_series_detail_',
         'cache_seasons_',
         'cache_season_detail_',
         'cache_episodes_',
-        'cache_next_up_episode_',
-        'cache_similar_items_',
-        'cache_season_resume_episode_',
       ];
 
       int removedCount = 0;
-      for (final key in keys) {
-        for (final prefix in cacheKeyPrefixes) {
-          if (key.startsWith(prefix)) {
-            await prefs.remove(key);
-            removedCount++;
-            break;
+      if (userId == null || userId.isEmpty) {
+        // ✅ 如果没有指定用户，清除当前服务器的所有数据缓存
+        for (final key in keys) {
+          for (final prefix in cacheKeyPrefixes) {
+            if (key.startsWith(prefix) && key.contains('_${serverId}_')) {
+              await prefs.remove(key);
+              removedCount++;
+              break;
+            }
+          }
+        }
+      } else {
+        // ✅ 只清除当前服务器+当前用户的数据缓存
+        // 缓存key格式：cache_xxx_{serverId}_{userId}_...
+        for (final key in keys) {
+          for (final prefix in cacheKeyPrefixes) {
+            if (key.startsWith(prefix) &&
+                key.contains('_${serverId}_') &&
+                (key.contains('_${serverId}_${userId}_') ||
+                    key.contains('_${serverId}_$userId'))) {
+              await prefs.remove(key);
+              removedCount++;
+              break;
+            }
           }
         }
       }
 
-      print('✅ [ServerCache] Data cache cleared: $removedCount keys removed');
+      print(
+          '✅ [ServerCache] Data cache cleared for server $serverId: $removedCount keys removed');
     } catch (e) {
       print('❌ [ServerCache] Failed to clear data cache: $e');
     }

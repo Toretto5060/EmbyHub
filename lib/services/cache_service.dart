@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:crypto/crypto.dart';
 import '../core/emby_api.dart';
 
 /// 缓存服务：用于持久化存储首页和列表页数据
@@ -20,12 +21,41 @@ class CacheService {
   // 缓存有效期（永久有效，设置为极大值）
   static const Duration _cacheExpiry = Duration(days: 365 * 100); // 100年，相当于永久
 
+  /// ✅ 获取当前服务器ID（与ServerCacheManager保持一致）
+  static Future<String> _getCurrentServerId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final host = prefs.getString('server_host') ?? '';
+    if (host.isEmpty) return 'default';
+
+    // 移除端口号
+    String hostWithoutPort = host;
+    if (host.startsWith('[')) {
+      final closeBracket = host.indexOf(']');
+      if (closeBracket != -1) {
+        hostWithoutPort = host.substring(0, closeBracket + 1);
+      }
+    } else {
+      final colonIndex = host.lastIndexOf(':');
+      if (colonIndex != -1) {
+        final colonCount = ':'.allMatches(host).length;
+        if (colonCount == 1) {
+          hostWithoutPort = host.substring(0, colonIndex);
+        }
+      }
+    }
+
+    final bytes = utf8.encode(hostWithoutPort.toLowerCase());
+    final digest = md5.convert(bytes);
+    return digest.toString();
+  }
+
   /// 保存继续观看数据
   static Future<void> saveResumeItems(
       String userId, List<ItemInfo> items) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kResumeItemsKey}_$userId';
+      final serverId = await _getCurrentServerId();
+      final key = '${_kResumeItemsKey}_${serverId}_$userId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'items': items.map((item) => item.toJson()).toList(),
@@ -41,7 +71,8 @@ class CacheService {
   static Future<List<ItemInfo>?> loadResumeItems(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kResumeItemsKey}_$userId';
+      final serverId = await _getCurrentServerId();
+      final key = '${_kResumeItemsKey}_${serverId}_$userId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -68,7 +99,8 @@ class CacheService {
   static Future<void> saveViews(String userId, List<ViewInfo> views) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kViewsKey}_$userId';
+      final serverId = await _getCurrentServerId();
+      final key = '${_kViewsKey}_${serverId}_$userId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'views': views.map((view) => view.toJson()).toList(),
@@ -83,7 +115,8 @@ class CacheService {
   static Future<List<ViewInfo>?> loadViews(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kViewsKey}_$userId';
+      final serverId = await _getCurrentServerId();
+      final key = '${_kViewsKey}_${serverId}_$userId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -111,7 +144,8 @@ class CacheService {
       String userId, String viewId, List<ItemInfo> items) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kLatestItemsPrefix${userId}_$viewId';
+      final serverId = await _getCurrentServerId();
+      final key = '$_kLatestItemsPrefix${serverId}_${userId}_$viewId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'items': items.map((item) => item.toJson()).toList(),
@@ -127,7 +161,8 @@ class CacheService {
       String userId, String viewId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kLatestItemsPrefix${userId}_$viewId';
+      final serverId = await _getCurrentServerId();
+      final key = '$_kLatestItemsPrefix${serverId}_${userId}_$viewId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -160,8 +195,9 @@ class CacheService {
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final serverId = await _getCurrentServerId();
       final key =
-          '$_kLibraryItemsPrefix${userId}_${parentId}_${sortBy}_$ascending';
+          '$_kLibraryItemsPrefix${serverId}_${userId}_${parentId}_${sortBy}_$ascending';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'items': items.map((item) => item.toJson()).toList(),
@@ -181,8 +217,9 @@ class CacheService {
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final serverId = await _getCurrentServerId();
       final key =
-          '$_kLibraryItemsPrefix${userId}_${parentId}_${sortBy}_$ascending';
+          '$_kLibraryItemsPrefix${serverId}_${userId}_${parentId}_${sortBy}_$ascending';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -210,7 +247,8 @@ class CacheService {
       String userId, String itemId, ItemInfo item) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kItemDetailPrefix}${userId}_$itemId';
+      final serverId = await _getCurrentServerId();
+      final key = '${_kItemDetailPrefix}${serverId}_${userId}_$itemId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'item': item.toJson(),
@@ -225,7 +263,8 @@ class CacheService {
   static Future<ItemInfo?> loadItemDetail(String userId, String itemId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kItemDetailPrefix}${userId}_$itemId';
+      final serverId = await _getCurrentServerId();
+      final key = '${_kItemDetailPrefix}${serverId}_${userId}_$itemId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -266,7 +305,8 @@ class CacheService {
       String userId, String itemId, List<ItemInfo> items) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kSimilarItemsPrefix${userId}_$itemId';
+      final serverId = await _getCurrentServerId();
+      final key = '$_kSimilarItemsPrefix${serverId}_${userId}_$itemId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'items': items.map((item) => item.toJson()).toList(),
@@ -282,7 +322,8 @@ class CacheService {
       String userId, String itemId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kSimilarItemsPrefix${userId}_$itemId';
+      final serverId = await _getCurrentServerId();
+      final key = '$_kSimilarItemsPrefix${serverId}_${userId}_$itemId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -307,7 +348,8 @@ class CacheService {
       String userId, String collectionId, List<ItemInfo> items) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kCollectionItemsPrefix${userId}_$collectionId';
+      final serverId = await _getCurrentServerId();
+      final key = '$_kCollectionItemsPrefix${serverId}_${userId}_$collectionId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'items': items.map((item) => item.toJson()).toList(),
@@ -323,7 +365,8 @@ class CacheService {
       String userId, String collectionId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kCollectionItemsPrefix${userId}_$collectionId';
+      final serverId = await _getCurrentServerId();
+      final key = '$_kCollectionItemsPrefix${serverId}_${userId}_$collectionId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -348,7 +391,8 @@ class CacheService {
       String userId, String seriesId, ItemInfo item) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kSeriesDetailPrefix}${userId}_$seriesId';
+      final serverId = await _getCurrentServerId();
+      final key = '${_kSeriesDetailPrefix}${serverId}_${userId}_$seriesId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'item': item.toJson(),
@@ -364,7 +408,8 @@ class CacheService {
       String userId, String seriesId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kSeriesDetailPrefix}${userId}_$seriesId';
+      final serverId = await _getCurrentServerId();
+      final key = '${_kSeriesDetailPrefix}${serverId}_${userId}_$seriesId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -388,7 +433,8 @@ class CacheService {
       String userId, String seriesId, List<ItemInfo> seasons) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kSeasonsPrefix${userId}_$seriesId';
+      final serverId = await _getCurrentServerId();
+      final key = '$_kSeasonsPrefix${serverId}_${userId}_$seriesId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'seasons': seasons.map((s) => s.toJson()).toList(),
@@ -404,7 +450,8 @@ class CacheService {
       String userId, String seriesId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kSeasonsPrefix${userId}_$seriesId';
+      final serverId = await _getCurrentServerId();
+      final key = '$_kSeasonsPrefix${serverId}_${userId}_$seriesId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -428,7 +475,9 @@ class CacheService {
       String userId, String seriesId, String seasonId, ItemInfo item) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kSeasonDetailPrefix}${userId}_${seriesId}_$seasonId';
+      final serverId = await _getCurrentServerId();
+      final key =
+          '${_kSeasonDetailPrefix}${serverId}_${userId}_${seriesId}_$seasonId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'item': item.toJson(),
@@ -444,7 +493,9 @@ class CacheService {
       String userId, String seriesId, String seasonId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '${_kSeasonDetailPrefix}${userId}_${seriesId}_$seasonId';
+      final serverId = await _getCurrentServerId();
+      final key =
+          '${_kSeasonDetailPrefix}${serverId}_${userId}_${seriesId}_$seasonId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
@@ -468,7 +519,9 @@ class CacheService {
       String seasonId, List<ItemInfo> episodes) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kEpisodesPrefix${userId}_${seriesId}_$seasonId';
+      final serverId = await _getCurrentServerId();
+      final key =
+          '$_kEpisodesPrefix${serverId}_${userId}_${seriesId}_$seasonId';
       final data = {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'episodes': episodes.map((e) => e.toJson()).toList(),
@@ -484,7 +537,9 @@ class CacheService {
       String userId, String seriesId, String seasonId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_kEpisodesPrefix${userId}_${seriesId}_$seasonId';
+      final serverId = await _getCurrentServerId();
+      final key =
+          '$_kEpisodesPrefix${serverId}_${userId}_${seriesId}_$seasonId';
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) return null;
 
