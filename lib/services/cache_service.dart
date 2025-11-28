@@ -12,6 +12,10 @@ class CacheService {
   static const String _kItemDetailPrefix = 'cache_item_detail_';
   static const String _kSimilarItemsPrefix = 'cache_similar_items_';
   static const String _kCollectionItemsPrefix = 'cache_collection_items_';
+  static const String _kSeriesDetailPrefix = 'cache_series_detail_';
+  static const String _kSeasonsPrefix = 'cache_seasons_';
+  static const String _kSeasonDetailPrefix = 'cache_season_detail_';
+  static const String _kEpisodesPrefix = 'cache_episodes_';
 
   // 缓存有效期（永久有效，设置为极大值）
   static const Duration _cacheExpiry = Duration(days: 365 * 100); // 100年，相当于永久
@@ -334,6 +338,166 @@ class CacheService {
 
       final itemsJson = data['items'] as List;
       return itemsJson.map((json) => ItemInfo.fromJson(json)).toList();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 保存剧集详情数据
+  static Future<void> saveSeriesDetail(
+      String userId, String seriesId, ItemInfo item) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_kSeriesDetailPrefix}${userId}_$seriesId';
+      final data = {
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'item': item.toJson(),
+      };
+      await prefs.setString(key, jsonEncode(data));
+    } catch (e) {
+      // 缓存失败不影响主流程
+    }
+  }
+
+  /// 读取剧集详情数据
+  static Future<ItemInfo?> loadSeriesDetail(
+      String userId, String seriesId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_kSeriesDetailPrefix}${userId}_$seriesId';
+      final jsonStr = prefs.getString(key);
+      if (jsonStr == null) return null;
+
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final timestamp = data['timestamp'] as int;
+
+      final cacheTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      if (DateTime.now().difference(cacheTime) > _cacheExpiry) {
+        return null;
+      }
+
+      final itemJson = data['item'] as Map<String, dynamic>;
+      return ItemInfo.fromJson(itemJson);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 保存季列表数据
+  static Future<void> saveSeasons(
+      String userId, String seriesId, List<ItemInfo> seasons) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_kSeasonsPrefix${userId}_$seriesId';
+      final data = {
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'seasons': seasons.map((s) => s.toJson()).toList(),
+      };
+      await prefs.setString(key, jsonEncode(data));
+    } catch (e) {
+      // 缓存失败不影响主流程
+    }
+  }
+
+  /// 读取季列表数据
+  static Future<List<ItemInfo>?> loadSeasons(
+      String userId, String seriesId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_kSeasonsPrefix${userId}_$seriesId';
+      final jsonStr = prefs.getString(key);
+      if (jsonStr == null) return null;
+
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final timestamp = data['timestamp'] as int;
+
+      final cacheTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      if (DateTime.now().difference(cacheTime) > _cacheExpiry) {
+        return null;
+      }
+
+      final seasonsJson = data['seasons'] as List;
+      return seasonsJson.map((json) => ItemInfo.fromJson(json)).toList();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 保存季详情数据
+  static Future<void> saveSeasonDetail(
+      String userId, String seriesId, String seasonId, ItemInfo item) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_kSeasonDetailPrefix}${userId}_${seriesId}_$seasonId';
+      final data = {
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'item': item.toJson(),
+      };
+      await prefs.setString(key, jsonEncode(data));
+    } catch (e) {
+      // 缓存失败不影响主流程
+    }
+  }
+
+  /// 读取季详情数据
+  static Future<ItemInfo?> loadSeasonDetail(
+      String userId, String seriesId, String seasonId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_kSeasonDetailPrefix}${userId}_${seriesId}_$seasonId';
+      final jsonStr = prefs.getString(key);
+      if (jsonStr == null) return null;
+
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final timestamp = data['timestamp'] as int;
+
+      final cacheTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      if (DateTime.now().difference(cacheTime) > _cacheExpiry) {
+        return null;
+      }
+
+      final itemJson = data['item'] as Map<String, dynamic>;
+      return ItemInfo.fromJson(itemJson);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 保存剧集列表数据
+  static Future<void> saveEpisodes(String userId, String seriesId,
+      String seasonId, List<ItemInfo> episodes) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_kEpisodesPrefix${userId}_${seriesId}_$seasonId';
+      final data = {
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'episodes': episodes.map((e) => e.toJson()).toList(),
+      };
+      await prefs.setString(key, jsonEncode(data));
+    } catch (e) {
+      // 缓存失败不影响主流程
+    }
+  }
+
+  /// 读取剧集列表数据
+  static Future<List<ItemInfo>?> loadEpisodes(
+      String userId, String seriesId, String seasonId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_kEpisodesPrefix${userId}_${seriesId}_$seasonId';
+      final jsonStr = prefs.getString(key);
+      if (jsonStr == null) return null;
+
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final timestamp = data['timestamp'] as int;
+
+      final cacheTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      if (DateTime.now().difference(cacheTime) > _cacheExpiry) {
+        return null;
+      }
+
+      final episodesJson = data['episodes'] as List;
+      return episodesJson.map((json) => ItemInfo.fromJson(json)).toList();
     } catch (e) {
       return null;
     }

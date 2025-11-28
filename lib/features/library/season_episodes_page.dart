@@ -19,8 +19,10 @@ import '../../utils/status_bar_manager.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../utils/app_route_observer.dart';
 import '../../utils/theme_utils.dart';
+import '../../services/cache_service.dart';
+import '../../utils/debounce_helper.dart';
 
-// ✅ 获取季详情
+// ✅ 获取季详情（缓存优先 + 防抖）
 final seasonProvider =
     FutureProvider.family<ItemInfo, (String seriesId, String seasonId)>(
         (ref, params) async {
@@ -28,23 +30,108 @@ final seasonProvider =
   if (auth == null || !auth.isLoggedIn) {
     throw Exception('未登录');
   }
-  final api = await EmbyApi.create();
-  return api.getItem(auth.userId!, params.$2);
+
+  final userId = auth.userId!;
+  final seriesId = params.$1;
+  final seasonId = params.$2;
+
+  // ✅ 先尝试从缓存加载
+  final cachedItem =
+      await CacheService.loadSeasonDetail(userId, seriesId, seasonId);
+
+  if (cachedItem != null) {
+    // ✅ 后台更新数据
+    _fetchAndCacheSeasonDetail(ref, userId, seriesId, seasonId).catchError((e) {
+      // 忽略后台更新错误
+      return cachedItem;
+    });
+
+    return cachedItem;
+  }
+
+  // ✅ 缓存未命中，直接请求
+  return await _fetchAndCacheSeasonDetail(ref, userId, seriesId, seasonId);
 });
 
-// ✅ 获取某一季的集列表
+// ✅ 获取并缓存季详情
+Future<ItemInfo> _fetchAndCacheSeasonDetail(
+  FutureProviderRef<ItemInfo> ref,
+  String userId,
+  String seriesId,
+  String seasonId,
+) async {
+  // ✅ 防抖：10秒内只执行一次
+  final key = 'season_detail_${userId}_${seriesId}_$seasonId';
+  if (!DebounceHelper.shouldExecute(key)) {
+    final cached =
+        await CacheService.loadSeasonDetail(userId, seriesId, seasonId);
+    if (cached != null) return cached;
+  }
+
+  final api = await EmbyApi.create();
+  final item = await api.getItem(userId, seasonId);
+
+  // ✅ 保存到缓存
+  await CacheService.saveSeasonDetail(userId, seriesId, seasonId, item);
+
+  return item;
+}
+
+// ✅ 获取某一季的集列表（缓存优先 + 防抖）
 final episodesProvider =
     FutureProvider.family<List<ItemInfo>, (String seriesId, String seasonId)>(
         (ref, params) async {
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
-  final api = await EmbyApi.create();
-  return api.getEpisodes(
-    userId: auth.userId!,
-    seriesId: params.$1,
-    seasonId: params.$2,
-  );
+
+  final userId = auth.userId!;
+  final seriesId = params.$1;
+  final seasonId = params.$2;
+
+  // ✅ 先尝试从缓存加载
+  final cachedEpisodes =
+      await CacheService.loadEpisodes(userId, seriesId, seasonId);
+
+  if (cachedEpisodes != null) {
+    // ✅ 后台更新数据
+    _fetchAndCacheEpisodes(ref, userId, seriesId, seasonId).catchError((e) {
+      // 忽略后台更新错误
+      return <ItemInfo>[];
+    });
+
+    return cachedEpisodes;
+  }
+
+  // ✅ 缓存未命中，直接请求
+  return await _fetchAndCacheEpisodes(ref, userId, seriesId, seasonId);
 });
+
+// ✅ 获取并缓存剧集列表
+Future<List<ItemInfo>> _fetchAndCacheEpisodes(
+  FutureProviderRef<List<ItemInfo>> ref,
+  String userId,
+  String seriesId,
+  String seasonId,
+) async {
+  // ✅ 防抖：10秒内只执行一次
+  final key = 'episodes_${userId}_${seriesId}_$seasonId';
+  if (!DebounceHelper.shouldExecute(key)) {
+    final cached = await CacheService.loadEpisodes(userId, seriesId, seasonId);
+    if (cached != null) return cached;
+  }
+
+  final api = await EmbyApi.create();
+  final episodes = await api.getEpisodes(
+    userId: userId,
+    seriesId: seriesId,
+    seasonId: seasonId,
+  );
+
+  // ✅ 保存到缓存
+  await CacheService.saveEpisodes(userId, seriesId, seasonId, episodes);
+
+  return episodes;
+}
 
 // ✅ 获取季的继续观看集数
 final seasonResumeEpisodeProvider =
@@ -232,6 +319,16 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
     // ✅ 使用 microtask 立即刷新，而不是等待下一帧
     Future.microtask(() {
       if (!mounted) return;
+
+      // ✅ 清除防抖记录，确保能立即刷新
+      final auth = ref.read(authStateProvider).value;
+      if (auth != null && auth.isLoggedIn) {
+        DebounceHelper.clear(
+            'season_detail_${auth.userId}_${widget.seriesId}_${widget.seasonId}');
+        DebounceHelper.clear(
+            'episodes_${auth.userId}_${widget.seriesId}_${widget.seasonId}');
+      }
+
       // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
       // ignore: unused_result
       ref.refresh(seasonProvider((widget.seriesId, widget.seasonId)));
@@ -675,11 +772,9 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
             SliverToBoxAdapter(
               child: Builder(
                 builder: (context) {
-                  final isDark = isDarkModeFromContext(context, ref);
                   return Container(
-                    color: isDark
-                        ? const Color(0xFF000000)
-                        : const Color(0xFFFFFFFF),
+                    color:
+                        CupertinoColors.systemBackground.resolveFrom(context),
                     child: episodes.when(
                       data: (list) {
                         if (list.isEmpty) {
@@ -785,9 +880,7 @@ class _SeasonEpisodesPageState extends ConsumerState<SeasonEpisodesPage>
     return RepaintBoundary(
       child: Builder(
         builder: (context) {
-          final isDark = isDarkModeFromContext(context, ref);
-          final bgColor =
-              isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+          final bgColor = CupertinoColors.systemBackground.resolveFrom(context);
 
           return Stack(
             fit: StackFit.expand,

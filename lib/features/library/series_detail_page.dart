@@ -21,31 +21,107 @@ import '../../utils/status_bar_manager.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../utils/app_route_observer.dart';
 import '../../utils/theme_utils.dart';
+import '../../services/cache_service.dart';
+import '../../utils/debounce_helper.dart';
 
-// ✅ 获取剧集详情
+// ✅ 获取剧集详情（缓存优先 + 防抖）
 final seriesProvider =
     FutureProvider.family<ItemInfo, String>((ref, seriesId) async {
-  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     throw Exception('未登录');
   }
-  final api = await EmbyApi.create();
-  return api.getItem(auth.userId!, seriesId);
+
+  final userId = auth.userId!;
+
+  // ✅ 先尝试从缓存加载
+  final cachedItem = await CacheService.loadSeriesDetail(userId, seriesId);
+
+  if (cachedItem != null) {
+    // ✅ 后台更新数据（异步执行，不阻塞）
+    _fetchAndCacheSeriesDetail(ref, userId, seriesId).catchError((e) {
+      // 忽略后台更新错误
+      return cachedItem;
+    });
+
+    return cachedItem;
+  }
+
+  // ✅ 缓存未命中，直接请求
+  return await _fetchAndCacheSeriesDetail(ref, userId, seriesId);
 });
 
-// ✅ 获取剧集的季列表（不依赖 libraryRefreshTickerProvider，季列表不会因为观看状态变化而改变）
-// 季的观看状态由 seasonWatchStatsProvider 单独管理，不需要重新加载整个季列表
+// ✅ 获取并缓存剧集详情
+Future<ItemInfo> _fetchAndCacheSeriesDetail(
+  FutureProviderRef<ItemInfo> ref,
+  String userId,
+  String seriesId,
+) async {
+  // ✅ 防抖：10秒内只执行一次
+  final key = 'series_detail_${userId}_$seriesId';
+  if (!DebounceHelper.shouldExecute(key)) {
+    // 如果在防抖期内，返回缓存数据（如果有）
+    final cached = await CacheService.loadSeriesDetail(userId, seriesId);
+    if (cached != null) return cached;
+  }
+
+  final api = await EmbyApi.create();
+  final item = await api.getItem(userId, seriesId);
+
+  // ✅ 保存到缓存
+  await CacheService.saveSeriesDetail(userId, seriesId, item);
+
+  return item;
+}
+
+// ✅ 获取剧集的季列表（缓存优先 + 防抖）
 final seasonsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, seriesId) async {
-  // ✅ 不 watch libraryRefreshTickerProvider，避免按钮点击时重新加载整个季列表
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     return const [];
   }
-  final api = await EmbyApi.create();
-  return api.getSeasons(userId: auth.userId!, seriesId: seriesId);
+
+  final userId = auth.userId!;
+
+  // ✅ 先尝试从缓存加载
+  final cachedSeasons = await CacheService.loadSeasons(userId, seriesId);
+
+  if (cachedSeasons != null) {
+    // ✅ 后台更新数据
+    _fetchAndCacheSeasons(ref, userId, seriesId).catchError((e) {
+      // 忽略后台更新错误
+      return <ItemInfo>[];
+    });
+
+    return cachedSeasons;
+  }
+
+  // ✅ 缓存未命中，直接请求
+  return await _fetchAndCacheSeasons(ref, userId, seriesId);
 });
+
+// ✅ 获取并缓存季列表
+Future<List<ItemInfo>> _fetchAndCacheSeasons(
+  FutureProviderRef<List<ItemInfo>> ref,
+  String userId,
+  String seriesId,
+) async {
+  // ✅ 防抖：10秒内只执行一次
+  final key = 'seasons_${userId}_$seriesId';
+  if (!DebounceHelper.shouldExecute(key)) {
+    final cached = await CacheService.loadSeasons(userId, seriesId);
+    if (cached != null) return cached;
+  }
+
+  final api = await EmbyApi.create();
+  final seasons = await api.getSeasons(userId: userId, seriesId: seriesId);
+
+  // ✅ 保存到缓存
+  await CacheService.saveSeasons(userId, seriesId, seasons);
+
+  return seasons;
+}
 
 // ✅ 获取某个季的观看统计信息（不依赖 libraryRefreshTickerProvider）
 // 只在观看按钮点击时手动刷新，收藏按钮不会触发刷新
@@ -291,6 +367,14 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     // ✅ 使用 microtask 立即刷新，而不是等待下一帧
     Future.microtask(() {
       if (!mounted) return;
+
+      // ✅ 清除防抖记录，确保能立即刷新
+      final auth = ref.read(authStateProvider).value;
+      if (auth != null && auth.isLoggedIn) {
+        DebounceHelper.clear('series_detail_${auth.userId}_${widget.seriesId}');
+        DebounceHelper.clear('seasons_${auth.userId}_${widget.seriesId}');
+      }
+
       // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
       // ignore: unused_result
       ref.refresh(seriesProvider(widget.seriesId));
@@ -723,8 +807,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
             ),
             SliverToBoxAdapter(
               child: Container(
-                color:
-                    isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF),
+                color: CupertinoColors.systemBackground.resolveFrom(context),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -937,9 +1020,7 @@ class _SeriesDetailPageState extends ConsumerState<SeriesDetailPage>
     return RepaintBoundary(
       child: Builder(
         builder: (context) {
-          final isDark = isDarkModeFromContext(context, ref);
-          final bgColor =
-              isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+          final bgColor = CupertinoColors.systemBackground.resolveFrom(context);
 
           return Stack(
             fit: StackFit.expand,
