@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../core/emby_api.dart';
 import '../../providers/account_history_provider.dart';
@@ -13,6 +12,9 @@ import '../../widgets/custom_toast.dart';
 import '../../utils/theme_utils.dart';
 import '../home/bottom_nav_wrapper.dart';
 import '../../services/server_cache_manager.dart';
+
+// ✅ 缓存刷新触发器 Provider
+final cacheRefreshTriggerProvider = StateProvider<int>((ref) => 0);
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -1457,17 +1459,19 @@ class _QualityStrategySelectorState extends State<_QualityStrategySelector> {
 }
 
 // ✅ 缓存管理器组件
-class _CacheManager extends StatefulWidget {
+class _CacheManager extends ConsumerStatefulWidget {
   const _CacheManager();
 
   @override
-  State<_CacheManager> createState() => _CacheManagerState();
+  ConsumerState<_CacheManager> createState() => _CacheManagerState();
 }
 
-class _CacheManagerState extends State<_CacheManager> {
+class _CacheManagerState extends ConsumerState<_CacheManager> {
   String _imageCacheSize = '计算中...';
   String _dataCacheSize = '计算中...';
   bool _isLoading = false;
+  bool _isLoadingCacheSize = false;
+  int _lastTriggerValue = 0;
 
   @override
   void initState() {
@@ -1476,14 +1480,22 @@ class _CacheManagerState extends State<_CacheManager> {
   }
 
   Future<void> _loadCacheSize() async {
-    final imageSize = await ServerCacheManager.getImageCacheSize();
-    final dataSize = await ServerCacheManager.getDataCacheSize();
+    // ✅ 防止重复加载
+    if (_isLoadingCacheSize) return;
+    _isLoadingCacheSize = true;
 
-    if (mounted) {
-      setState(() {
-        _imageCacheSize = ServerCacheManager.formatCacheSize(imageSize);
-        _dataCacheSize = ServerCacheManager.formatCacheSize(dataSize);
-      });
+    try {
+      final imageSize = await ServerCacheManager.getImageCacheSize();
+      final dataSize = await ServerCacheManager.getDataCacheSize();
+
+      if (mounted) {
+        setState(() {
+          _imageCacheSize = ServerCacheManager.formatCacheSize(imageSize);
+          _dataCacheSize = ServerCacheManager.formatCacheSize(dataSize);
+        });
+      }
+    } finally {
+      _isLoadingCacheSize = false;
     }
   }
 
@@ -1557,128 +1569,133 @@ class _CacheManagerState extends State<_CacheManager> {
 
   @override
   Widget build(BuildContext context) {
-    return VisibilityDetector(
-        key: const Key('cache_manager_visibility'),
-        onVisibilityChanged: (info) {
-          // ✅ 当组件可见时（底部导航切换到设置页），刷新缓存大小
-          if (info.visibleFraction > 0 && mounted) {
-            _loadCacheSize();
-          }
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    // ✅ 监听缓存刷新触发器
+    final triggerValue = ref.watch(cacheRefreshTriggerProvider);
+
+    // ✅ 当触发器值变化时，刷新缓存大小
+    if (triggerValue != _lastTriggerValue) {
+      _lastTriggerValue = triggerValue;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _loadCacheSize();
+        }
+      });
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 图片缓存
+          Row(
             children: [
-              // 图片缓存
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.image_rounded,
-                              size: 20,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                            const SizedBox(width: 8),
-                            const Text(
-                              '图片缓存',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
+                        Icon(
+                          Icons.image_rounded,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.primary,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _imageCacheSize,
+                        const SizedBox(width: 8),
+                        const Text(
+                          '图片缓存',
                           style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(context).textTheme.bodySmall?.color,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  OutlinedButton(
-                    onPressed: _isLoading ? null : _clearImageCache,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.orange,
-                      side: BorderSide(color: Colors.orange.withOpacity(0.5)),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
+                    const SizedBox(height: 4),
+                    Text(
+                      _imageCacheSize,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).textTheme.bodySmall?.color,
+                      ),
                     ),
-                    child: const Text('清除'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const Divider(height: 1),
-              const SizedBox(height: 16),
-              // 数据缓存
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.storage_rounded,
-                              size: 20,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                            const SizedBox(width: 8),
-                            const Text(
-                              '数据缓存',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _dataCacheSize,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Theme.of(context).textTheme.bodySmall?.color,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  OutlinedButton(
-                    onPressed: _isLoading ? null : _clearDataCache,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.orange,
-                      side: BorderSide(color: Colors.orange.withOpacity(0.5)),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                    ),
-                    child: const Text('清除'),
-                  ),
-                ],
-              ),
-              if (_isLoading) ...[
-                const SizedBox(height: 16),
-                const Center(
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
+                  ],
                 ),
-              ],
+              ),
+              OutlinedButton(
+                onPressed: _isLoading ? null : _clearImageCache,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.orange,
+                  side: BorderSide(color: Colors.orange.withOpacity(0.5)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                ),
+                child: const Text('清除'),
+              ),
             ],
           ),
-        ));
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 16),
+          // 数据缓存
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.storage_rounded,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          '数据缓存',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _dataCacheSize,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).textTheme.bodySmall?.color,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              OutlinedButton(
+                onPressed: _isLoading ? null : _clearDataCache,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.orange,
+                  side: BorderSide(color: Colors.orange.withOpacity(0.5)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                ),
+                child: const Text('清除'),
+              ),
+            ],
+          ),
+          if (_isLoading) ...[
+            const SizedBox(height: 16),
+            const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }

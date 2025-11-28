@@ -797,6 +797,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
               if (backdropUrl == null || backdropUrl.isEmpty) {
                 final primaryTag = item.imageTags?['Primary'] ?? '';
                 if (primaryTag.isNotEmpty) {
+                  // ✅ 使用800尺寸，与列表页继续观看卡片的 Primary fallback 保持一致，提高缓存命中率
                   backdropUrl = api.buildImageUrl(
                     itemId: item.id!,
                     type: 'Primary',
@@ -2767,10 +2768,11 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
       // ✅ 使用 getBackdropUrl 方法，确保与预加载的 URL 一致
       backdropUrl = item.getBackdropUrl(api);
 
-      // Fallback 到 Primary（与详情页显示逻辑一致）
+      // Fallback 到 Primary（与详情页显示逻辑和列表页继续观看卡片保持一致）
       if (backdropUrl == null || backdropUrl.isEmpty) {
         final primaryTag = item.imageTags?['Primary'] ?? '';
         if (primaryTag.isNotEmpty) {
+          // ✅ 使用800尺寸，与列表页继续观看卡片的 Primary fallback 保持一致
           backdropUrl = api.buildImageUrl(
             itemId: itemId,
             type: 'Primary',
@@ -3993,10 +3995,11 @@ class _SimilarCard extends StatelessWidget {
         }
 
         if ((url == null || url.isEmpty) && hasHorizontalArtwork) {
+          // ✅ 统一 Backdrop 图片尺寸为800，与列表页保持一致，提高缓存命中率
           url = api.buildImageUrl(
             itemId: item.id!,
             type: 'Backdrop',
-            maxWidth: 720,
+            maxWidth: 800,
           );
         }
 

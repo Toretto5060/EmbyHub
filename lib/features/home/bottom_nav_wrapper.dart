@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../utils/platform_utils.dart';
 import '../../utils/status_bar_manager.dart';
 import '../../utils/theme_utils.dart';
+import '../settings/settings_page.dart';
 
 // InheritedWidget 用于向下传递当前选中的标签索引
 class BottomNavProvider extends InheritedWidget {
@@ -179,6 +180,11 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
             context.go('/');
           }
           setState(() => _index = index);
+
+          // ✅ 如果切换到设置页面（index == 2），触发缓存刷新
+          if (index == 2) {
+            ref.read(cacheRefreshTriggerProvider.notifier).state++;
+          }
         },
         behavior: HitTestBehavior.opaque,
         child: Column(
