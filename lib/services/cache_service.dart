@@ -9,9 +9,10 @@ class CacheService {
   static const String _kViewsKey = 'cache_views';
   static const String _kLatestItemsPrefix = 'cache_latest_items_';
   static const String _kLibraryItemsPrefix = 'cache_library_items_';
+  static const String _kItemDetailPrefix = 'cache_item_detail_';
 
-  // 缓存有效期（24小时）
-  static const Duration _cacheExpiry = Duration(hours: 24);
+  // 缓存有效期（永久有效，设置为极大值）
+  static const Duration _cacheExpiry = Duration(days: 365 * 100); // 100年，相当于永久
 
   /// 保存继续观看数据
   static Future<void> saveResumeItems(
@@ -194,6 +195,47 @@ class CacheService {
           .toList();
     } catch (e) {
       print('❌ Failed to load library items cache: $e');
+      return null;
+    }
+  }
+
+  /// 保存详情页数据
+  static Future<void> saveItemDetail(
+      String userId, String itemId, ItemInfo item) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_kItemDetailPrefix}${userId}_$itemId';
+      final data = {
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'item': item.toJson(),
+      };
+      await prefs.setString(key, jsonEncode(data));
+    } catch (e) {
+      print('❌ Failed to save item detail cache: $e');
+    }
+  }
+
+  /// 读取详情页数据
+  static Future<ItemInfo?> loadItemDetail(String userId, String itemId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '${_kItemDetailPrefix}${userId}_$itemId';
+      final jsonStr = prefs.getString(key);
+      if (jsonStr == null) return null;
+
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final timestamp = data['timestamp'] as int;
+
+      // 检查缓存是否过期
+      final cacheTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      if (DateTime.now().difference(cacheTime) > _cacheExpiry) {
+        return null;
+      }
+
+      final itemJson = data['item'] as Map<String, dynamic>;
+      return ItemInfo.fromJson(itemJson);
+    } catch (e) {
+      print('❌ Failed to load item detail cache: $e');
       return null;
     }
   }

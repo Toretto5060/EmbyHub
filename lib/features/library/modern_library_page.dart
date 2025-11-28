@@ -249,9 +249,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
     final resumeItems = ref.watch(resumeProvider);
     final views = ref.watch(viewsProvider);
 
-    // ✅ 检测是否有任何请求正在加载（不包括下拉刷新）
-    final isAnyLoading =
-        !_isRefreshing && (resumeItems.isLoading || views.isLoading);
+    // ✅ 只有在没有数据且正在加载时才显示 loading（有缓存数据时不显示）
+    final isAnyLoading = !_isRefreshing &&
+        ((resumeItems.isLoading && resumeItems.valueOrNull == null) ||
+            (views.isLoading && views.valueOrNull == null));
 
     // ✅ 第二波并行请求：预加载所有媒体库的最新内容
     // 当 views 有数据后，立即触发所有 latest 请求（不等待渲染）
@@ -276,10 +277,11 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
       }
     }
 
-    // ✅ 检测是否有最新内容正在加载
-    final isLatestLoading = latestProviders.any((p) => p.isLoading);
+    // ✅ 只有在没有数据且正在加载时才显示 loading
+    final isLatestLoading =
+        latestProviders.any((p) => p.isLoading && p.valueOrNull == null);
 
-    // ✅ 综合加载状态（任何数据正在加载都显示 loading）
+    // ✅ 综合加载状态（只有真正没有数据时才显示 loading）
     final shouldShowLoading = _isRefreshing || isAnyLoading || isLatestLoading;
 
     return CupertinoPageScaffold(

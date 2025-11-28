@@ -20,17 +20,50 @@ import '../../utils/status_bar_manager.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../utils/app_route_observer.dart';
 import '../../utils/theme_utils.dart';
+import '../../services/cache_service.dart';
 
 final itemProvider =
     FutureProvider.family<ItemInfo, String>((ref, itemId) async {
-  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final auth = ref.read(authStateProvider).value;
   if (auth == null || !auth.isLoggedIn) {
     throw Exception('未登录');
   }
+
+  // ✅ 先尝试从缓存加载
+  final cachedItem = await CacheService.loadItemDetail(auth.userId!, itemId);
+  if (cachedItem != null) {
+    print('✅ [ItemDetail] 从缓存加载详情: ${cachedItem.name}');
+    // ✅ 有缓存，立即返回，同时后台更新（不传 ref，避免循环依赖）
+    _fetchAndCacheItemDetail(auth.userId!, itemId);
+    return cachedItem;
+  }
+
+  // ✅ 无缓存，从 API 获取并保存
+  print('🌐 [ItemDetail] 从 API 加载详情: $itemId');
   final api = await EmbyApi.create();
-  return api.getItem(auth.userId!, itemId);
+  final item = await api.getItem(auth.userId!, itemId);
+  await CacheService.saveItemDetail(auth.userId!, itemId, item);
+  print('💾 [ItemDetail] 保存到缓存: ${item.name}');
+  return item;
 });
+
+/// ✅ 后台获取并缓存详情数据
+/// 注意：不使用 ref.invalidate，避免循环依赖
+/// 缓存会在下次进入页面时自动使用最新数据
+Future<void> _fetchAndCacheItemDetail(String userId, String itemId) async {
+  try {
+    print('🔄 [ItemDetail] 后台更新详情: $itemId');
+    final api = await EmbyApi.create();
+    final item = await api.getItem(userId, itemId);
+    await CacheService.saveItemDetail(userId, itemId, item);
+    print('💾 [ItemDetail] 后台更新完成，保存到缓存: ${item.name}');
+    // ✅ 不调用 invalidate，避免循环依赖
+    // 缓存已更新，下次进入页面会自动使用新数据
+  } catch (e) {
+    print('❌ [ItemDetail] 后台更新失败: $e');
+    // 后台更新失败不影响用户体验
+  }
+}
 
 final similarItemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, itemId) async {
@@ -451,68 +484,38 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
           });
           return CupertinoPageScaffold(
             backgroundColor: CupertinoColors.systemBackground,
-            child: item.maybeWhen(
-              data: (data) => _buildContentArea(data),
-              loading: () {
-                // ✅ 如果有缓存数据，继续显示缓存数据，不显示loading（避免切换按钮时闪烁）
-                if (_cachedItemData != null) {
-                  return _buildContentArea(_cachedItemData!);
-                }
-                // ✅ 如果没有缓存数据，显示空白页面和loading指示器
-                return const Center(
-                  child: CupertinoActivityIndicator(),
-                );
-              },
-              error: (e, _) => Center(
-                child: Text('加载失败: $e'),
-              ),
-              orElse: () {
-                // ✅ 如果 item 还没有数据且没有缓存，显示loading
-                if (_cachedItemData == null) {
-                  return const Center(
-                    child: CupertinoActivityIndicator(),
-                  );
-                }
-                // ✅ 有缓存数据，显示缓存数据
-                return _buildContentArea(_cachedItemData!);
-              },
-            ),
+            // ✅ 不再显示整体 loading，直接构建内容区域
+            child: _buildContentAreaWithBackdrop(item),
           );
         },
       ),
     );
   }
 
-  /// ✅ 构建内容区域（避免在loading和orElse中重复代码）
-  Widget _buildContentArea(ItemInfo data) {
-    final performers = data.performers ?? const <PerformerInfo>[];
-    final externalLinks = _composeExternalLinks(data);
-    final similarItems = ref.watch(similarItemsProvider(widget.itemId));
-
-    // ✅ 使用 Builder 获取 isDark，避免在每次滚动时重新计算
+  /// ✅ 构建带背景图的内容区域（优先加载背景图）
+  Widget _buildContentAreaWithBackdrop(AsyncValue<ItemInfo> itemAsync) {
+    // ✅ 使用 Builder 获取 isDark
     return Builder(
       builder: (context) {
         final isDark = isDarkModeFromContext(context, ref);
 
         return CustomScrollView(
           controller: _scrollController,
-          // ✅ 添加 cacheExtent 提升滚动性能
           cacheExtent: 500,
           slivers: [
-            // ✅ 使用 SliverAppBar 实现标题滚动动画
+            // ✅ 背景图独立加载，不依赖 itemProvider
             ValueListenableBuilder<SystemUiOverlayStyle?>(
               valueListenable: _navSyncedStyleNotifier,
               builder: (context, navSyncedStyle, child) {
                 return SliverAppBar(
-                  expandedHeight: _backdropHeight - 40, // 背景图高度减小，让标题和评分信息更接近
+                  expandedHeight: _backdropHeight - 40,
                   pinned: true,
                   stretch: true,
-                  backgroundColor: Colors.transparent, // ✅ 设置为透明，避免与毛玻璃效果叠加
-                  surfaceTintColor: Colors.transparent, // ✅ 移除 Material 3 的表面色调
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
                   systemOverlayStyle: navSyncedStyle ?? _statusBarStyle,
                   leading: LayoutBuilder(
                     builder: (context, constraints) {
-                      // ✅ 根据折叠进度和状态栏样式计算按钮颜色
                       final settings =
                           context.dependOnInheritedWidgetOfExactType<
                               FlexibleSpaceBarSettings>();
@@ -543,7 +546,6 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                   actions: [
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        // ✅ 根据折叠进度和状态栏样式计算按钮颜色
                         final settings =
                             context.dependOnInheritedWidgetOfExactType<
                                 FlexibleSpaceBarSettings>();
@@ -568,319 +570,441 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
                         final iconColor =
                             _colorForStatusStyle(targetStyle, brightness);
 
-                        return Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: _buildTopActions(data, iconColor),
+                        // ✅ 如果数据还没加载完成，显示占位按钮
+                        return itemAsync.maybeWhen(
+                          data: (data) => Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: _buildTopActions(data, iconColor),
+                          ),
+                          orElse: () => const SizedBox(width: 44, height: 44),
                         );
                       },
                     ),
                   ],
-                  // ✅ 添加毛玻璃效果（刚开始滑动就显示）
-                  flexibleSpace: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // ✅ 底层：FlexibleSpaceBar（只有背景图，不显示标题）
-                      FlexibleSpaceBar(
-                        // ✅ collapseMode.pin: 背景图跟随滚动向上移动，不缩小
-                        collapseMode: CollapseMode.pin,
-                        titlePadding: EdgeInsets.zero,
-                        centerTitle: false,
-                        title: const SizedBox.shrink(), // 不在这里显示标题
-                        background: _buildBackdropBackground(context, data),
-                      ),
-                      // ✅ 中层：毛玻璃效果（只覆盖顶部导航栏区域）
-                      ValueListenableBuilder<double>(
-                        valueListenable: _scrollOffsetNotifier,
-                        builder: (context, scrollOffset, child) {
-                          // ✅ 毛玻璃强度：基于滚动偏移量，刚开始滑动就显示
-                          // 参考 series_detail_page.dart 的实现：blurStart=10, blurEnd=250
-                          const double blurStart = 10.0;
-                          const double blurEnd = 250.0;
-                          final double blurProgress;
-                          if (scrollOffset <= blurStart) {
-                            blurProgress = 0.0;
-                          } else {
-                            final double effective = (scrollOffset - blurStart)
-                                .clamp(0.0, blurEnd - blurStart);
-                            blurProgress = (effective / (blurEnd - blurStart))
-                                .clamp(0.0, 1.0);
-                          }
-                          final blurSigma = 30.0 * blurProgress;
-                          final bgOpacity = 0.7 * blurProgress;
-                          final baseColor = isDark
-                              ? const Color(0xFF1C1C1E)
-                              : const Color(0xFFF2F2F7);
-
-                          // ✅ 只在导航栏高度范围内显示毛玻璃（包含状态栏）
-                          final statusBarHeight =
-                              MediaQuery.of(context).padding.top;
-                          final navBarHeight = kToolbarHeight;
-                          final totalHeight = statusBarHeight + navBarHeight;
-
-                          return Positioned(
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            height: totalHeight,
-                            child: ClipRect(
-                              child: BackdropFilter(
-                                filter: ui.ImageFilter.blur(
-                                  sigmaX: blurSigma,
-                                  sigmaY: blurSigma,
-                                ),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: baseColor.withOpacity(bgOpacity),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      // ✅ 上层：标题（在毛玻璃之上）
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          // ✅ 计算折叠进度：0.0 = 完全展开，1.0 = 完全折叠
-                          final settings =
-                              context.dependOnInheritedWidgetOfExactType<
-                                  FlexibleSpaceBarSettings>();
-                          if (settings == null) {
-                            return const SizedBox.shrink();
-                          }
-                          final deltaExtent =
-                              settings.maxExtent - settings.minExtent;
-                          final t = deltaExtent > 0
-                              ? (1.0 -
-                                      (settings.currentExtent -
-                                              settings.minExtent) /
-                                          deltaExtent)
-                                  .clamp(0.0, 1.0)
-                              : 1.0;
-
-                          // ✅ 标题大小：从 20 缩小到 17（更小的初始大小）
-                          final sizeProgress = Curves.easeInOut.transform(t);
-                          final fontSize = 28.0 - (28.0 - 17.0) * sizeProgress;
-
-                          // ✅ 标题位置：从底部左侧移动到顶部中心
-                          // 展开时：距离左边 12，距离底部 4（更靠近底部和左边）
-                          // 折叠时：距离左边 56（返回按钮后），距离底部 13（与返回按钮垂直居中对齐）
-                          // 使用不同的曲线控制水平和垂直位移，实现"吸附"效果
-                          final horizontalProgress =
-                              Curves.easeInOutCubic.transform(t);
-                          final verticalProgress = Curves.easeOut.transform(t);
-                          final leftPadding =
-                              20.0 + (56.0 - 40.0) * horizontalProgress;
-                          final bottomPadding = 10 + 9.0 * verticalProgress;
-
-                          // ✅ 获取深浅色模式，设置标题文字颜色
-                          final isDark = isDarkModeFromContext(context, ref);
-                          final titleColor =
-                              isDark ? Colors.white : Colors.black87;
-
-                          // ✅ 检查是否有 logo
-                          final hasLogo = data.imageTags?['Logo'] != null &&
-                              data.imageTags!['Logo']!.isNotEmpty;
-
-                          return Container(
-                            alignment: Alignment.bottomLeft,
-                            padding: EdgeInsets.only(
-                              left: leftPadding,
-                              right: 20, // 右侧也保持20的边距，让文字铺满屏幕
-                              bottom: bottomPadding,
-                            ),
-                            child: hasLogo
-                                ? _buildLogoToTextTransition(
-                                    data, t, fontSize, titleColor)
-                                : Text(
-                                    data.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.left, // 明确指定居左对齐
-                                    style: TextStyle(
-                                      fontSize: fontSize,
-                                      fontWeight: FontWeight.w700,
-                                      color: titleColor,
-                                      height: 1.2,
-                                    ),
-                                  ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
+                  flexibleSpace:
+                      _buildFlexibleSpaceWithBackdrop(itemAsync, isDark),
                 );
               },
             ),
-            // ✅ 主要内容区域
-            SliverToBoxAdapter(
-              child: Stack(
-                children: [
-                  Container(
-                    color: isDark
-                        ? const Color(0xFF000000)
-                        : const Color(0xFFFFFFFF),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // ✅ 头部信息卡片（元数据、播放按钮等）
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildMetaInfo(data, isDark),
-                              const SizedBox(height: 5),
-                              _buildMediaInfo(data, isDark),
-                              const SizedBox(height: 18),
-                              _buildPlaySection(context, data, isDark),
-                              if ((data.overview ?? '').isNotEmpty) ...[
-                                const SizedBox(height: 18),
-                                GestureDetector(
-                                  onTap: () => _showOverviewDialog(data),
-                                  child: Text(
-                                    data.overview!,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 14, height: 1.4),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        // ✅ 演员列表
-                        if (performers.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 20),
-                            child: Text(
-                              '演员',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            height: 190,
-                            child: ListView.builder(
-                              padding: EdgeInsets.zero,
-                              scrollDirection: Axis.horizontal,
-                              itemCount: performers.length,
-                              // ✅ 添加 cacheExtent 提升横向列表性能
-                              cacheExtent: 300,
-                              itemBuilder: (context, index) {
-                                final card = _PerformerCard(
-                                  key: ValueKey(
-                                      'performer_card_${performers[index].id}'),
-                                  performer: performers[index],
-                                  isDark: isDark,
-                                );
-                                final bool isFirst = index == 0;
-                                final bool isLast =
-                                    index == performers.length - 1;
-                                return Padding(
-                                  padding: EdgeInsets.only(
-                                    left: isFirst ? 20 : 12,
-                                    right: isLast ? 20 : 0,
-                                  ),
-                                  child: card,
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                        // ✅ 相似影片
-                        similarItems.when(
-                          data: (items) {
-                            if (items.isEmpty) {
-                              return const SizedBox.shrink();
-                            }
-                            final allAre16x9 = items.every((item) =>
-                                !_hasHorizontalArtworkForSimilar(item));
-                            final listHeight = allAre16x9 ? 130.0 : 190.0;
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(height: 24),
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 20),
-                                  child: Text(
-                                    '其他类似影片',
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                SizedBox(
-                                  height: listHeight,
-                                  child: ListView.builder(
-                                    padding: EdgeInsets.zero,
-                                    scrollDirection: Axis.horizontal,
-                                    itemCount: items.length,
-                                    // ✅ 添加 cacheExtent 提升横向列表性能
-                                    cacheExtent: 300,
-                                    itemBuilder: (context, index) {
-                                      final card = _SimilarCard(
-                                        key: ValueKey(
-                                            'similar_card_${items[index].id}'),
-                                        item: items[index],
-                                        isDark: isDark,
-                                      );
-                                      final bool isFirst = index == 0;
-                                      final bool isLast =
-                                          index == items.length - 1;
-                                      return Padding(
-                                        padding: EdgeInsets.only(
-                                          left: isFirst ? 20 : 12,
-                                          right: isLast ? 20 : 0,
-                                        ),
-                                        child: card,
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                          loading: () => const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 24),
-                            child: Center(
-                              child: CupertinoActivityIndicator(),
-                            ),
-                          ),
-                          error: (_, __) => const SizedBox.shrink(),
-                        ),
-                        // ✅ 外部链接
-                        if (externalLinks.isNotEmpty) ...[
-                          const SizedBox(height: 24),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            child: _buildExternalLinks(externalLinks, isDark),
-                          ),
-                        ],
-                        // ✅ 详细媒体信息
-                        const SizedBox(height: 24),
-                        _buildDetailedMediaModules(
-                          data,
-                          isDark,
-                          horizontalPadding: 20,
-                        ),
-                        const SizedBox(height: 20),
-                      ],
-                    ),
+            // ✅ 主要内容区域（延迟加载）
+            itemAsync.when(
+              data: (data) => _buildMainContent(data, isDark),
+              loading: () {
+                // ✅ 如果有缓存数据，显示缓存数据
+                if (_cachedItemData != null) {
+                  return _buildMainContent(_cachedItemData!, isDark);
+                }
+                // ✅ 没有缓存数据，显示空白区域（不显示 loading）
+                return const SliverToBoxAdapter(
+                  child: SizedBox.shrink(),
+                );
+              },
+              error: (e, _) => SliverToBoxAdapter(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text('加载失败: $e'),
                   ),
-                ],
+                ),
               ),
             ),
           ],
         );
       },
+    );
+  }
+
+  /// ✅ 构建 FlexibleSpace（包含背景图、毛玻璃、标题）
+  Widget _buildFlexibleSpaceWithBackdrop(
+      AsyncValue<ItemInfo> itemAsync, bool isDark) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // ✅ 底层：FlexibleSpaceBar（背景图优先加载）
+        FlexibleSpaceBar(
+          collapseMode: CollapseMode.pin,
+          titlePadding: EdgeInsets.zero,
+          centerTitle: false,
+          title: const SizedBox.shrink(),
+          background: _buildBackdropBackgroundAsync(itemAsync),
+        ),
+        // ✅ 中层：毛玻璃效果
+        ValueListenableBuilder<double>(
+          valueListenable: _scrollOffsetNotifier,
+          builder: (context, scrollOffset, child) {
+            const double blurStart = 10.0;
+            const double blurEnd = 250.0;
+            final double blurProgress;
+            if (scrollOffset <= blurStart) {
+              blurProgress = 0.0;
+            } else {
+              final double effective =
+                  (scrollOffset - blurStart).clamp(0.0, blurEnd - blurStart);
+              blurProgress =
+                  (effective / (blurEnd - blurStart)).clamp(0.0, 1.0);
+            }
+            final blurSigma = 30.0 * blurProgress;
+            final bgOpacity = 0.7 * blurProgress;
+            final baseColor =
+                isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7);
+
+            final statusBarHeight = MediaQuery.of(context).padding.top;
+            final navBarHeight = kToolbarHeight;
+            final totalHeight = statusBarHeight + navBarHeight;
+
+            return Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: totalHeight,
+              child: ClipRect(
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(
+                    sigmaX: blurSigma,
+                    sigmaY: blurSigma,
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: baseColor.withOpacity(bgOpacity),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+        // ✅ 上层：标题
+        itemAsync.maybeWhen(
+          data: (data) => _buildTitleOverlay(data, isDark),
+          orElse: () => const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+
+  /// ✅ 构建背景图（异步加载，不依赖完整的 item 数据）
+  Widget _buildBackdropBackgroundAsync(AsyncValue<ItemInfo> itemAsync) {
+    return RepaintBoundary(
+      child: Builder(
+        builder: (context) {
+          // ✅ 获取系统背景色
+          final isDark = isDarkModeFromContext(context, ref);
+          final systemBgColor = isDark
+              ? const Color(0xFF000000) // 深色模式：纯黑色
+              : const Color(0xFFFFFFFF); // 浅色模式：纯白色
+
+          return FutureBuilder<EmbyApi>(
+            future: EmbyApi.create(),
+            builder: (context, apiSnapshot) {
+              if (!apiSnapshot.hasData) {
+                // ✅ 使用系统背景色，而不是灰色
+                return Container(color: systemBgColor);
+              }
+
+              final api = apiSnapshot.data!;
+
+              // ✅ 优先使用缓存数据，如果没有则等待 itemAsync
+              final item = _cachedItemData ?? itemAsync.valueOrNull;
+
+              if (item == null || item.id == null) {
+                // ✅ 使用系统背景色
+                return Container(color: systemBgColor);
+              }
+
+              String? backdropUrl;
+
+              if ((item.backdropImageTags?.isNotEmpty ?? false) ||
+                  (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+                backdropUrl = api.buildImageUrl(
+                  itemId: item.id!,
+                  type: 'Backdrop',
+                  maxWidth: 1920,
+                );
+              }
+
+              if (backdropUrl == null || backdropUrl.isEmpty) {
+                final primaryTag = item.imageTags?['Primary'] ?? '';
+                if (primaryTag.isNotEmpty) {
+                  backdropUrl = api.buildImageUrl(
+                    itemId: item.id!,
+                    type: 'Primary',
+                    maxWidth: 800,
+                  );
+                }
+              }
+
+              if (backdropUrl == null || backdropUrl.isEmpty) {
+                // ✅ 使用系统背景色
+                return Container(color: systemBgColor);
+              }
+
+              final bottomColor = systemBgColor;
+
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  // ✅ 底层：系统背景色
+                  Container(color: systemBgColor),
+                  // ✅ 图片层
+                  EmbyFadeInImage(
+                    key: ValueKey('backdrop_${item.id}_$backdropUrl'),
+                    imageUrl: backdropUrl,
+                    fit: BoxFit.cover,
+                    onImageReady: (image) =>
+                        _handleBackdropImage(image, item.id ?? backdropUrl!),
+                  ),
+                  // ✅ 渐变遮罩层
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      height: 180,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            bottomColor.withOpacity(0.1),
+                            bottomColor.withOpacity(0.2),
+                            bottomColor.withOpacity(0.4),
+                            bottomColor.withOpacity(0.6),
+                            bottomColor.withOpacity(0.8),
+                            bottomColor,
+                          ],
+                          stops: const [0.0, 0.2, 0.35, 0.5, 0.65, 0.85, 1.0],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  /// ✅ 构建标题覆盖层
+  Widget _buildTitleOverlay(ItemInfo data, bool isDark) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final settings = context
+            .dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+        if (settings == null) {
+          return const SizedBox.shrink();
+        }
+        final deltaExtent = settings.maxExtent - settings.minExtent;
+        final t = deltaExtent > 0
+            ? (1.0 -
+                    (settings.currentExtent - settings.minExtent) / deltaExtent)
+                .clamp(0.0, 1.0)
+            : 1.0;
+
+        final sizeProgress = Curves.easeInOut.transform(t);
+        final fontSize = 28.0 - (28.0 - 17.0) * sizeProgress;
+
+        final horizontalProgress = Curves.easeInOutCubic.transform(t);
+        final verticalProgress = Curves.easeOut.transform(t);
+        final leftPadding = 20.0 + (56.0 - 40.0) * horizontalProgress;
+        final bottomPadding = 10 + 9.0 * verticalProgress;
+
+        final titleColor = isDark ? Colors.white : Colors.black87;
+
+        final hasLogo = data.imageTags?['Logo'] != null &&
+            data.imageTags!['Logo']!.isNotEmpty;
+
+        return Container(
+          alignment: Alignment.bottomLeft,
+          padding: EdgeInsets.only(
+            left: leftPadding,
+            right: 20,
+            bottom: bottomPadding,
+          ),
+          child: hasLogo
+              ? _buildLogoToTextTransition(data, t, fontSize, titleColor)
+              : Text(
+                  data.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.left,
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: FontWeight.w700,
+                    color: titleColor,
+                    height: 1.2,
+                  ),
+                ),
+        );
+      },
+    );
+  }
+
+  /// ✅ 构建主要内容（演员、相似影片等）
+  Widget _buildMainContent(ItemInfo data, bool isDark) {
+    final performers = data.performers ?? const <PerformerInfo>[];
+    final externalLinks = _composeExternalLinks(data);
+    final similarItems = ref.watch(similarItemsProvider(widget.itemId));
+
+    return SliverToBoxAdapter(
+      child: Stack(
+        children: [
+          Container(
+            color: isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ✅ 头部信息卡片
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildMetaInfo(data, isDark),
+                      const SizedBox(height: 5),
+                      _buildMediaInfo(data, isDark),
+                      const SizedBox(height: 18),
+                      _buildPlaySection(context, data, isDark),
+                      if ((data.overview ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 18),
+                        GestureDetector(
+                          onTap: () => _showOverviewDialog(data),
+                          child: Text(
+                            data.overview!,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 14, height: 1.4),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                // ✅ 演员列表
+                if (performers.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(
+                      '演员',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 190,
+                    child: ListView.builder(
+                      padding: EdgeInsets.zero,
+                      scrollDirection: Axis.horizontal,
+                      itemCount: performers.length,
+                      cacheExtent: 300,
+                      itemBuilder: (context, index) {
+                        final card = _PerformerCard(
+                          key: ValueKey(
+                              'performer_card_${performers[index].id}'),
+                          performer: performers[index],
+                          isDark: isDark,
+                        );
+                        final bool isFirst = index == 0;
+                        final bool isLast = index == performers.length - 1;
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            left: isFirst ? 20 : 12,
+                            right: isLast ? 20 : 0,
+                          ),
+                          child: card,
+                        );
+                      },
+                    ),
+                  ),
+                ],
+                // ✅ 相似影片
+                similarItems.when(
+                  data: (items) {
+                    if (items.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    final allAre16x9 = items.every(
+                        (item) => !_hasHorizontalArtworkForSimilar(item));
+                    final listHeight = allAre16x9 ? 130.0 : 190.0;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 24),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 20),
+                          child: Text(
+                            '其他类似影片',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: listHeight,
+                          child: ListView.builder(
+                            padding: EdgeInsets.zero,
+                            scrollDirection: Axis.horizontal,
+                            itemCount: items.length,
+                            cacheExtent: 300,
+                            itemBuilder: (context, index) {
+                              final card = _SimilarCard(
+                                key:
+                                    ValueKey('similar_card_${items[index].id}'),
+                                item: items[index],
+                                isDark: isDark,
+                              );
+                              final bool isFirst = index == 0;
+                              final bool isLast = index == items.length - 1;
+                              return Padding(
+                                padding: EdgeInsets.only(
+                                  left: isFirst ? 20 : 12,
+                                  right: isLast ? 20 : 0,
+                                ),
+                                child: card,
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(
+                      child: CupertinoActivityIndicator(),
+                    ),
+                  ),
+                  error: (_, __) => const SizedBox.shrink(),
+                ),
+                // ✅ 外部链接
+                if (externalLinks.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: _buildExternalLinks(externalLinks, isDark),
+                  ),
+                ],
+                // ✅ 详细媒体信息
+                const SizedBox(height: 24),
+                _buildDetailedMediaModules(
+                  data,
+                  isDark,
+                  horizontalPadding: 20,
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1017,100 +1141,6 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage>
     return fallbackBrightness == Brightness.dark
         ? Colors.white
         : Colors.black87;
-  }
-
-  Widget _buildBackdropBackground(BuildContext context, ItemInfo item) {
-    // ✅ 使用 RepaintBoundary 隔离背景图的重绘
-    return RepaintBoundary(
-      child: Builder(
-        builder: (context) {
-          if (item.id == null) {
-            return Container(color: CupertinoColors.systemGrey5);
-          }
-
-          return FutureBuilder<EmbyApi>(
-            future: EmbyApi.create(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return Container(color: CupertinoColors.systemGrey5);
-              }
-              final api = snapshot.data!;
-              String? backdropUrl;
-
-              if ((item.backdropImageTags?.isNotEmpty ?? false) ||
-                  (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
-                backdropUrl = api.buildImageUrl(
-                  itemId: item.id!,
-                  type: 'Backdrop',
-                  maxWidth: 1920,
-                );
-              }
-
-              if (backdropUrl == null || backdropUrl.isEmpty) {
-                final primaryTag = item.imageTags?['Primary'] ?? '';
-                if (primaryTag.isNotEmpty) {
-                  backdropUrl = api.buildImageUrl(
-                    itemId: item.id!,
-                    type: 'Primary',
-                    maxWidth: 800,
-                  );
-                }
-              }
-
-              if (backdropUrl == null || backdropUrl.isEmpty) {
-                return Container(color: CupertinoColors.systemGrey5);
-              }
-
-              // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
-              // ✅ 获取深浅色模式，设置遮罩底部颜色与下方内容区域背景色一致
-              final isDark = isDarkModeFromContext(context, ref);
-              final bottomColor = isDark
-                  ? const Color(0xFF000000) // 深色模式：纯黑色
-                  : const Color(0xFFFFFFFF); // 浅色模式：纯白色
-
-              return Stack(
-                fit: StackFit.expand,
-                children: [
-                  EmbyFadeInImage(
-                    key: ValueKey('backdrop_${item.id}_$backdropUrl'),
-                    imageUrl: backdropUrl,
-                    fit: BoxFit.cover,
-                    onImageReady: (image) =>
-                        _handleBackdropImage(image, item.id ?? backdropUrl!),
-                  ),
-                  // ✅ 底部渐变遮罩，固定在背景图底部，铺满整个宽度
-                  // 从透明渐变到与下方内容区域背景色一致
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      height: 180, // 增加高度，让渐变更线性
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.transparent,
-                            bottomColor.withOpacity(0.1),
-                            bottomColor.withOpacity(0.2),
-                            bottomColor.withOpacity(0.4),
-                            bottomColor.withOpacity(0.6),
-                            bottomColor.withOpacity(0.8),
-                            bottomColor, // 底部完全不透明，与下方背景色一致
-                          ],
-                          stops: const [0.0, 0.2, 0.35, 0.5, 0.65, 0.85, 1.0],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      ),
-    );
   }
 
   List<Widget> _buildTopActions(ItemInfo item, Color iconColor) {
