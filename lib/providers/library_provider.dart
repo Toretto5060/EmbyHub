@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/emby_api.dart';
 import '../services/cache_service.dart';
+import '../utils/debounce_helper.dart';
 import 'settings_provider.dart';
 
 const bool _kLibraryProviderLogging = false;
@@ -41,19 +42,24 @@ final resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
     _libraryLog(
         'resumeProvider: ✅ Loaded ${cachedItems.length} items from cache');
 
-    // ✅ 后台更新数据（异步执行，不阻塞）
-    _fetchAndCacheResumeItems(userId).then((freshItems) {
-      _libraryLog(
-          'resumeProvider: 🔄 Fresh data received (${freshItems.length} items), invalidating provider');
-      // ✅ 使用 invalidateSelf 触发重新加载
-      try {
-        ref.invalidateSelf();
-      } catch (e) {
-        _libraryLog('resumeProvider: ⚠️ Failed to invalidate: $e');
-      }
-    }).catchError((e) {
-      _libraryLog('resumeProvider: ❌ Background fetch failed: $e');
-    });
+    // ✅ 防抖：如果 10 秒内已经更新过，跳过本次更新
+    final key = 'resume_$userId';
+    if (DebounceHelper.shouldExecute(key)) {
+      // ✅ 后台更新数据（异步执行，不阻塞）
+      _fetchAndCacheResumeItems(userId).then((freshItems) {
+        _libraryLog(
+            'resumeProvider: 🔄 Fresh data received (${freshItems.length} items), invalidating provider');
+        // ✅ 使用 invalidateSelf 触发重新加载
+        // 注意：invalidateSelf 只会让当前 provider 重新执行，不会影响其他 provider
+        try {
+          ref.invalidateSelf();
+        } catch (e) {
+          _libraryLog('resumeProvider: ⚠️ Failed to invalidate: $e');
+        }
+      }).catchError((e) {
+        _libraryLog('resumeProvider: ❌ Background fetch failed: $e');
+      });
+    }
 
     return cachedItems;
   }
@@ -140,18 +146,22 @@ final viewsProvider = FutureProvider.autoDispose<List<ViewInfo>>((ref) async {
     _libraryLog(
         'viewsProvider: ✅ Loaded ${cachedViews.length} views from cache');
 
-    // ✅ 后台更新数据（异步执行，不阻塞）
-    _fetchAndCacheViews(userId).then((freshViews) {
-      _libraryLog(
-          'viewsProvider: 🔄 Fresh data received (${freshViews.length} views), invalidating provider');
-      try {
-        ref.invalidateSelf();
-      } catch (e) {
-        _libraryLog('viewsProvider: ⚠️ Failed to invalidate: $e');
-      }
-    }).catchError((e) {
-      _libraryLog('viewsProvider: ❌ Background fetch failed: $e');
-    });
+    // ✅ 防抖：如果 10 秒内已经更新过，跳过本次更新
+    final key = 'views_$userId';
+    if (DebounceHelper.shouldExecute(key)) {
+      // ✅ 后台更新数据（异步执行，不阻塞）
+      _fetchAndCacheViews(userId).then((freshViews) {
+        _libraryLog(
+            'viewsProvider: 🔄 Fresh data received (${freshViews.length} views), invalidating provider');
+        try {
+          ref.invalidateSelf();
+        } catch (e) {
+          _libraryLog('viewsProvider: ⚠️ Failed to invalidate: $e');
+        }
+      }).catchError((e) {
+        _libraryLog('viewsProvider: ❌ Background fetch failed: $e');
+      });
+    }
 
     return cachedViews;
   }
@@ -197,19 +207,23 @@ final latestByViewProvider = FutureProvider.autoDispose
     _libraryLog(
         'latestByViewProvider: ✅ Loaded ${cachedItems.length} items from cache for viewId=$viewId');
 
-    // ✅ 后台更新数据（异步执行，不阻塞）
-    _fetchAndCacheLatestItems(userId, viewId).then((freshItems) {
-      _libraryLog(
-          'latestByViewProvider: 🔄 Fresh data received (${freshItems.length} items) for viewId=$viewId, invalidating provider');
-      try {
-        ref.invalidateSelf();
-      } catch (e) {
-        _libraryLog('latestByViewProvider: ⚠️ Failed to invalidate: $e');
-      }
-    }).catchError((e) {
-      _libraryLog(
-          'latestByViewProvider: ❌ Background fetch failed for viewId=$viewId: $e');
-    });
+    // ✅ 防抖：如果 10 秒内已经更新过，跳过本次更新
+    final key = 'latest_${userId}_$viewId';
+    if (DebounceHelper.shouldExecute(key)) {
+      // ✅ 后台更新数据（异步执行，不阻塞）
+      _fetchAndCacheLatestItems(userId, viewId).then((freshItems) {
+        _libraryLog(
+            'latestByViewProvider: 🔄 Fresh data received (${freshItems.length} items) for viewId=$viewId, invalidating provider');
+        try {
+          ref.invalidateSelf();
+        } catch (e) {
+          _libraryLog('latestByViewProvider: ⚠️ Failed to invalidate: $e');
+        }
+      }).catchError((e) {
+        _libraryLog(
+            'latestByViewProvider: ❌ Background fetch failed for viewId=$viewId: $e');
+      });
+    }
 
     return cachedItems;
   }

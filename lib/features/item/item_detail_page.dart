@@ -21,6 +21,7 @@ import '../../widgets/blur_navigation_bar.dart';
 import '../../utils/app_route_observer.dart';
 import '../../utils/theme_utils.dart';
 import '../../services/cache_service.dart';
+import '../../utils/debounce_helper.dart';
 
 final itemProvider =
     FutureProvider.family<ItemInfo, String>((ref, itemId) async {
@@ -32,35 +33,36 @@ final itemProvider =
   // ✅ 先尝试从缓存加载
   final cachedItem = await CacheService.loadItemDetail(auth.userId!, itemId);
   if (cachedItem != null) {
-    print('✅ [ItemDetail] 从缓存加载详情: ${cachedItem.name}');
     // ✅ 有缓存，立即返回，同时后台更新（不传 ref，避免循环依赖）
     _fetchAndCacheItemDetail(auth.userId!, itemId);
     return cachedItem;
   }
 
   // ✅ 无缓存，从 API 获取并保存
-  print('🌐 [ItemDetail] 从 API 加载详情: $itemId');
   final api = await EmbyApi.create();
   final item = await api.getItem(auth.userId!, itemId);
   await CacheService.saveItemDetail(auth.userId!, itemId, item);
-  print('💾 [ItemDetail] 保存到缓存: ${item.name}');
   return item;
 });
 
 /// ✅ 后台获取并缓存详情数据
 /// 注意：不使用 ref.invalidate，避免循环依赖
 /// 缓存会在下次进入页面时自动使用最新数据
+/// 使用防抖机制，避免频繁更新
 Future<void> _fetchAndCacheItemDetail(String userId, String itemId) async {
   try {
-    print('🔄 [ItemDetail] 后台更新详情: $itemId');
+    // ✅ 防抖：如果 10 秒内已经更新过，跳过
+    final key = 'item_detail_${userId}_$itemId';
+    if (!DebounceHelper.shouldExecute(key)) {
+      return;
+    }
+
     final api = await EmbyApi.create();
     final item = await api.getItem(userId, itemId);
     await CacheService.saveItemDetail(userId, itemId, item);
-    print('💾 [ItemDetail] 后台更新完成，保存到缓存: ${item.name}');
     // ✅ 不调用 invalidate，避免循环依赖
     // 缓存已更新，下次进入页面会自动使用新数据
   } catch (e) {
-    print('❌ [ItemDetail] 后台更新失败: $e');
     // 后台更新失败不影响用户体验
   }
 }

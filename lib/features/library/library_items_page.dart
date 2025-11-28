@@ -12,6 +12,7 @@ import '../../services/cache_service.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/emby_api_provider.dart';
 import '../../utils/app_route_observer.dart';
+import '../../utils/debounce_helper.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/theme_utils.dart';
@@ -384,18 +385,22 @@ final itemsProvider =
   );
 
   if (cachedItems != null && cachedItems.isNotEmpty) {
-    // ✅ 后台更新数据（异步执行，不阻塞）
-    _fetchAndCacheLibraryItems(ref, viewId, userId, sortState)
-        .then((freshItems) {
-      // ✅ 使用 invalidateSelf 触发重新加载
-      try {
-        ref.invalidateSelf();
-      } catch (e) {
-        // 忽略错误
-      }
-    }).catchError((e) {
-      // 忽略后台更新错误
-    });
+    // ✅ 防抖：如果 10 秒内已经更新过，跳过本次更新
+    final key = 'library_items_${userId}_${viewId}_${sortBy}_$ascending';
+    if (DebounceHelper.shouldExecute(key)) {
+      // ✅ 后台更新数据（异步执行，不阻塞）
+      _fetchAndCacheLibraryItems(ref, viewId, userId, sortState)
+          .then((freshItems) {
+        // ✅ 使用 invalidateSelf 触发重新加载
+        try {
+          ref.invalidateSelf();
+        } catch (e) {
+          // 忽略错误
+        }
+      }).catchError((e) {
+        // 忽略后台更新错误
+      });
+    }
 
     return cachedItems;
   }

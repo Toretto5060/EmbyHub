@@ -211,7 +211,7 @@ class CacheService {
       };
       await prefs.setString(key, jsonEncode(data));
     } catch (e) {
-      print('❌ Failed to save item detail cache: $e');
+      // 缓存失败不影响主流程，静默处理
     }
   }
 
@@ -235,7 +235,7 @@ class CacheService {
       final itemJson = data['item'] as Map<String, dynamic>;
       return ItemInfo.fromJson(itemJson);
     } catch (e) {
-      print('❌ Failed to load item detail cache: $e');
+      // 缓存读取失败，静默处理
       return null;
     }
   }
