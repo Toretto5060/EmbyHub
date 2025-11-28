@@ -2217,6 +2217,14 @@ class ViewInfo {
       collectionType: collectionType,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'Id': id,
+      'Name': name,
+      'CollectionType': collectionType,
+    };
+  }
 }
 
 // ✅ 类型信息类

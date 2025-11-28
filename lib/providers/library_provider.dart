@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/emby_api.dart';
+import '../services/cache_service.dart';
 import 'settings_provider.dart';
 
 const bool _kLibraryProviderLogging = false;
@@ -18,9 +19,8 @@ final currentUserIdProvider = Provider<String?>((ref) {
   return auth?.userId;
 });
 
-// ✅ 公共 Provider：继续观看
+// ✅ 公共 Provider：继续观看（带缓存 + 后台刷新）
 final resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
-  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final userId = ref.watch(currentUserIdProvider);
   if (userId == null) {
     _libraryLog('resumeProvider: No userId');
@@ -35,35 +35,59 @@ final resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
     return <ItemInfo>[];
   }
 
-  _libraryLog('resumeProvider: Fetching resume items for userId=$userId');
+  // ✅ 先尝试从缓存加载
+  final cachedItems = await CacheService.loadResumeItems(userId);
+  if (cachedItems != null && cachedItems.isNotEmpty) {
+    _libraryLog(
+        'resumeProvider: ✅ Loaded ${cachedItems.length} items from cache');
+
+    // ✅ 后台更新数据（异步执行，不阻塞）
+    _fetchAndCacheResumeItems(userId).then((freshItems) {
+      _libraryLog(
+          'resumeProvider: 🔄 Fresh data received (${freshItems.length} items), invalidating provider');
+      // ✅ 使用 invalidateSelf 触发重新加载
+      try {
+        ref.invalidateSelf();
+      } catch (e) {
+        _libraryLog('resumeProvider: ⚠️ Failed to invalidate: $e');
+      }
+    }).catchError((e) {
+      _libraryLog('resumeProvider: ❌ Background fetch failed: $e');
+    });
+
+    return cachedItems;
+  }
+
+  // ✅ 缓存未命中，直接请求
+  _libraryLog('resumeProvider: ❌ Cache miss, fetching from API');
+  return await _fetchAndCacheResumeItems(userId);
+});
+
+// ✅ 获取并缓存继续观看数据
+Future<List<ItemInfo>> _fetchAndCacheResumeItems(String userId) async {
   final api = await EmbyApi.create();
   final items = await api.getResumeItems(userId);
-  _libraryLog('resumeProvider: Got ${items.length} resume items');
+  _libraryLog('resumeProvider: Got ${items.length} resume items from API');
 
   // ✅ 去重处理：对于同一电视剧（seriesId相同），只保留最近播放的那一集
-  final Map<String, ItemInfo> seriesMap = {}; // seriesId -> 最近播放的集
-  final List<ItemInfo> movies = []; // 电影（没有seriesId）
+  final Map<String, ItemInfo> seriesMap = {};
+  final List<ItemInfo> movies = [];
 
   for (final item in items) {
     final seriesId = item.seriesId;
 
-    // 如果是电影（没有seriesId），直接添加
     if (seriesId == null || seriesId.isEmpty) {
       movies.add(item);
       continue;
     }
 
-    // 如果是电视剧的集，检查是否已有该电视剧的记录
     if (!seriesMap.containsKey(seriesId)) {
-      // 第一次遇到这个电视剧，直接添加
       seriesMap[seriesId] = item;
     } else {
-      // 已有该电视剧的记录，比较播放日期，保留最近播放的
       final existingItem = seriesMap[seriesId]!;
       final existingDate = existingItem.userData?['LastPlayedDate'] as String?;
       final currentDate = item.userData?['LastPlayedDate'] as String?;
 
-      // 如果当前集的播放日期更近，则替换
       if (currentDate != null &&
           (existingDate == null || currentDate.compareTo(existingDate) > 0)) {
         seriesMap[seriesId] = item;
@@ -71,30 +95,31 @@ final resumeProvider = FutureProvider.autoDispose<List<ItemInfo>>((ref) async {
     }
   }
 
-  // ✅ 合并结果：先显示电视剧（按播放日期排序），再显示电影
   final deduplicatedItems = [
     ...seriesMap.values,
     ...movies,
   ];
 
-  // ✅ 按播放日期排序（最近的在前）
   deduplicatedItems.sort((a, b) {
     final aDate = a.userData?['LastPlayedDate'] as String?;
     final bDate = b.userData?['LastPlayedDate'] as String?;
     if (aDate == null && bDate == null) return 0;
     if (aDate == null) return 1;
     if (bDate == null) return -1;
-    return bDate.compareTo(aDate); // 降序：最近的在前
+    return bDate.compareTo(aDate);
   });
 
   _libraryLog(
       'resumeProvider: Deduplicated to ${deduplicatedItems.length} items');
-  return deduplicatedItems;
-});
 
-// ✅ 公共 Provider：媒体库列表
+  // ✅ 保存到缓存
+  await CacheService.saveResumeItems(userId, deduplicatedItems);
+
+  return deduplicatedItems;
+}
+
+// ✅ 公共 Provider：媒体库列表（带缓存 + 后台刷新）
 final viewsProvider = FutureProvider.autoDispose<List<ViewInfo>>((ref) async {
-  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final userId = ref.watch(currentUserIdProvider);
   if (userId == null) {
     _libraryLog('viewsProvider: No userId');
@@ -109,17 +134,48 @@ final viewsProvider = FutureProvider.autoDispose<List<ViewInfo>>((ref) async {
     return <ViewInfo>[];
   }
 
-  _libraryLog('viewsProvider: Fetching views for userId=$userId');
-  final api = await EmbyApi.create();
-  final views = await api.getUserViews(userId);
-  _libraryLog('viewsProvider: Got ${views.length} views');
-  return views;
+  // ✅ 先尝试从缓存加载
+  final cachedViews = await CacheService.loadViews(userId);
+  if (cachedViews != null && cachedViews.isNotEmpty) {
+    _libraryLog(
+        'viewsProvider: ✅ Loaded ${cachedViews.length} views from cache');
+
+    // ✅ 后台更新数据（异步执行，不阻塞）
+    _fetchAndCacheViews(userId).then((freshViews) {
+      _libraryLog(
+          'viewsProvider: 🔄 Fresh data received (${freshViews.length} views), invalidating provider');
+      try {
+        ref.invalidateSelf();
+      } catch (e) {
+        _libraryLog('viewsProvider: ⚠️ Failed to invalidate: $e');
+      }
+    }).catchError((e) {
+      _libraryLog('viewsProvider: ❌ Background fetch failed: $e');
+    });
+
+    return cachedViews;
+  }
+
+  // ✅ 缓存未命中，直接请求
+  _libraryLog('viewsProvider: ❌ Cache miss, fetching from API');
+  return await _fetchAndCacheViews(userId);
 });
 
-// ✅ 公共 Provider：每个媒体库的最新内容
+// ✅ 获取并缓存媒体库列表
+Future<List<ViewInfo>> _fetchAndCacheViews(String userId) async {
+  final api = await EmbyApi.create();
+  final views = await api.getUserViews(userId);
+  _libraryLog('viewsProvider: Got ${views.length} views from API');
+
+  // ✅ 保存到缓存
+  await CacheService.saveViews(userId, views);
+
+  return views;
+}
+
+// ✅ 公共 Provider：每个媒体库的最新内容（带缓存 + 后台刷新）
 final latestByViewProvider = FutureProvider.autoDispose
     .family<List<ItemInfo>, String>((ref, viewId) async {
-  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final userId = ref.watch(currentUserIdProvider);
 
   if (userId == null) {
@@ -135,11 +191,45 @@ final latestByViewProvider = FutureProvider.autoDispose
     return <ItemInfo>[];
   }
 
+  // ✅ 先尝试从缓存加载
+  final cachedItems = await CacheService.loadLatestItems(userId, viewId);
+  if (cachedItems != null && cachedItems.isNotEmpty) {
+    _libraryLog(
+        'latestByViewProvider: ✅ Loaded ${cachedItems.length} items from cache for viewId=$viewId');
+
+    // ✅ 后台更新数据（异步执行，不阻塞）
+    _fetchAndCacheLatestItems(userId, viewId).then((freshItems) {
+      _libraryLog(
+          'latestByViewProvider: 🔄 Fresh data received (${freshItems.length} items) for viewId=$viewId, invalidating provider');
+      try {
+        ref.invalidateSelf();
+      } catch (e) {
+        _libraryLog('latestByViewProvider: ⚠️ Failed to invalidate: $e');
+      }
+    }).catchError((e) {
+      _libraryLog(
+          'latestByViewProvider: ❌ Background fetch failed for viewId=$viewId: $e');
+    });
+
+    return cachedItems;
+  }
+
+  // ✅ 缓存未命中，直接请求
   _libraryLog(
-      'latestByViewProvider: Fetching latest items for userId=$userId, viewId=$viewId');
+      'latestByViewProvider: ❌ Cache miss for viewId=$viewId, fetching from API');
+  return await _fetchAndCacheLatestItems(userId, viewId);
+});
+
+// ✅ 获取并缓存最新内容
+Future<List<ItemInfo>> _fetchAndCacheLatestItems(
+    String userId, String viewId) async {
   final api = await EmbyApi.create();
   final items = await api.getLatestItems(userId, parentId: viewId);
   _libraryLog(
-      'latestByViewProvider: Got ${items.length} items for viewId=$viewId');
+      'latestByViewProvider: Got ${items.length} items from API for viewId=$viewId');
+
+  // ✅ 保存到缓存
+  await CacheService.saveLatestItems(userId, viewId, items);
+
   return items;
-});
+}

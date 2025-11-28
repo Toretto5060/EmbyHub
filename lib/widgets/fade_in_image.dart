@@ -2,17 +2,24 @@
 ///
 /// 🚀 核心特性：
 /// 1. 三级缓存策略：内存缓存 -> 磁盘缓存 -> 网络加载
-/// 2. 并发控制：最多同时加载 5 张图片，避免网络拥堵
-/// 3. 取消机制：组件销毁、URL变化、滚出可视区域时自动取消加载
-/// 4. 懒加载：仅在可视范围内才开始网络加载
+/// 2. 并发控制：最多同时加载 5 张图片，避免网络拥堵（仅限网络请求）
+/// 3. 取消机制：组件销毁、URL变化、滚出可视区域时自动取消网络加载
+/// 4. 智能懒加载：缓存图片立即全部显示，只有网络请求才受可视化控制
 /// 5. 智能淡入：仅网络加载的图片有淡入效果，缓存图片立即显示
 /// 6. 错误重试：网络错误和5xx错误自动重试，4xx错误不重试
 /// 7. 请求去重：相同URL只发起一次网络请求，多个组件共享结果
 ///
 /// 📊 性能优化：
-/// - 并发控制避免同时发起过多请求导致的网络拥堵
-/// - 取消机制减少不必要的网络流量和CPU占用
+/// - 缓存图片立即全部显示，不受并发控制和可视化限制
+/// - 只有网络请求才受并发控制（最多5个）和可视化控制（懒加载）
+/// - 取消机制减少不必要的网络流量和CPU占用（仅限网络请求）
 /// - 三级缓存大幅减少网络请求次数
+///
+/// 💾 缓存策略：
+/// - 内存缓存：App运行期间有效，关闭后清空，立即显示
+/// - 磁盘缓存：永久保存在 ApplicationSupportDirectory，不自动清理，立即显示
+/// - 网络加载：受并发控制和可视化控制，有淡入效果
+/// - 只有卸载App才会删除磁盘缓存
 ///
 /// 🎯 使用场景：
 /// - 列表/网格中的大量图片加载
@@ -20,7 +27,6 @@
 /// - 网络条件不稳定的环境
 
 import 'dart:async';
-import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -39,7 +45,9 @@ import 'package:visibility_detector/visibility_detector.dart';
 const bool _kImageCacheLogging = false;
 
 void _log(String message) {
-  if (_kImageCacheLogging) {}
+  if (_kImageCacheLogging) {
+    print('[ImageCache] $message');
+  }
 }
 
 // ✅ 不可重试的异常（如404等客户端错误）
@@ -55,8 +63,7 @@ class _NonRetryableException implements Exception {
 class _ImageCache {
   static final _memoryCache = <String, ui.Image>{};
   static final _loading = <String, Future<ui.Image>>{};
-  static final Queue<_PendingRequest> _pendingRequests =
-      Queue<_PendingRequest>();
+  static final List<_PendingRequest> _pendingRequests = []; // ✅ 改用 List 支持优先级排序
   static int _activeRequests = 0;
   static const int _maxConcurrentRequests = 5; // 最大并发请求数
   static Directory? _cacheDir;
@@ -64,8 +71,9 @@ class _ImageCache {
   // 初始化缓存目录
   static Future<void> init() async {
     if (_cacheDir == null) {
-      final tempDir = await getTemporaryDirectory();
-      _cacheDir = Directory('${tempDir.path}/image_cache');
+      // ✅ 使用应用支持目录，确保持久化缓存（不会被系统自动清理）
+      final appDir = await getApplicationSupportDirectory();
+      _cacheDir = Directory('${appDir.path}/image_cache');
       if (!_cacheDir!.existsSync()) {
         _cacheDir!.createSync(recursive: true);
       }
@@ -86,50 +94,56 @@ class _ImageCache {
     try {
       await init();
       final file = _getCacheFile(url);
+      _log('🔍 Checking disk cache: ${file.path}');
+
       if (await file.exists()) {
-        _log('💾 Loading from disk cache: $url');
+        _log('✅ Disk cache file exists: ${file.path}');
 
         // ✅ 异步读取文件，不阻塞UI线程
         final bytes = await file.readAsBytes();
+        _log('📖 Read ${bytes.length} bytes from disk cache');
 
-        // ✅ 使用 compute 在后台线程解码图片（如果图片较大）
-        // 对于小图片，直接解码更快
-        final ui.Image image;
-        if (bytes.length > 100 * 1024) {
-          // 大于100KB使用后台解码
-          image = await compute(_decodeImage, bytes);
-        } else {
-          final codec = await ui.instantiateImageCodec(bytes);
-          final frame = await codec.getNextFrame();
-          image = frame.image;
-        }
+        // ✅ 在主线程解码图片（compute 在 isolate 中无法访问图片解码器）
+        _log('🔄 Decoding image (${bytes.length} bytes)');
+        final codec = await ui.instantiateImageCodec(bytes);
+        final frame = await codec.getNextFrame();
+        final image = frame.image;
+
+        _log('💾 Successfully loaded from disk cache: $url');
 
         // 同时保存到内存缓存
         putToMemory(url, image);
         return image;
+      } else {
+        _log('❌ Disk cache file not found: ${file.path}');
       }
-    } catch (e) {
+    } catch (e, stack) {
       _log('❌ Failed to load from disk cache: $e');
+      _log('Stack trace: $stack');
     }
     return null;
   }
 
-  // 在后台线程解码图片
-  static Future<ui.Image> _decodeImage(Uint8List bytes) async {
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    return frame.image;
-  }
-
-  // 保存到持久化缓存
+  // 保存到持久化缓存（永久保存，不自动清理）
   static Future<void> saveToDisk(String url, Uint8List bytes) async {
     try {
       await init();
       final file = _getCacheFile(url);
       await file.writeAsBytes(bytes);
-      _log('💾 Saved to disk cache: $url');
-    } catch (e) {
+      _log(
+          '💾 Saved to disk cache (permanent): ${file.path} (${bytes.length} bytes)');
+
+      // ✅ 验证文件是否真的保存成功
+      if (await file.exists()) {
+        final savedBytes = await file.readAsBytes();
+        _log(
+            '✅ Verified: File saved successfully (${savedBytes.length} bytes)');
+      } else {
+        _log('❌ Warning: File does not exist after save!');
+      }
+    } catch (e, stack) {
       _log('❌ Failed to save to disk cache: $e');
+      _log('Stack trace: $stack');
     }
   }
 
@@ -143,27 +157,63 @@ class _ImageCache {
   static Future<ui.Image>? getLoading(String url) => _loading[url];
 
   static Future<ui.Image> enqueueNetworkLoad(
-      String url, Future<ui.Image> Function() loader) {
+      String url, Future<ui.Image> Function() loader,
+      {bool isVisible = false}) {
     final existing = _loading[url];
     if (existing != null) {
+      // ✅ 如果已经在加载，且当前是可见的，提升优先级
+      if (isVisible) {
+        _promoteRequestPriority(url);
+      }
       return existing;
     }
     final completer = Completer<ui.Image>();
     _loading[url] = completer.future;
-    _pendingRequests.add(_PendingRequest(url, loader, completer));
+
+    // ✅ 根据可见性设置优先级
+    final request = _PendingRequest(
+      url,
+      loader,
+      completer,
+      isVisible: isVisible,
+    );
+
+    if (isVisible) {
+      // ✅ 可见的图片插入到队列前面（高优先级）
+      _pendingRequests.insert(0, request);
+      _log('🔝 High priority request added: $url');
+    } else {
+      // ✅ 不可见的图片添加到队列末尾（低优先级）
+      _pendingRequests.add(request);
+      _log('📥 Low priority request added: $url');
+    }
+
     _processQueue();
     return completer.future;
+  }
+
+  // ✅ 提升请求优先级（当图片从不可见变为可见时）
+  static void _promoteRequestPriority(String url) {
+    for (int i = 0; i < _pendingRequests.length; i++) {
+      if (_pendingRequests[i].url == url && !_pendingRequests[i].isVisible) {
+        final request = _pendingRequests.removeAt(i);
+        request.isVisible = true; // 标记为可见
+        _pendingRequests.insert(0, request); // 移到队列前面
+        _log('⬆️ Request priority promoted: $url');
+        break;
+      }
+    }
   }
 
   static void _processQueue() {
     // ✅ 并发控制：同时处理多个请求（最多 _maxConcurrentRequests 个）
     while (_activeRequests < _maxConcurrentRequests &&
         _pendingRequests.isNotEmpty) {
-      final request = _pendingRequests.removeFirst();
+      final request = _pendingRequests.removeAt(0);
       _activeRequests++;
 
       _log(
-          '🚀 Starting request (active: $_activeRequests/${_maxConcurrentRequests}): ${request.url}');
+          '🚀 Starting request (active: $_activeRequests/${_maxConcurrentRequests}, priority: ${request.isVisible ? "HIGH" : "LOW"}): ${request.url}');
 
       request.loader().then((image) {
         if (!request.completer.isCompleted) {
@@ -281,17 +331,47 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
     }
   }
 
-  /// 异步检查磁盘缓存，如果有则立即显示（无需淡入）
-  Future<void> _checkDiskCacheAsync() async {
+  /// 只加载缓存（内存+磁盘），不发起网络请求
+  /// 用于不可见区域的图片，有缓存就显示，没缓存就等到可见时再加载
+  Future<void> _loadCacheOnly() async {
     if (_isCancelled) return;
 
+    // ✅ 1. 先检查内存缓存
+    final memoryCached = _ImageCache.getFromMemory(widget.imageUrl);
+    if (memoryCached != null) {
+      _log('✅ Image from memory cache (cache-only): ${widget.imageUrl}');
+      if (mounted && _currentUrl == widget.imageUrl && !_isCancelled) {
+        if (_isFirstBuild) {
+          _image = memoryCached;
+          _shouldFadeIn = false;
+          _isLoading = false;
+          _hasError = false;
+          _isFirstBuild = false;
+        } else {
+          setState(() {
+            _image = memoryCached;
+            _shouldFadeIn = false;
+            _isLoading = false;
+            _hasError = false;
+          });
+        }
+        widget.onImageReady?.call(memoryCached);
+      }
+      return;
+    }
+
+    if (_isCancelled) return;
+
+    // ✅ 2. 检查磁盘缓存
     final diskCached = await _ImageCache.getFromDisk(widget.imageUrl);
     if (_isCancelled) return;
 
     if (diskCached != null && mounted && _currentUrl == widget.imageUrl) {
-      _log('✅ Image from disk cache (async): ${widget.imageUrl}');
+      _log('✅ Image from disk cache (cache-only): ${widget.imageUrl}');
 
-      // ✅ 如果是第一次构建且找到缓存，不需要 setState，直接设置
+      // ✅ 保存到内存缓存
+      _ImageCache.putToMemory(widget.imageUrl, diskCached);
+
       if (_isFirstBuild) {
         _image = diskCached;
         _shouldFadeIn = false;
@@ -301,16 +381,22 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
       } else {
         setState(() {
           _image = diskCached;
-          _shouldFadeIn = false; // 缓存图片不需要淡入
+          _shouldFadeIn = false;
           _isLoading = false;
           _hasError = false;
         });
       }
-
       widget.onImageReady?.call(diskCached);
     } else {
       _isFirstBuild = false;
     }
+    // ✅ 如果缓存未命中，不做任何操作，等到可见时再加载
+  }
+
+  /// 异步检查磁盘缓存，如果有则立即显示（无需淡入）
+  /// @deprecated 使用 _loadCacheOnly 替代
+  Future<void> _checkDiskCacheAsync() async {
+    await _loadCacheOnly();
   }
 
   @override
@@ -345,12 +431,13 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
         return;
       }
 
-      // 如果已经可见或禁用懒加载，立即加载
+      // ✅ 优先检查缓存（内存+磁盘），有缓存就立即显示，不受可视化控制
+      // 只有缓存未命中时才受可视化控制
       if (_isVisible || !widget.enableLazyLoad) {
         _loadImageWithCache(keepOldImage: true);
       } else {
-        // 启用懒加载且不可见时，异步检查磁盘缓存
-        _checkDiskCacheAsync();
+        // 启用懒加载且不可见时，先检查缓存，有缓存就显示
+        _loadCacheOnly();
       }
     }
   }
@@ -360,22 +447,28 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
     final wasVisible = _isVisible;
     _isVisible = info.visibleFraction > 0;
 
-    // 从可见变为不可见，取消加载
-    if (wasVisible && !_isVisible && _isLoading) {
-      _log('👁️ Image became invisible, cancelling load: ${widget.imageUrl}');
-      _cancelLoading();
+    // ✅ 从不可见变为可见：提升优先级（不取消加载）
+    if (!wasVisible && _isVisible) {
+      _log('👁️ Image became visible: ${widget.imageUrl}');
+
+      // 如果图片还没加载成功
+      if (_image == null) {
+        if (_isLoading) {
+          // ✅ 正在加载中，提升优先级到队列前面
+          _log('⬆️ Promoting priority for visible image: ${widget.imageUrl}');
+          _ImageCache._promoteRequestPriority(widget.imageUrl);
+        } else {
+          // ✅ 还没开始加载，立即开始加载（高优先级）
+          _log('🚀 Starting high priority load: ${widget.imageUrl}');
+          _isCancelled = false;
+          _loadImageWithCache();
+        }
+      }
     }
 
-    // 从不可见变为可见，需要加载图片
-    // ✅ 修复：不仅检查 _hasStartedLoading，还要检查图片是否真的加载成功
-    // 如果图片被取消后再次进入可视区域，应该重新加载
-    if (!wasVisible && _isVisible) {
-      // 如果图片还没加载成功，且不在加载中，则开始加载
-      if (_image == null && !_isLoading) {
-        _log('👁️ Image became visible, start loading: ${widget.imageUrl}');
-        _isCancelled = false;
-        _loadImageWithCache();
-      }
+    // ✅ 从可见变为不可见：不做任何操作（不取消加载，让它继续完成）
+    if (wasVisible && !_isVisible) {
+      _log('👁️ Image became invisible (continue loading): ${widget.imageUrl}');
     }
   }
 
@@ -499,9 +592,11 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
     }
 
     // 创建加载 Future 并放入正在加载的队列
+    // ✅ 传递可见性信息，用于优先级排序
     final loadFuture = _ImageCache.enqueueNetworkLoad(
       widget.imageUrl,
       _loadImageFromNetwork,
+      isVisible: _isVisible,
     );
 
     try {
@@ -719,10 +814,12 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
 }
 
 class _PendingRequest {
-  _PendingRequest(this.url, this.loader, this.completer);
+  _PendingRequest(this.url, this.loader, this.completer,
+      {this.isVisible = false});
   final String url;
   final Future<ui.Image> Function() loader;
   final Completer<ui.Image> completer;
+  bool isVisible; // ✅ 是否在可见区域（可变，用于优先级提升）
 }
 
 /*

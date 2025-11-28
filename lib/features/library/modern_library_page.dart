@@ -386,91 +386,102 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
               cacheExtent: MediaQuery.of(context).size.height * 3,
               children: [
                 // My Libraries Section
-                views.when(
-                  data: (viewList) {
-                    if (viewList.isEmpty) {
-                      return _buildEmptyState(context, isLoggedIn: true);
-                    }
-                    // ✅ 过滤出非直播和音乐的媒体库
-                    final mediaViews = viewList
-                        .where((v) =>
-                            v.collectionType != 'livetv' &&
-                            v.collectionType != 'music')
-                        .toList();
-                    // ✅ 如果只有一个媒体库，不显示最新内容模块
-                    final shouldShowLatestSections = mediaViews.length > 1;
+                // ✅ 使用缓存优先策略：有数据就显示，无论是否在加载
+                Builder(
+                  builder: (context) {
+                    final viewList = views.valueOrNull;
 
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // 我的媒体模块
-                        _buildMyLibrariesSection(context, viewList),
-                        // 继续观看模块（放在我的媒体之后）
-                        resumeItems.when(
-                          data: (items) {
-                            if (items.isEmpty) return const SizedBox.shrink();
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildSectionHeader(context, '继续观看'),
-                                const SizedBox(
-                                    height: _sectionTitleToContentSpacing),
-                                _buildResumeList(context, ref, items),
-                                const SizedBox(height: _sectionSpacing),
-                              ],
-                            );
-                          },
-                          loading: () => const SizedBox.shrink(),
-                          error: (e, st) => const SizedBox.shrink(),
-                        ),
-                        // ✅ 只有当有多个媒体库时才显示各个媒体库的最新内容
-                        if (shouldShowLatestSections) ...[
-                          ...mediaViews.map((view) =>
-                              _buildLatestSection(context, ref, view)),
-                        ],
-                        const SizedBox(height: 16),
-                      ],
-                    );
-                  },
-                  loading: () => _buildSkeletonLoading(context),
-                  error: (e, st) {
-                    // 网络错误时显示错误提示和重试按钮
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(32.0),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              CupertinoIcons.wifi_exclamationmark,
-                              size: 64,
-                              color: Colors.grey.shade400,
-                            ),
-                            const SizedBox(height: 16),
-                            DefaultTextStyle(
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: isDark
-                                    ? Colors.white.withValues(alpha: 0.7)
-                                    : Colors.black.withValues(alpha: 0.7),
-                              ),
-                              child: const Text(
-                                '加载媒体库失败\n请检查网络连接',
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            CupertinoButton.filled(
-                              onPressed: () {
-                                ref.invalidate(viewsProvider);
-                                ref.invalidate(resumeProvider);
-                              },
-                              child: const Text('重试'),
-                            ),
+                    // ✅ 如果有数据（来自缓存或API），直接显示
+                    if (viewList != null) {
+                      if (viewList.isEmpty) {
+                        return _buildEmptyState(context, isLoggedIn: true);
+                      }
+
+                      // ✅ 过滤出非直播和音乐的媒体库
+                      final mediaViews = viewList
+                          .where((v) =>
+                              v.collectionType != 'livetv' &&
+                              v.collectionType != 'music')
+                          .toList();
+                      // ✅ 如果只有一个媒体库，不显示最新内容模块
+                      final shouldShowLatestSections = mediaViews.length > 1;
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 我的媒体模块
+                          _buildMyLibrariesSection(context, viewList),
+                          // 继续观看模块（放在我的媒体之后）
+                          Builder(
+                            builder: (context) {
+                              final items = resumeItems.valueOrNull;
+                              if (items == null || items.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildSectionHeader(context, '继续观看'),
+                                  const SizedBox(
+                                      height: _sectionTitleToContentSpacing),
+                                  _buildResumeList(context, ref, items),
+                                  const SizedBox(height: _sectionSpacing),
+                                ],
+                              );
+                            },
+                          ),
+                          // ✅ 只有当有多个媒体库时才显示各个媒体库的最新内容
+                          if (shouldShowLatestSections) ...[
+                            ...mediaViews.map((view) =>
+                                _buildLatestSection(context, ref, view)),
                           ],
+                          const SizedBox(height: 16),
+                        ],
+                      );
+                    }
+
+                    // ✅ 无数据且有错误，显示错误提示
+                    if (views.hasError) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(32.0),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                CupertinoIcons.wifi_exclamationmark,
+                                size: 64,
+                                color: Colors.grey.shade400,
+                              ),
+                              const SizedBox(height: 16),
+                              DefaultTextStyle(
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.7)
+                                      : Colors.black.withValues(alpha: 0.7),
+                                ),
+                                child: const Text(
+                                  '加载媒体库失败\n请检查网络连接',
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                              const SizedBox(height: 24),
+                              CupertinoButton.filled(
+                                onPressed: () {
+                                  ref.invalidate(viewsProvider);
+                                  ref.invalidate(resumeProvider);
+                                },
+                                child: const Text('重试'),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
+                      );
+                    }
+
+                    // ✅ 无数据且正在加载：显示空白（不显示骨架屏）
+                    return const SizedBox.shrink();
                   },
                 ),
               ],
@@ -593,7 +604,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                 child: Builder(
                   builder: (context) {
                     if (view.id == null) {
-                      return _buildLibraryPlaceholder();
+                      return const SizedBox.shrink();
                     }
 
                     // ✅ 性能优化：使用 Provider 而不是 FutureBuilder
@@ -607,17 +618,16 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                           maxWidth: 300, // 媒体库卡片使用较低分辨率
                         );
                         if (url.isEmpty) {
-                          return _buildLibraryPlaceholder();
+                          return const SizedBox.shrink();
                         }
 
                         return EmbyFadeInImage(
                           imageUrl: url,
                           fit: BoxFit.cover,
-                          placeholder: _buildLibraryPlaceholder(),
                         );
                       },
-                      loading: () => _buildLibraryPlaceholder(),
-                      error: (_, __) => _buildLibraryPlaceholder(),
+                      loading: () => const SizedBox.shrink(),
+                      error: (_, __) => const SizedBox.shrink(),
                     );
                   },
                 ),
@@ -637,21 +647,6 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                 textAlign: TextAlign.center,
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLibraryPlaceholder() {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.blue.shade300,
-            Colors.purple.shade400,
           ],
         ),
       ),
@@ -1294,16 +1289,9 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
       BuildContext context, WidgetRef ref, ItemInfo item) {
     final apiAsync = ref.watch(embyApiProvider);
 
-    Widget placeholder() => Container(
-          color: CupertinoColors.systemGrey5,
-          child: const Center(
-            child: Icon(CupertinoIcons.tv, size: 48),
-          ),
-        );
-
     final itemId = item.id;
     if (itemId == null || itemId.isEmpty) {
-      return placeholder();
+      return const SizedBox.shrink();
     }
 
     return apiAsync.when(
@@ -1445,7 +1433,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         }
 
         if (url == null || url.isEmpty) {
-          return placeholder();
+          return const SizedBox.shrink();
         }
 
         // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
@@ -1453,11 +1441,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
           key: ValueKey('resume_poster_${item.id}_$url'),
           imageUrl: url,
           fit: BoxFit.cover,
-          placeholder: placeholder(),
         );
       },
-      loading: () => placeholder(),
-      error: (_, __) => placeholder(),
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 
@@ -1465,12 +1452,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
       {required bool hasBackdrop}) {
     final itemId = item.id;
     if (itemId == null || itemId.isEmpty) {
-      return Container(
-        color: CupertinoColors.systemGrey5,
-        child: const Center(
-          child: Icon(CupertinoIcons.film, size: 48),
-        ),
-      );
+      return const SizedBox.shrink();
     }
 
     // ✅ 性能优化：使用 Provider 而不是 FutureBuilder，避免重复创建 Future
@@ -1487,10 +1469,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         );
 
         if (url.isEmpty) {
-          return Container(
-            color: CupertinoColors.systemGrey5,
-            child: const Icon(CupertinoIcons.photo, size: 32),
-          );
+          return const SizedBox.shrink();
         }
 
         // ✅ 使用稳定的 key（基于 item.id + URL），只有图片 URL 变化时才重新加载
@@ -1500,131 +1479,8 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
           fit: BoxFit.cover,
         );
       },
-      loading: () => Container(color: CupertinoColors.systemGrey5),
-      error: (_, __) => Container(
-        color: CupertinoColors.systemGrey5,
-        child: const Icon(CupertinoIcons.photo, size: 32),
-      ),
-    );
-  }
-
-  // ✅ 骨架屏加载状态（提升感知性能）
-  Widget _buildSkeletonLoading(BuildContext context) {
-    final isDark = isDarkModeFromContext(context, ref);
-    final shimmerBaseColor =
-        isDark ? Colors.grey.shade800 : Colors.grey.shade300;
-    final shimmerHighlightColor =
-        isDark ? Colors.grey.shade700 : Colors.grey.shade100;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 我的媒体骨架屏
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Container(
-            width: 100,
-            height: 20,
-            decoration: BoxDecoration(
-              color: shimmerBaseColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        ),
-        const SizedBox(height: 5),
-        SizedBox(
-          height: 125,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: 3,
-            itemBuilder: (context, index) {
-              return Container(
-                width: 150,
-                margin: const EdgeInsets.only(left: 6, right: 6),
-                child: Column(
-                  children: [
-                    Container(
-                      height: 100,
-                      decoration: BoxDecoration(
-                        color: shimmerBaseColor,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      height: 14,
-                      width: 100,
-                      decoration: BoxDecoration(
-                        color: shimmerHighlightColor,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 5),
-        // 继续观看骨架屏
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Container(
-            width: 80,
-            height: 20,
-            decoration: BoxDecoration(
-              color: shimmerBaseColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        ),
-        const SizedBox(height: 5),
-        SizedBox(
-          height: 141,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: 2,
-            itemBuilder: (context, index) {
-              return Container(
-                width: 180,
-                margin: const EdgeInsets.only(left: 6, right: 6),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      height: 101,
-                      decoration: BoxDecoration(
-                        color: shimmerBaseColor,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      height: 14,
-                      width: 120,
-                      decoration: BoxDecoration(
-                        color: shimmerHighlightColor,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      height: 12,
-                      width: 80,
-                      decoration: BoxDecoration(
-                        color: shimmerHighlightColor,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ],
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 

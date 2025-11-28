@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/emby_api.dart';
+import '../../services/cache_service.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/emby_api_provider.dart';
 import '../../utils/app_route_observer.dart';
@@ -365,16 +366,56 @@ final resumeMoviesProvider =
 
 final itemsProvider =
     FutureProvider.family<List<ItemInfo>, String>((ref, viewId) async {
-  // ✅ 移除 libraryRefreshTickerProvider 的 watch，改为在页面生命周期时手动刷新
   final sortState = ref.watch(sortStateProvider(viewId));
   final authAsync = ref.watch(authStateProvider);
   final auth = authAsync.value;
   if (auth == null || !auth.isLoggedIn) return <ItemInfo>[];
+
+  final userId = auth.userId!;
+  final sortBy = sortState.sortBy.value;
+  final ascending = sortState.ascending;
+
+  // ✅ 先尝试从缓存加载
+  final cachedItems = await CacheService.loadLibraryItems(
+    userId: userId,
+    parentId: viewId,
+    sortBy: sortBy,
+    ascending: ascending,
+  );
+
+  if (cachedItems != null && cachedItems.isNotEmpty) {
+    // ✅ 后台更新数据（异步执行，不阻塞）
+    _fetchAndCacheLibraryItems(ref, viewId, userId, sortState)
+        .then((freshItems) {
+      // ✅ 使用 invalidateSelf 触发重新加载
+      try {
+        ref.invalidateSelf();
+      } catch (e) {
+        // 忽略错误
+      }
+    }).catchError((e) {
+      // 忽略后台更新错误
+    });
+
+    return cachedItems;
+  }
+
+  // ✅ 缓存未命中，直接请求
+  return await _fetchAndCacheLibraryItems(ref, viewId, userId, sortState);
+});
+
+// ✅ 获取并缓存列表数据
+Future<List<ItemInfo>> _fetchAndCacheLibraryItems(
+  FutureProviderRef<List<ItemInfo>> ref,
+  String viewId,
+  String userId,
+  SortState sortState,
+) async {
   final api = await ref.read(embyApiProvider.future);
 
   // ✅ 先获取少量数据来判断库类型
   final sampleItems = await api.getItemsByParent(
-    userId: auth.userId!,
+    userId: userId,
     parentId: viewId,
     includeItemTypes: 'Movie,Series,BoxSet,Video',
     limit: 10,
@@ -399,12 +440,10 @@ final itemsProvider =
   if (!availableSortOptions.contains(sortState.sortBy)) {
     // ✅ 向后兼容：对于不支持的字段，使用新列表中的第一个选项作为默认值
     if (libraryType == 'Series') {
-      // ✅ 对于Series，使用新列表中的第一个选项（IMDB评分）
       currentSortOption = availableSortOptions.isNotEmpty
           ? availableSortOptions.first
           : SortOption.premiereDate;
     } else {
-      // ✅ 对于Movie类型，使用新列表中的第一个选项（电影类型）
       currentSortOption = availableSortOptions.isNotEmpty
           ? availableSortOptions.first
           : SortOption.premiereDate;
@@ -436,7 +475,7 @@ final itemsProvider =
 
     while (true) {
       final result = await api.getItemsByParentWithTotal(
-        userId: auth.userId!,
+        userId: userId,
         parentId: viewId,
         includeItemTypes: 'Movie,Series,BoxSet,Video',
         sortBy: sortBy,
@@ -463,11 +502,12 @@ final itemsProvider =
     return allItems;
   }
 
+  List<ItemInfo> items;
   // 对于电视剧库，只获取 Series，不获取单集
   // ✅ 对于Series和Movie类型，直接使用选择的排序字段
   if (libraryType == 'Series') {
     try {
-      return await loadAllItems(sortBy: sortBy, ascending: ascending);
+      items = await loadAllItems(sortBy: sortBy, ascending: ascending);
     } catch (e) {
       // ✅ 如果排序失败，使用新列表中的第一个选项作为默认排序
       final fallbackOption = availableSortOptions.isNotEmpty
@@ -479,7 +519,7 @@ final itemsProvider =
           fallbackOption != SortOption.random) {
         fallbackSortBy = '$fallbackSortBy,${SortOption.name.value}';
       }
-      return await loadAllItems(
+      items = await loadAllItems(
         sortBy: fallbackSortBy,
         ascending: false,
         fallbackSortBy: fallbackSortBy,
@@ -488,20 +528,31 @@ final itemsProvider =
   } else {
     // ✅ 对于Movie类型，直接使用选择的排序字段，并启用合集合并
     try {
-      return await loadAllItems(sortBy: sortBy, ascending: ascending);
+      items = await loadAllItems(sortBy: sortBy, ascending: ascending);
     } catch (e) {
       // ✅ 如果排序失败，使用PremiereDate作为默认排序
       // ✅ 给 fallback 排序也添加 SortName
       String fallbackSortBy =
           '${SortOption.premiereDate.value},${SortOption.name.value}';
-      return await loadAllItems(
+      items = await loadAllItems(
         sortBy: fallbackSortBy,
         ascending: false,
         fallbackSortBy: fallbackSortBy,
       );
     }
   }
-});
+
+  // ✅ 保存到缓存
+  await CacheService.saveLibraryItems(
+    userId: userId,
+    parentId: viewId,
+    sortBy: sortState.sortBy.value,
+    ascending: sortState.ascending,
+    items: items,
+  );
+
+  return items;
+}
 
 class LibraryItemsPage extends ConsumerStatefulWidget {
   const LibraryItemsPage({
