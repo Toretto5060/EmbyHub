@@ -410,6 +410,22 @@ final itemsProvider =
 });
 
 // ✅ 获取并缓存列表数据
+// ✅ 判断影片是否有横向艺术图（16:9）
+bool _hasHorizontalArtworkForItem(ItemInfo item) {
+  final hasBackdrop = (item.backdropImageTags?.isNotEmpty ?? false) ||
+      (item.parentBackdropImageTags?.isNotEmpty ?? false);
+  if (hasBackdrop) return true;
+
+  final imageTags = item.imageTags ?? const <String, String>{};
+  final primaryTag = imageTags['Primary'];
+  if (primaryTag == null || primaryTag.isEmpty) {
+    return false;
+  }
+  // 如果缺少壁纸但存在 Primary 图，就将其作为竖向海报处理
+  return false;
+}
+
+// ✅ 获取并缓存列表数据
 Future<List<ItemInfo>> _fetchAndCacheLibraryItems(
   FutureProviderRef<List<ItemInfo>> ref,
   String viewId,
@@ -594,17 +610,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   }
 
   bool _hasHorizontalArtwork(ItemInfo item) {
-    final hasBackdrop = (item.backdropImageTags?.isNotEmpty ?? false) ||
-        (item.parentBackdropImageTags?.isNotEmpty ?? false);
-    if (hasBackdrop) return true;
-
-    final imageTags = item.imageTags ?? const <String, String>{};
-    final primaryTag = imageTags['Primary'];
-    if (primaryTag == null || primaryTag.isEmpty) {
-      return false;
-    }
-    // 如果缺少壁纸但存在 Primary 图，就将其作为竖向海报处理
-    return false;
+    return _hasHorizontalArtworkForItem(item);
   }
 
   List<List<_RowEntry>> _buildRows(List<ItemInfo> items) {
@@ -2706,24 +2712,54 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
     return apiAsync.when(
       data: (api) {
         String? imageUrl;
+        String? imageType;
         final imageTags = item.imageTags ?? const <String, String>{};
         final backdropTags = item.backdropImageTags ?? const <String>[];
 
-        if (backdropTags.isNotEmpty) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Backdrop',
-            tag: backdropTags.first,
-            imageIndex: 0,
-            maxWidth: 800,
-          );
-        } else if (imageTags['Primary'] != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Primary',
-            tag: imageTags['Primary']!,
-            maxWidth: 800,
-          );
+        // ✅ 使用 _hasHorizontalArtworkForItem 判断是否是16:9
+        final hasHorizontalArtwork = _hasHorizontalArtworkForItem(item);
+
+        if (!hasHorizontalArtwork) {
+          // ✅ 16:9影片：优先使用Primary，与影片tab保持一致，提高缓存命中率
+          if (imageTags['Primary'] != null) {
+            imageUrl = api.buildImageUrl(
+              itemId: itemId,
+              type: 'Primary',
+              tag: imageTags['Primary']!,
+              maxWidth: 800,
+            );
+            imageType = 'Primary';
+          } else if (backdropTags.isNotEmpty) {
+            // Fallback to Backdrop
+            imageUrl = api.buildImageUrl(
+              itemId: itemId,
+              type: 'Backdrop',
+              tag: backdropTags.first,
+              imageIndex: 0,
+              maxWidth: 800,
+            );
+            imageType = 'Backdrop';
+          }
+        } else {
+          // ✅ 非16:9影片：使用原来的逻辑（Backdrop > Primary）
+          if (backdropTags.isNotEmpty) {
+            imageUrl = api.buildImageUrl(
+              itemId: itemId,
+              type: 'Backdrop',
+              tag: backdropTags.first,
+              imageIndex: 0,
+              maxWidth: 800,
+            );
+            imageType = 'Backdrop';
+          } else if (imageTags['Primary'] != null) {
+            imageUrl = api.buildImageUrl(
+              itemId: itemId,
+              type: 'Primary',
+              tag: imageTags['Primary']!,
+              maxWidth: 800,
+            );
+            imageType = 'Primary';
+          }
         }
 
         if (imageUrl == null) {
@@ -3032,65 +3068,94 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
     return apiAsync.when(
       data: (api) {
         String? imageUrl;
+        String? imageType;
         final imageTags = item.imageTags ?? const <String, String>{};
         final backdropTags = item.backdropImageTags ?? const <String>[];
 
-        // 优先级：缩略图 > 背景图 > 主图 > 季缩略图 > 季背景图 > 季主图 > 剧集主图
-        if (imageTags['Thumb'] != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Thumb',
-            tag: imageTags['Thumb']!,
-            maxWidth: 800,
-          );
-        } else if (backdropTags.isNotEmpty) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Backdrop',
-            tag: backdropTags.first,
-            imageIndex: 0,
-            maxWidth: 800,
-          );
-        } else if (imageTags['Primary'] != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: itemId,
-            type: 'Primary',
-            tag: imageTags['Primary']!,
-            maxWidth: 800,
-          );
-        } else if (item.parentThumbItemId != null &&
-            item.parentThumbImageTag != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: item.parentThumbItemId!,
-            type: 'Thumb',
-            tag: item.parentThumbImageTag!,
-            maxWidth: 800,
-          );
-        } else if (item.parentBackdropItemId != null &&
-            (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
-          imageUrl = api.buildImageUrl(
-            itemId: item.parentBackdropItemId!,
-            type: 'Backdrop',
-            tag: item.parentBackdropImageTags!.first,
-            imageIndex: 0,
-            maxWidth: 800,
-          );
-        } else if (item.seasonId != null &&
-            item.seasonPrimaryImageTag != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: item.seasonId!,
-            type: 'Primary',
-            tag: item.seasonPrimaryImageTag!,
-            maxWidth: 800,
-          );
-        } else if (item.seriesId != null &&
-            item.seriesPrimaryImageTag != null) {
-          imageUrl = api.buildImageUrl(
-            itemId: item.seriesId!,
-            type: 'Primary',
-            tag: item.seriesPrimaryImageTag!,
-            maxWidth: 800,
-          );
+        // ✅ 判断是否是16:9（有横向背景图）
+        final hasBackdrop = (imageTags['Thumb'] != null) ||
+            backdropTags.isNotEmpty ||
+            (item.parentThumbItemId != null &&
+                item.parentThumbImageTag != null) ||
+            (item.parentBackdropItemId != null &&
+                (item.parentBackdropImageTags?.isNotEmpty ?? false));
+
+        if (hasBackdrop) {
+          // ✅ 16:9剧集：优先使用Thumb，然后Primary，最后才是Backdrop（与影片tab的Primary逻辑类似）
+          if (imageTags['Thumb'] != null) {
+            imageUrl = api.buildImageUrl(
+              itemId: itemId,
+              type: 'Thumb',
+              tag: imageTags['Thumb']!,
+              maxWidth: 800,
+            );
+            imageType = 'Thumb';
+          } else if (imageTags['Primary'] != null) {
+            imageUrl = api.buildImageUrl(
+              itemId: itemId,
+              type: 'Primary',
+              tag: imageTags['Primary']!,
+              maxWidth: 800,
+            );
+            imageType = 'Primary';
+          } else if (backdropTags.isNotEmpty) {
+            imageUrl = api.buildImageUrl(
+              itemId: itemId,
+              type: 'Backdrop',
+              tag: backdropTags.first,
+              imageIndex: 0,
+              maxWidth: 800,
+            );
+            imageType = 'Backdrop';
+          } else if (item.parentThumbItemId != null &&
+              item.parentThumbImageTag != null) {
+            imageUrl = api.buildImageUrl(
+              itemId: item.parentThumbItemId!,
+              type: 'Thumb',
+              tag: item.parentThumbImageTag!,
+              maxWidth: 800,
+            );
+            imageType = 'ParentThumb';
+          } else if (item.parentBackdropItemId != null &&
+              (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
+            imageUrl = api.buildImageUrl(
+              itemId: item.parentBackdropItemId!,
+              type: 'Backdrop',
+              tag: item.parentBackdropImageTags!.first,
+              imageIndex: 0,
+              maxWidth: 800,
+            );
+            imageType = 'ParentBackdrop';
+          }
+        } else {
+          // ✅ 非16:9剧集：使用原来的逻辑
+          if (imageTags['Primary'] != null) {
+            imageUrl = api.buildImageUrl(
+              itemId: itemId,
+              type: 'Primary',
+              tag: imageTags['Primary']!,
+              maxWidth: 800,
+            );
+            imageType = 'Primary';
+          } else if (item.seasonId != null &&
+              item.seasonPrimaryImageTag != null) {
+            imageUrl = api.buildImageUrl(
+              itemId: item.seasonId!,
+              type: 'Primary',
+              tag: item.seasonPrimaryImageTag!,
+              maxWidth: 800,
+            );
+            imageType = 'SeasonPrimary';
+          } else if (item.seriesId != null &&
+              item.seriesPrimaryImageTag != null) {
+            imageUrl = api.buildImageUrl(
+              itemId: item.seriesId!,
+              type: 'Primary',
+              tag: item.seriesPrimaryImageTag!,
+              maxWidth: 800,
+            );
+            imageType = 'SeriesPrimary';
+          }
         }
 
         if (imageUrl == null) {

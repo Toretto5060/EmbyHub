@@ -74,6 +74,17 @@ final similarItemsProvider =
     return const [];
   }
 
+  // ✅ 检查当前影片是否是16:9，如果是则不请求类似影片
+  final itemAsync = ref.read(itemProvider(itemId));
+  final currentItem = itemAsync.valueOrNull;
+  if (currentItem != null) {
+    // 使用 hasHorizontalArtwork 判断是否是9:16
+    final hasHorizontalArtwork = _hasHorizontalArtwork(currentItem);
+    if (!hasHorizontalArtwork) {
+      return const [];
+    }
+  }
+
   // ✅ 优化2：先尝试从缓存加载
   final cachedItems = await CacheService.loadSimilarItems(auth.userId!, itemId);
   if (cachedItems != null) {
@@ -88,6 +99,20 @@ final similarItemsProvider =
   await CacheService.saveSimilarItems(auth.userId!, itemId, items);
   return items;
 });
+
+bool _hasHorizontalArtwork(ItemInfo item) {
+  if (item.backdropImageTags != null && item.backdropImageTags!.isNotEmpty) {
+    return true;
+  }
+  if (item.parentBackdropImageTags != null &&
+      item.parentBackdropImageTags!.isNotEmpty) {
+    return true;
+  }
+  if ((item.imageTags?['Primary'] ?? '').isEmpty) {
+    return false;
+  }
+  return false;
+}
 
 /// ✅ 后台获取并缓存相似影片数据
 Future<void> _fetchAndCacheSimilarItems(String userId, String itemId) async {
