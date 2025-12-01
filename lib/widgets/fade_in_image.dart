@@ -350,8 +350,8 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
     }
   }
 
-  /// 只加载缓存（内存+磁盘），不发起网络请求
-  /// 用于不可见区域的图片，有缓存就显示，没缓存就等到可见时再加载
+  /// 加载缓存，如果没有缓存则发起低优先级网络请求
+  /// 用于不可见区域的图片，有缓存就显示，没缓存就低优先级加载
   Future<void> _loadCacheOnly() async {
     if (_isCancelled) return;
 
@@ -406,10 +406,13 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
         });
       }
       widget.onImageReady?.call(diskCached);
-    } else {
-      _isFirstBuild = false;
+      return;
     }
-    // ✅ 如果缓存未命中，不做任何操作，等到可见时再加载
+
+    // ✅ 如果缓存未命中，发起低优先级网络请求
+    _isFirstBuild = false;
+    _log('📥 Cache miss, starting low priority load: ${widget.imageUrl}');
+    _loadImageWithCache();
   }
 
   /// 异步检查磁盘缓存，如果有则立即显示（无需淡入）
