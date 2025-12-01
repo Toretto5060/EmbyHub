@@ -67,13 +67,12 @@ class _ImageCache {
   static int _activeRequests = 0;
   static const int _maxConcurrentRequests = 5; // 最大并发请求数
   static Directory? _cacheDir;
-  static String? _currentUserId; // ✅ 当前用户ID
   static String? _currentServerId; // ✅ 当前服务器ID
 
-  // ✅ 设置当前用户ID和服务器ID（在登录时调用）
+  // ✅ 设置当前服务器ID（在登录时调用）
+  // 注意：同一服务器的所有用户共享图片缓存
   static void setCurrentUserAndServer(String? userId, String? serverId) {
-    if (_currentUserId != userId || _currentServerId != serverId) {
-      _currentUserId = userId;
+    if (_currentServerId != serverId) {
       _currentServerId = serverId;
       _cacheDir = null; // 重置缓存目录，下次init时会创建新的目录
       _memoryCache.clear(); // 清除内存缓存
@@ -86,19 +85,12 @@ class _ImageCache {
       // ✅ 使用应用缓存目录，允许系统/用户清理
       final cacheDir = await getApplicationCacheDirectory();
 
-      // ✅ 目录结构：image_cache/{serverId}/{userId}/
+      // ✅ 目录结构：image_cache/{serverId}/ (所有用户共享)
       if (_currentServerId != null && _currentServerId!.isNotEmpty) {
-        if (_currentUserId != null && _currentUserId!.isNotEmpty) {
-          _cacheDir = Directory(
-              '${cacheDir.path}/image_cache/$_currentServerId/$_currentUserId');
-        } else {
-          // ✅ 有服务器但未登录
-          _cacheDir = Directory(
-              '${cacheDir.path}/image_cache/$_currentServerId/default');
-        }
+        _cacheDir = Directory('${cacheDir.path}/image_cache/$_currentServerId');
       } else {
         // ✅ 未连接服务器时使用默认目录
-        _cacheDir = Directory('${cacheDir.path}/image_cache/default/default');
+        _cacheDir = Directory('${cacheDir.path}/image_cache/default');
       }
 
       if (!_cacheDir!.existsSync()) {

@@ -1500,8 +1500,9 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
       final auth = ref.read(authStateProvider).value;
       final userId = auth?.userId;
 
-      final imageSize =
-          await ServerCacheManager.getImageCacheSize(userId: userId);
+      // ✅ 图片缓存是服务器级别的（所有用户共享），不需要传userId
+      final imageSize = await ServerCacheManager.getImageCacheSize();
+      // ✅ 数据缓存是用户级别的，需要传userId
       final dataSize =
           await ServerCacheManager.getDataCacheSize(userId: userId);
 
@@ -1521,7 +1522,8 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('清除图片缓存'),
-        content: const Text('确定要清除当前用户的图片缓存吗？\n\n清除后图片将重新从服务器加载。'),
+        content: const Text(
+            '确定要清除当前服务器的图片缓存吗？\n\n清除后图片将重新从服务器加载。\n注意：此操作会清除当前设备该服务器所有用户的图片缓存。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -1540,11 +1542,8 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
 
     setState(() => _isLoading = true);
 
-    // ✅ 获取当前用户ID
-    final auth = ref.read(authStateProvider).value;
-    final userId = auth?.userId;
-
-    await ServerCacheManager.clearImageCache(userId: userId);
+    // ✅ 图片缓存是服务器级别的，所有用户共享
+    await ServerCacheManager.clearImageCache();
 
     if (mounted) {
       setState(() => _isLoading = false);
