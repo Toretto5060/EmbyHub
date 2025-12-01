@@ -461,18 +461,31 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     );
   }
 
-  /// ✅ 加载保存的音频和字幕选择
+  /// ✅ 加载保存的音频和字幕选择（剧集类型优先加载seriesId级别的选择）
   Future<void> _loadStreamSelections() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+
+      // ✅ 确定加载的key前缀：剧集类型优先使用seriesId
+      String keyPrefix;
+      if (_itemType == 'Episode' && _itemDetails?.seriesId != null) {
+        keyPrefix = 'series_${_itemDetails!.seriesId}';
+        _playerLog('📖 [Player] 加载剧集级别的音频/字幕选择: ${_itemDetails!.seriesId}');
+      } else {
+        keyPrefix = 'item_${widget.itemId}';
+        _playerLog('📖 [Player] 加载单个项目的音频/字幕选择: ${widget.itemId}');
+      }
+
       final hasManualAudio =
-          prefs.getBool('item_${widget.itemId}_manual_audio') ?? false;
+          prefs.getBool('${keyPrefix}_manual_audio') ?? false;
       final hasManualSubtitle =
-          prefs.getBool('item_${widget.itemId}_manual_subtitle') ?? false;
+          prefs.getBool('${keyPrefix}_manual_subtitle') ?? false;
 
       final audioIndex =
-          hasManualAudio ? prefs.getInt('item_${widget.itemId}_audio') : null;
-      final subtitleIndex = prefs.getInt('item_${widget.itemId}_subtitle');
+          hasManualAudio ? prefs.getInt('${keyPrefix}_audio') : null;
+      final subtitleIndex = prefs.getInt('${keyPrefix}_subtitle');
+
+      _playerLog('📖 [Player] 加载的选择 - 音频索引: $audioIndex, 字幕索引: $subtitleIndex');
 
       if (mounted) {
         setState(() {
@@ -706,31 +719,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
   }
 
-  // ✅ 保存音频和字幕选择（保存数组索引，用于UI显示）
+  // ✅ 保存音频和字幕选择（剧集类型按seriesId保存，其他类型按itemId保存）
   Future<void> _saveStreamSelections() async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
+      // ✅ 确定保存的key前缀：剧集类型使用seriesId，其他类型使用itemId
+      String keyPrefix;
+      if (_itemType == 'Episode' && _itemDetails?.seriesId != null) {
+        keyPrefix = 'series_${_itemDetails!.seriesId}';
+        _playerLog('💾 [Player] 保存剧集级别的音频/字幕选择: ${_itemDetails!.seriesId}');
+      } else {
+        keyPrefix = 'item_${widget.itemId}';
+        _playerLog('💾 [Player] 保存单个项目的音频/字幕选择: ${widget.itemId}');
+      }
+
       // ✅ 保存音频数组索引
       if (_selectedAudioStreamIndex != null &&
           _selectedAudioStreamIndex! >= 0) {
-        await prefs.setInt(
-            'item_${widget.itemId}_audio', _selectedAudioStreamIndex!);
+        await prefs.setInt('${keyPrefix}_audio', _selectedAudioStreamIndex!);
         _playerLog('💾 [Player] 保存音频选择(数组索引): $_selectedAudioStreamIndex');
       }
 
       // ✅ 保存字幕数组索引（支持-1表示不显示）
       if (_selectedSubtitleStreamIndex != null) {
         await prefs.setInt(
-            'item_${widget.itemId}_subtitle', _selectedSubtitleStreamIndex!);
+            '${keyPrefix}_subtitle', _selectedSubtitleStreamIndex!);
         _playerLog(
             '💾 [Player] 保存字幕选择(数组索引): $_selectedSubtitleStreamIndex, manual: $_hasManuallySelectedSubtitle');
       }
 
       await prefs.setBool(
-          'item_${widget.itemId}_manual_audio', _hasManuallySelectedAudio);
-      await prefs.setBool('item_${widget.itemId}_manual_subtitle',
-          _hasManuallySelectedSubtitle);
+          '${keyPrefix}_manual_audio', _hasManuallySelectedAudio);
+      await prefs.setBool(
+          '${keyPrefix}_manual_subtitle', _hasManuallySelectedSubtitle);
     } catch (e) {
       _playerLog('❌ [Player] Save stream selections failed: $e');
     }
@@ -4343,6 +4365,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _playerLogImportant('🎬 [Player] Switching to new episode: $newItemId');
 
     try {
+      // ✅ 立即暂停播放器，停止声音
+      await _guardPlayerCommand('pause before switch', () => _player.pause());
+      _playerLog('⏸️ [Player] Paused player before switching episode');
+
       // ✅ 先向 Emby 汇报旧剧集的播放停止（只汇报一次）
       if (!_hasReportedPlaybackStopped &&
           _api != null &&
@@ -4359,7 +4385,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             positionTicks: positionTicks,
           );
           _hasReportedPlaybackStopped = true; // ✅ 标记已汇报
-          _playerLog('✅ [Player] Reported playback stopped for old episode');
         } catch (e) {
           _playerLog('⚠️ [Player] Failed to report playback stopped: $e');
         }
@@ -4420,24 +4445,103 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         );
       }
 
+      // ✅ 在更新流列表之前，保存之前选择的轨道信息
+      String? previousAudioLanguage;
+      String? previousAudioCodec;
+      String? previousSubtitleLanguage;
+
+      // ✅ 只要有选择的索引，就尝试保存语言信息（不管是否手动选择）
+      if (_selectedAudioStreamIndex != null &&
+          _selectedAudioStreamIndex! >= 0 &&
+          _selectedAudioStreamIndex! < _audioStreams.length) {
+        final prevAudio = _audioStreams[_selectedAudioStreamIndex!];
+        previousAudioLanguage = prevAudio['Language'] as String?;
+        previousAudioCodec = prevAudio['Codec'] as String?;
+      }
+
+      if (_selectedSubtitleStreamIndex != null &&
+          _selectedSubtitleStreamIndex! >= 0 &&
+          _selectedSubtitleStreamIndex! < _subtitleStreams.length) {
+        final prevSubtitle = _subtitleStreams[_selectedSubtitleStreamIndex!];
+        previousSubtitleLanguage = prevSubtitle['Language'] as String?;
+      }
+
       // ✅ 更新音频和字幕流信息（新剧集）
       _audioStreams = _getAudioStreams(itemDetails);
       _subtitleStreams = _getSubtitleStreams(itemDetails);
+
+      // ✅ 重新匹配音频和字幕轨道（基于语言和编码，而不是索引）
+      int? newAudioIndex;
+      int? newSubtitleIndex;
+
+      // 匹配音频轨道（优先匹配语言+编码，其次只匹配语言）
+      if (previousAudioLanguage != null) {
+        for (int i = 0; i < _audioStreams.length; i++) {
+          final audio = _audioStreams[i];
+          final lang = audio['Language'] as String?;
+          final codec = audio['Codec'] as String?;
+
+          if (lang == previousAudioLanguage && codec == previousAudioCodec) {
+            newAudioIndex = i;
+            break;
+          } else if (lang == previousAudioLanguage && newAudioIndex == null) {
+            newAudioIndex = i;
+          }
+        }
+
+        if (newAudioIndex != null) {
+          _selectedAudioStreamIndex = newAudioIndex;
+          _hasManuallySelectedAudio = true;
+        } else {
+          _selectedAudioStreamIndex = null;
+          _hasManuallySelectedAudio = false;
+        }
+      } else {
+        _selectedAudioStreamIndex = null;
+        _hasManuallySelectedAudio = false;
+      }
+
+      // 匹配字幕轨道（基于语言）
+      if (_selectedSubtitleStreamIndex == -1) {
+        // 用户选择了"不显示字幕"，保持这个选择
+        newSubtitleIndex = -1;
+        _selectedSubtitleStreamIndex = -1;
+        _hasManuallySelectedSubtitle = true;
+      } else if (previousSubtitleLanguage != null) {
+        for (int i = 0; i < _subtitleStreams.length; i++) {
+          final subtitle = _subtitleStreams[i];
+          final lang = subtitle['Language'] as String?;
+
+          if (lang == previousSubtitleLanguage) {
+            newSubtitleIndex = i;
+            break;
+          }
+        }
+
+        if (newSubtitleIndex != null) {
+          _selectedSubtitleStreamIndex = newSubtitleIndex;
+          _hasManuallySelectedSubtitle = true;
+        } else {
+          _selectedSubtitleStreamIndex = null;
+          _hasManuallySelectedSubtitle = false;
+        }
+      } else {
+        _selectedSubtitleStreamIndex = null;
+        _hasManuallySelectedSubtitle = false;
+      }
 
       // ✅ 获取实际的 MediaStream Index（用于 PlaybackInfo）
       int? actualAudioIndex;
       int? actualSubtitleIndex;
 
-      if (_hasManuallySelectedAudio &&
-          _selectedAudioStreamIndex != null &&
+      if (_selectedAudioStreamIndex != null &&
           _selectedAudioStreamIndex! >= 0 &&
           _selectedAudioStreamIndex! < _audioStreams.length) {
         actualAudioIndex =
             _audioStreams[_selectedAudioStreamIndex!]['Index'] as int?;
       }
 
-      if (_hasManuallySelectedSubtitle &&
-          _selectedSubtitleStreamIndex != null) {
+      if (_selectedSubtitleStreamIndex != null) {
         if (_selectedSubtitleStreamIndex! >= 0 &&
             _selectedSubtitleStreamIndex! < _subtitleStreams.length) {
           actualSubtitleIndex =
@@ -4446,9 +4550,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           actualSubtitleIndex = -1;
         }
       }
-
-      _playerLog(
-          '🎬 [Player] Switch episode - Audio Index: $actualAudioIndex, Subtitle Index: $actualSubtitleIndex');
 
       // ✅ 获取PlaybackInfo和MediaSourceId（传递音频和字幕索引）
       final playbackInfo = await _api!.getPlaybackInfo(
@@ -4490,7 +4591,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         startTimeTicks: 0, // 新剧集从头开始
       );
 
-      _playerLogImportant('🎬 [Player] New episode URL: ${media.uri}');
+      // ✅ 检测是否为 HLS 流（与初始加载逻辑一致）
+      final isHlsStream =
+          media.uri.contains('.m3u8') || media.uri.contains('hls');
 
       // ✅ 直接切换播放URL（不重新创建播放器）
       await _guardPlayerCommand(
@@ -4498,13 +4601,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         () => _player.open(
           url: media.uri,
           headers: media.headers,
-          isHls: true,
+          isHls: isHlsStream, // ✅ 根据URL类型动态判断
           autoPlay: true, // 自动播放新剧集
           startPosition: Duration.zero, // 从头开始
         ),
       );
-
-      _playerLogImportant('✅ [Player] Successfully switched to new episode');
 
       // ✅ 主动向 Emby 汇报新剧集的播放开始
       if (_playSessionId != null && _mediaSourceId != null) {
@@ -4524,7 +4625,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             subtitleStreamIndex: subtitleIndex,
           );
           _hasReportedPlaybackStart = true; // ✅ 标记已汇报，防止重复
-          _playerLog('✅ [Player] Reported playback start for new episode');
         } catch (e) {
           _playerLog('⚠️ [Player] Failed to report playback start: $e');
         }
