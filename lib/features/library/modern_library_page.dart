@@ -37,6 +37,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   bool _isRouteSubscribed = false;
   String? _serverNameHost;
   Future<String>? _serverNameFuture;
+  bool _isPageVisible = false; // ✅ 页面是否可见（用于延迟加载媒体库内容）
 
   // 统一管理间距
   static const double _sectionTitleToContentSpacing = 5.0; // 模块标题距离下方卡片的高度
@@ -151,6 +152,17 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // ✅ 延迟加载媒体库内容：等待页面转场动画结束后再标记为可见
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 350), () {
+        if (mounted) {
+          setState(() {
+            _isPageVisible = true;
+          });
+        }
+      });
+    });
   }
 
   bool _wasRouteCurrent = false;
@@ -254,22 +266,23 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
         ((resumeItems.isLoading && resumeItems.valueOrNull == null) ||
             (views.isLoading && views.valueOrNull == null));
 
-    // ✅ 第二波并行请求：预加载所有媒体库的最新内容
-    // 当 views 有数据后，立即触发所有 latest 请求（不等待渲染）
-    final viewIds = views.whenData((viewList) {
-          return viewList
-              .where((v) =>
-                  v.collectionType != 'livetv' &&
-                  v.collectionType != 'music' &&
-                  v.id != null)
-              .map((v) => v.id!)
-              .toList();
-        }).value ??
-        [];
+    // ✅ 延迟加载媒体库内容：只有页面可见时才加载媒体库最新内容
+    final viewIds = _isPageVisible
+        ? (views.whenData((viewList) {
+              return viewList
+                  .where((v) =>
+                      v.collectionType != 'livetv' &&
+                      v.collectionType != 'music' &&
+                      v.id != null)
+                  .map((v) => v.id!)
+                  .toList();
+            }).value ??
+            [])
+        : <String>[];
 
-    // 立即触发所有媒体库的最新内容请求（并行）
+    // ✅ 延迟加载：只有页面可见时才触发媒体库最新内容请求
     final latestProviders = <AsyncValue<List<ItemInfo>>>[];
-    if (viewIds.isNotEmpty) {
+    if (_isPageVisible && viewIds.isNotEmpty) {
       _homeLog('build: 🚀 并行请求所有媒体库最新内容: ${viewIds.length} 个');
       for (final viewId in viewIds) {
         final latestAsync = ref.watch(latestByViewProvider(viewId));

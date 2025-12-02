@@ -40,6 +40,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../utils/theme_utils.dart';
+import '../utils/transition_optimizer.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 const bool _kImageCacheLogging = false;
@@ -225,6 +226,14 @@ class _ImageCache {
   }
 
   static void _processQueue() {
+    // ✅ 如果正在转场，暂停处理新的图片加载请求
+    if (TransitionOptimizer.isTransitioning) {
+      _log('⏸️ Pausing image loading during transition');
+      // 延迟100ms后重试
+      Future.delayed(const Duration(milliseconds: 100), _processQueue);
+      return;
+    }
+
     // ✅ 并发控制：同时处理多个请求（最多 _maxConcurrentRequests 个）
     while (_activeRequests < _maxConcurrentRequests &&
         _pendingRequests.isNotEmpty) {

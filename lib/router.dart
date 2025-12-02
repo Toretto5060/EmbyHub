@@ -29,7 +29,7 @@ CupertinoPage<T> buildCupertinoPage<T>({
 }) {
   return CupertinoPage<T>(
     key: state.pageKey,
-    // ✅ 使用 RepaintBoundary 隔离重绘，提升转场性能（不改变动画时间）
+    // ✅ 使用 RepaintBoundary 隔离重绘，提升转场性能
     child: RepaintBoundary(child: child),
   );
 }

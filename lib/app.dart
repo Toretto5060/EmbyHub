@@ -12,6 +12,37 @@ final routerProvider = Provider<GoRouter>((ref) {
   return createRouter();
 });
 
+// ✅ 缓存 Theme 配置，避免每次 build 时重新创建
+final _lightTheme = ThemeData(
+  useMaterial3: true,
+  colorScheme: ColorScheme.fromSeed(
+    seedColor: const Color(0xFF667eea),
+    brightness: Brightness.light,
+  ),
+  // ✅ 性能优化：禁用页面转场动画的阴影效果
+  pageTransitionsTheme: const PageTransitionsTheme(
+    builders: {
+      TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    },
+  ),
+);
+
+final _darkTheme = ThemeData(
+  useMaterial3: true,
+  colorScheme: ColorScheme.fromSeed(
+    seedColor: const Color(0xFF667eea),
+    brightness: Brightness.dark,
+  ),
+  // ✅ 性能优化：禁用页面转场动画的阴影效果
+  pageTransitionsTheme: const PageTransitionsTheme(
+    builders: {
+      TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    },
+  ),
+);
+
 class EmbyApp extends ConsumerWidget {
   const EmbyApp({super.key});
 
@@ -92,34 +123,8 @@ class EmbyApp extends ConsumerWidget {
           },
         );
       },
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF667eea),
-          brightness: Brightness.light,
-        ),
-        // ✅ 性能优化：禁用页面转场动画的阴影效果
-        pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {
-            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-          },
-        ),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF667eea),
-          brightness: Brightness.dark,
-        ),
-        // ✅ 性能优化：禁用页面转场动画的阴影效果
-        pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {
-            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-          },
-        ),
-      ),
+      theme: _lightTheme,
+      darkTheme: _darkTheme,
     );
   }
 }

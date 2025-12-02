@@ -45,10 +45,11 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    // ✅ 使用 PageView 实现左右滑动效果
-    return PageView(
+    // ✅ 使用 PageView.builder 实现左右滑动效果（懒加载）
+    return PageView.builder(
       controller: _pageController,
       physics: const NeverScrollableScrollPhysics(), // ✅ 禁用手势滑动，只通过底部导航切换
+      itemCount: 3,
       onPageChanged: (index) {
         // ✅ 同步更新底部导航栏的选中状态
         if (_currentIndex != index) {
@@ -62,12 +63,26 @@ class _HomePageState extends State<HomePage> {
           }
         }
       },
-      children: const [
-        ModernLibraryPage(),
-        _PlaceholderPage(title: '收藏/下载'),
-        SettingsPage(),
-      ],
+      itemBuilder: (context, index) {
+        // ✅ 使用 RepaintBoundary 隔离每个页面
+        return RepaintBoundary(
+          child: _buildPageAtIndex(index),
+        );
+      },
     );
+  }
+
+  Widget _buildPageAtIndex(int index) {
+    switch (index) {
+      case 0:
+        return const ModernLibraryPage();
+      case 1:
+        return const _PlaceholderPage(title: '收藏/下载');
+      case 2:
+        return const SettingsPage();
+      default:
+        return const SizedBox.shrink();
+    }
   }
 }
 
