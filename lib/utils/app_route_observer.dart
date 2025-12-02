@@ -8,11 +8,11 @@ class PerformanceRouteObserver extends RouteObserver<ModalRoute<void>> {
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didPush(route, previousRoute);
     // 标记转场开始
-    TransitionOptimizer.markTransitionStart();
+    TransitionOptimizer.onPageTransitionStart();
 
     // 在转场动画结束后标记转场结束（CupertinoPage 默认 300ms）
     Future.delayed(const Duration(milliseconds: 350), () {
-      TransitionOptimizer.markTransitionEnd();
+      TransitionOptimizer.onPageTransitionEnd();
     });
   }
 
@@ -20,11 +20,11 @@ class PerformanceRouteObserver extends RouteObserver<ModalRoute<void>> {
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didPop(route, previousRoute);
     // 标记转场开始
-    TransitionOptimizer.markTransitionStart();
+    TransitionOptimizer.onPageTransitionStart();
 
     // 在转场动画结束后标记转场结束（CupertinoPage 默认 300ms）
     Future.delayed(const Duration(milliseconds: 350), () {
-      TransitionOptimizer.markTransitionEnd();
+      TransitionOptimizer.onPageTransitionEnd();
     });
   }
 }

@@ -13,6 +13,7 @@ import '../../providers/settings_provider.dart';
 import '../../providers/emby_api_provider.dart';
 import '../../utils/app_route_observer.dart';
 import '../../utils/debounce_helper.dart';
+import '../../utils/transition_optimizer.dart';
 import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/theme_utils.dart';
@@ -601,12 +602,22 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   bool _isPageAnimating = false; // ✅ 标记PageView是否正在动画
   bool _isSortMenuOpen = false; // ✅ 排序菜单是否打开
   List<ItemInfo>? _cachedItemsList; // ✅ 缓存itemsList，避免重新加载时闪烁
+  bool _isPageVisible = false; // ✅ 页面是否可见（转场结束后才可见）
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _pageController = PageController(initialPage: 0);
+
+    // ✅ 等待转场结束后再标记页面可见
+    TransitionOptimizer.deferUntilTransitionEnd(() {
+      if (mounted) {
+        setState(() {
+          _isPageVisible = true;
+        });
+      }
+    });
   }
 
   bool _hasHorizontalArtwork(ItemInfo item) {
@@ -680,27 +691,35 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   }
 
   void _scheduleRefresh() {
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
+    // ✅ 等待转场结束后再刷新数据
+    TransitionOptimizer.deferUntilTransitionEnd(() {
       if (!mounted) return;
 
-      // ✅ 清除防抖记录，确保能立即刷新
-      final auth = ref.read(authStateProvider).value;
-      if (auth != null && auth.isLoggedIn) {
-        final sortState = ref.read(sortStateProvider(widget.viewId));
-        final key =
-            'library_items_${auth.userId}_${widget.viewId}_${sortState.sortBy.value}_${sortState.ascending}';
-        DebounceHelper.clear(key);
-      }
+      // ✅ 标记页面可见
+      _isPageVisible = true;
 
-      // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
-      // ignore: unused_result
-      ref.refresh(itemsProvider(widget.viewId));
-      // ignore: unused_result
-      ref.refresh(genresProvider(widget.viewId));
-      // ignore: unused_result
-      ref.refresh(episodesProvider(widget.viewId));
-      // ignore: unused_result
-      ref.refresh(resumeMoviesProvider(widget.viewId));
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+
+        // ✅ 清除防抖记录，确保能立即刷新
+        final auth = ref.read(authStateProvider).value;
+        if (auth != null && auth.isLoggedIn) {
+          final sortState = ref.read(sortStateProvider(widget.viewId));
+          final key =
+              'library_items_${auth.userId}_${widget.viewId}_${sortState.sortBy.value}_${sortState.ascending}';
+          DebounceHelper.clear(key);
+        }
+
+        // ✅ 使用 refresh 而不是 invalidate，确保立即重新加载数据
+        // ignore: unused_result
+        ref.refresh(itemsProvider(widget.viewId));
+        // ignore: unused_result
+        ref.refresh(genresProvider(widget.viewId));
+        // ignore: unused_result
+        ref.refresh(episodesProvider(widget.viewId));
+        // ignore: unused_result
+        ref.refresh(resumeMoviesProvider(widget.viewId));
+      });
     });
   }
 
@@ -715,12 +734,24 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
   @override
   void didPush() {
+    _isPageVisible = true;
     _scheduleRefresh();
   }
 
   @override
   void didPopNext() {
+    _isPageVisible = true;
     _scheduleRefresh();
+  }
+
+  @override
+  void didPushNext() {
+    _isPageVisible = false; // 页面变为不可见
+  }
+
+  @override
+  void didPop() {
+    _isPageVisible = false; // 页面被移除
   }
 
   @override
@@ -827,7 +858,9 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
     // ✅ 对于"类型"tab，只显示类型列表（点击类型会跳转到新页面）
     if (tab == '类型') {
-      final genresAsync = ref.watch(genresProvider(widget.viewId));
+      final genresAsync = _isPageVisible
+          ? ref.watch(genresProvider(widget.viewId))
+          : const AsyncValue<List<GenreInfo>>.loading();
       return genresAsync.when(
         data: (genres) {
           if (genres.isEmpty) {
@@ -865,7 +898,9 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     if (tab == '继续观看') {
       if (libraryType == 'Series') {
         // ✅ 电视剧类型：使用 episodesProvider 获取剧集
-        final episodesAsync = ref.watch(episodesProvider(widget.viewId));
+        final episodesAsync = _isPageVisible
+            ? ref.watch(episodesProvider(widget.viewId))
+            : const AsyncValue<List<ItemInfo>>.loading();
         return episodesAsync.when(
           data: (episodes) {
             if (episodes.isEmpty) {
@@ -900,7 +935,9 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
         );
       } else if (libraryType == 'Movie') {
         // ✅ 电影类型：使用 resumeMoviesProvider 获取电影
-        final moviesAsync = ref.watch(resumeMoviesProvider(widget.viewId));
+        final moviesAsync = _isPageVisible
+            ? ref.watch(resumeMoviesProvider(widget.viewId))
+            : const AsyncValue<List<ItemInfo>>.loading();
         return moviesAsync.when(
           data: (movies) {
             if (movies.isEmpty) {
@@ -1459,14 +1496,20 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     int actualItemCount = filteredCount;
     if (currentTab == '继续观看') {
       if (libraryType == 'Series') {
-        final episodesAsync = ref.watch(episodesProvider(widget.viewId));
+        final episodesAsync = _isPageVisible
+            ? ref.watch(episodesProvider(widget.viewId))
+            : const AsyncValue<List<ItemInfo>>.loading();
         actualItemCount = episodesAsync.valueOrNull?.length ?? 0;
       } else if (libraryType == 'Movie') {
-        final moviesAsync = ref.watch(resumeMoviesProvider(widget.viewId));
+        final moviesAsync = _isPageVisible
+            ? ref.watch(resumeMoviesProvider(widget.viewId))
+            : const AsyncValue<List<ItemInfo>>.loading();
         actualItemCount = moviesAsync.valueOrNull?.length ?? 0;
       }
     } else if (currentTab == '类型') {
-      final genresAsync = ref.watch(genresProvider(widget.viewId));
+      final genresAsync = _isPageVisible
+          ? ref.watch(genresProvider(widget.viewId))
+          : const AsyncValue<List<GenreInfo>>.loading();
       actualItemCount = genresAsync.valueOrNull?.length ?? 0;
     }
 
@@ -1536,7 +1579,10 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
   @override
   Widget build(BuildContext context) {
-    final items = ref.watch(itemsProvider(widget.viewId));
+    // ✅ 只有在页面可见时才请求数据
+    final items = _isPageVisible
+        ? ref.watch(itemsProvider(widget.viewId))
+        : AsyncValue<List<ItemInfo>>.data(_cachedItemsList ?? []);
 
     // ✅ 使用valueOrNull来获取当前值，如果有值就使用，避免loading状态导致的闪烁
     // 当sortState改变时，itemsProvider会重新获取数据，但valueOrNull会保留之前的值

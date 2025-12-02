@@ -8,22 +8,42 @@ import 'package:flutter/widgets.dart';
 class TransitionOptimizer {
   static bool _isTransitioning = false;
   static final List<VoidCallback> _listeners = [];
+  static final List<VoidCallback> _pendingCallbacks = [];
 
   /// 是否正在转场
   static bool get isTransitioning => _isTransitioning;
 
   /// 标记转场开始
-  static void markTransitionStart() {
+  static void onPageTransitionStart() {
     if (_isTransitioning) return;
     _isTransitioning = true;
     _notifyListeners();
   }
 
   /// 标记转场结束
-  static void markTransitionEnd() {
+  static void onPageTransitionEnd() {
     if (!_isTransitioning) return;
     _isTransitioning = false;
     _notifyListeners();
+    _executePendingCallbacks();
+  }
+
+  /// 延迟执行任务直到转场结束
+  static void deferUntilTransitionEnd(VoidCallback callback) {
+    if (_isTransitioning) {
+      _pendingCallbacks.add(callback);
+    } else {
+      callback();
+    }
+  }
+
+  /// 执行所有待处理的回调
+  static void _executePendingCallbacks() {
+    final callbacks = List<VoidCallback>.from(_pendingCallbacks);
+    _pendingCallbacks.clear();
+    for (final callback in callbacks) {
+      callback();
+    }
   }
 
   /// 添加监听器
