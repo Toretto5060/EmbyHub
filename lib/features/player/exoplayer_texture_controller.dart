@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -120,6 +121,22 @@ class ExoPlayerTextureController {
   }
 
   Future<void> disableSubtitles() => _invoke('disableSubtitles');
+
+  /// ✅ 获取指定位置的视频帧（用于预览）
+  /// 返回 JPEG 格式的字节数组
+  Future<Uint8List?> getFrameAtPosition(Duration position) async {
+    _ensureNotDisposed();
+    try {
+      final result = await _channel.invokeMethod<Uint8List>(
+        'getFrameAtPosition',
+        {'positionMs': position.inMilliseconds},
+      );
+      return result;
+    } catch (e) {
+      _debugLog('Failed to get frame at ${position.inSeconds}s: $e');
+      return null;
+    }
+  }
 
   /// 释放资源。调用后请勿再监听任何流或调用其他控制方法。
   Future<void> dispose() async {

@@ -18,6 +18,7 @@ import '../../widgets/fade_in_image.dart';
 import 'custom_subtitle_overlay.dart';
 import 'exoplayer_texture_controller.dart';
 import 'player_controls.dart';
+import 'video_preview_widget.dart';
 
 void _playerLog(String message) {
   if (kDebugMode) {
@@ -149,6 +150,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isDraggingProgress = false;
   Duration? _draggingPosition;
   bool _wasPlayingBeforeDrag = false;
+  bool _enableVideoPreview = true; // ✅ 是否启用视频预览功能
   Future<void> _performSeek(
     Duration target, {
     bool resumeAfterSeek = true,
@@ -3072,6 +3074,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                       _wasPlayingBeforeDrag = _isPlaying;
                     });
                     _cancelHideControlsTimer();
+                    // ✅ 拖动过程中不暂停播放，让视频继续播放
+                    // 预览窗口显示当前画面 + 目标时间提示
                   },
                   onDragging: (d) {
                     setState(() {
@@ -3083,6 +3087,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     setState(() {
                       _draggingPosition = null;
                     });
+
                     await _performSeek(
                       d,
                       resumeAfterSeek: shouldResume,
@@ -3232,6 +3237,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                       ),
                     ),
                   ),
+                ),
+
+              // ✅ 视频预览组件（在拖动进度条时显示，放在最顶层）
+              if (_enableVideoPreview &&
+                  _isDraggingProgress &&
+                  _draggingPosition != null &&
+                  _duration > Duration.zero)
+                VideoPreviewWidget(
+                  player: _player,
+                  previewPosition: _draggingPosition!,
+                  duration: _duration,
+                  formatTime: _formatTime,
                 ),
             ],
           ),

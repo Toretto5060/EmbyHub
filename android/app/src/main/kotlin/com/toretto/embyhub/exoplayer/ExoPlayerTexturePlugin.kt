@@ -1,11 +1,14 @@
 package com.toretto.embyhub.exoplayer
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.TrafficStats
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
 import com.google.android.exoplayer2.C
+import java.io.ByteArrayOutputStream
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.LoadControl
 import com.google.android.exoplayer2.MediaItem
@@ -39,6 +42,10 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var eventSink: EventChannel.EventSink? = null
     private var renderersFactory: DefaultRenderersFactory? = null
     private val handler = Handler(Looper.getMainLooper())
+    
+    // ✅ 视频帧提取器（用于预览）
+    private var currentMediaUrl: String? = null
+    private var currentMediaHeaders: Map<String, String>? = null
 
     // ✅ 网络速度计算相关变量（使用系统 TrafficStats）
     private var lastTotalRxBytes: Long = 0
@@ -194,6 +201,11 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(null)
             }
 
+            "getFrameAtPosition" -> {
+                val positionMs = call.argument<Number>("positionMs")?.toLong() ?: 0L
+                getFrameAtPosition(positionMs, result)
+            }
+
             else -> result.notImplemented()
         }
     }
@@ -281,6 +293,10 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         isHls: Boolean
     ) {
         initializeTextureIfNeeded()
+
+        // ✅ 保存当前媒体信息（用于帧提取）
+        currentMediaUrl = url
+        currentMediaHeaders = headers
 
         // 每次打开新媒体都重建播放器，确保清除旧状态
         val loadControl = cacheConfig?.let { buildLoadControl(it) }
@@ -415,6 +431,69 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "networkSpeedBps" to networkSpeed
         )
         sink.success(state)
+    }
+
+    /**
+     * ✅ 获取指定位置的视频帧（用于预览）
+     * 使用 MediaMetadataRetriever 异步提取帧，避免阻塞主线程
+     */
+    private fun getFrameAtPosition(positionMs: Long, result: MethodChannel.Result) {
+        val url = currentMediaUrl
+        val headers = currentMediaHeaders
+
+        if (url == null) {
+            result.error("NO_MEDIA", "No media loaded", null)
+            return
+        }
+
+        // ✅ 在后台线程执行帧提取（避免阻塞主线程）
+        Thread {
+            var retriever: MediaMetadataRetriever? = null
+            try {
+                retriever = MediaMetadataRetriever()
+                
+                // ✅ 设置数据源（支持 HTTP headers）
+                if (headers != null && headers.isNotEmpty()) {
+                    retriever.setDataSource(url, headers)
+                } else {
+                    retriever.setDataSource(url)
+                }
+
+                // ✅ 获取指定时间的帧（微秒）
+                val timeUs = positionMs * 1000
+                val bitmap = retriever.getFrameAtTime(
+                    timeUs,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                )
+
+                if (bitmap != null) {
+                    // ✅ 压缩为 JPEG 字节数组
+                    val stream = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                    val bytes = stream.toByteArray()
+                    bitmap.recycle()
+
+                    // ✅ 返回到主线程
+                    handler.post {
+                        result.success(bytes)
+                    }
+                } else {
+                    handler.post {
+                        result.error("FRAME_NULL", "Failed to extract frame", null)
+                    }
+                }
+            } catch (e: Exception) {
+                handler.post {
+                    result.error("EXTRACTION_ERROR", e.message, null)
+                }
+            } finally {
+                try {
+                    retriever?.release()
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+        }.start()
     }
 }
 
