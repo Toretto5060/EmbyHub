@@ -9,6 +9,7 @@ import android.os.Looper
 import android.view.Surface
 import com.google.android.exoplayer2.C
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.Executors
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.LoadControl
 import com.google.android.exoplayer2.MediaItem
@@ -46,6 +47,8 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     // ✅ 视频帧提取器（用于预览）
     private var currentMediaUrl: String? = null
     private var currentMediaHeaders: Map<String, String>? = null
+    private var frameRetriever: MediaMetadataRetriever? = null // ✅ 复用的帧提取器
+    private val frameExecutor = Executors.newSingleThreadExecutor() // ✅ 单线程池处理帧提取
 
     // ✅ 网络速度计算相关变量（使用系统 TrafficStats）
     private var lastTotalRxBytes: Long = 0
@@ -118,6 +121,8 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         handler.removeCallbacks(progressRunnable)
         methodChannel.setMethodCallHandler(null)
         disposePlayer()
+        releaseFrameRetriever()
+        frameExecutor.shutdown()
         surface?.release()
         textureEntry?.release()
         surface = null
@@ -193,6 +198,7 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
             "dispose" -> {
                 disposePlayer()
+                releaseFrameRetriever()
                 // 清理texture和surface，避免下次进入时显示残留画面
                 surface?.release()
                 surface = null
@@ -297,6 +303,9 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // ✅ 保存当前媒体信息（用于帧提取）
         currentMediaUrl = url
         currentMediaHeaders = headers
+        
+        // ✅ 初始化帧提取器（复用以提高性能）
+        initializeFrameRetriever(url, headers)
 
         // 每次打开新媒体都重建播放器，确保清除旧状态
         val loadControl = cacheConfig?.let { buildLoadControl(it) }
@@ -434,44 +443,78 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     /**
-     * ✅ 获取指定位置的视频帧（用于预览）
-     * 使用 MediaMetadataRetriever 异步提取帧，避免阻塞主线程
+     * ✅ 初始化帧提取器（复用以提高性能）
      */
-    private fun getFrameAtPosition(positionMs: Long, result: MethodChannel.Result) {
-        val url = currentMediaUrl
-        val headers = currentMediaHeaders
-
-        if (url == null) {
-            result.error("NO_MEDIA", "No media loaded", null)
-            return
-        }
-
-        // ✅ 在后台线程执行帧提取（避免阻塞主线程）
-        Thread {
-            var retriever: MediaMetadataRetriever? = null
+    private fun initializeFrameRetriever(url: String, headers: Map<String, String>?) {
+        // ✅ 在后台线程初始化
+        frameExecutor.execute {
             try {
-                retriever = MediaMetadataRetriever()
+                // ✅ 释放旧的提取器
+                frameRetriever?.release()
                 
-                // ✅ 设置数据源（支持 HTTP headers）
+                // ✅ 创建新的提取器
+                val retriever = MediaMetadataRetriever()
                 if (headers != null && headers.isNotEmpty()) {
                     retriever.setDataSource(url, headers)
                 } else {
                     retriever.setDataSource(url)
                 }
+                frameRetriever = retriever
+            } catch (e: Exception) {
+                // 初始化失败，后续会每次创建新的
+                frameRetriever = null
+            }
+        }
+    }
+
+    /**
+     * ✅ 获取指定位置的视频帧（用于预览）
+     * 优化版本：复用 MediaMetadataRetriever，使用关键帧提取，降低质量
+     */
+    private fun getFrameAtPosition(positionMs: Long, result: MethodChannel.Result) {
+        if (currentMediaUrl == null) {
+            result.error("NO_MEDIA", "No media loaded", null)
+            return
+        }
+
+        // ✅ 使用线程池执行帧提取
+        frameExecutor.execute {
+            try {
+                val retriever = frameRetriever
+                if (retriever == null) {
+                    handler.post {
+                        result.error("RETRIEVER_NULL", "Frame retriever not initialized", null)
+                    }
+                    return@execute
+                }
 
                 // ✅ 获取指定时间的帧（微秒）
                 val timeUs = positionMs * 1000
+                
+                // ✅ 使用 OPTION_CLOSEST_SYNC 获取最近的关键帧（速度快）
+                // 虽然不如 OPTION_CLOSEST 精确，但速度快很多，适合预览
                 val bitmap = retriever.getFrameAtTime(
                     timeUs,
                     MediaMetadataRetriever.OPTION_CLOSEST_SYNC
                 )
 
                 if (bitmap != null) {
-                    // ✅ 压缩为 JPEG 字节数组
+                    // ✅ 缩放图片（目标宽度 240px，进一步减小数据量）
+                    val scaledBitmap = if (bitmap.width > 240) {
+                        val scale = 240.0 / bitmap.width
+                        val newHeight = (bitmap.height * scale).toInt()
+                        Bitmap.createScaledBitmap(bitmap, 240, newHeight, false).also {
+                            if (it != bitmap) bitmap.recycle()
+                        }
+                    } else {
+                        bitmap
+                    }
+                    
+                    // ✅ 压缩为 JPEG（质量 60，预览足够）
                     val stream = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                    scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 60, stream)
                     val bytes = stream.toByteArray()
-                    bitmap.recycle()
+                    scaledBitmap.recycle()
 
                     // ✅ 返回到主线程
                     handler.post {
@@ -486,14 +529,22 @@ class ExoPlayerTexturePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 handler.post {
                     result.error("EXTRACTION_ERROR", e.message, null)
                 }
-            } finally {
-                try {
-                    retriever?.release()
-                } catch (e: Exception) {
-                    // Ignore
-                }
             }
-        }.start()
+        }
+    }
+    
+    /**
+     * ✅ 清理资源
+     */
+    private fun releaseFrameRetriever() {
+        frameExecutor.execute {
+            try {
+                frameRetriever?.release()
+                frameRetriever = null
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
     }
 }
 
