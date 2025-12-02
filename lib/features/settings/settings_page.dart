@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -24,11 +25,24 @@ class SettingsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authStateProvider);
     final server = ref.watch(serverSettingsProvider);
+    final isDark = isDarkModeFromContext(context, ref);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('设置'),
-        elevation: 0,
+      extendBodyBehindAppBar: true,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+            child: AppBar(
+              title: const Text('设置'),
+              elevation: 0,
+              backgroundColor: isDark
+                  ? const Color(0xFF1C1C1E).withOpacity(0)
+                  : const Color(0xFFF2F2F7).withOpacity(0),
+            ),
+          ),
+        ),
       ),
       body: auth.when(
         data: (authData) {

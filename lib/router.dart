@@ -22,14 +22,15 @@ final GlobalKey<NavigatorState> _rootNavigatorKey =
 final GlobalKey<NavigatorState> _shellNavigatorKey =
     GlobalKey<NavigatorState>(debugLabel: 'shell');
 
-// Cupertino style page transition
+// ✅ 优化的 Cupertino 页面转场 - 保持原生动画时间，只优化性能
 CupertinoPage<T> buildCupertinoPage<T>({
   required Widget child,
   required GoRouterState state,
 }) {
   return CupertinoPage<T>(
     key: state.pageKey,
-    child: child,
+    // ✅ 使用 RepaintBoundary 隔离重绘，提升转场性能（不改变动画时间）
+    child: RepaintBoundary(child: child),
   );
 }
 
@@ -183,10 +184,10 @@ GoRouter createRouter() {
           final fromStart = params['fromStart'] == 'true';
           final positionTicks = int.tryParse(params['positionTicks'] ?? '');
           final initialTicks = fromStart ? 0 : (positionTicks ?? 0);
-          
+
           // ✅ 从 extra 中获取传递的参数（如果有）
           final extra = state.extra as Map<String, dynamic>?;
-          
+
           return buildCupertinoPage(
             child: PlayerPage(
               itemId: itemId,

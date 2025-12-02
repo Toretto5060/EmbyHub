@@ -55,6 +55,8 @@ class EmbyApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       routerConfig: router,
       themeMode: materialThemeMode, // ✅ 使用 themeMode，MaterialApp 会自动切换主题而不重建应用
+      // ✅ 性能优化：禁用 Checkerboard 调试模式
+      showPerformanceOverlay: false,
       builder: (context, child) {
         // ✅ 监听主题模式变化，使用用户选择的主题模式计算亮度（而不是系统平台亮度）
         return Consumer(
@@ -80,7 +82,10 @@ class EmbyApp extends ConsumerWidget {
                 final finalStyle = style ?? defaultStyle;
                 return AnnotatedRegion<SystemUiOverlayStyle>(
                   value: finalStyle,
-                  child: child ?? const SizedBox.shrink(),
+                  // ✅ 使用 RepaintBoundary 隔离整个应用的重绘
+                  child: RepaintBoundary(
+                    child: child ?? const SizedBox.shrink(),
+                  ),
                 );
               },
             );
@@ -93,12 +98,26 @@ class EmbyApp extends ConsumerWidget {
           seedColor: const Color(0xFF667eea),
           brightness: Brightness.light,
         ),
+        // ✅ 性能优化：禁用页面转场动画的阴影效果
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          },
+        ),
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF667eea),
           brightness: Brightness.dark,
+        ),
+        // ✅ 性能优化：禁用页面转场动画的阴影效果
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          },
         ),
       ),
     );

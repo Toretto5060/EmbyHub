@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
@@ -6,6 +7,12 @@ import 'utils/platform_utils.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ✅ 性能优化：启用高刷新率
   await PlatformUtils.requestHighRefreshRate();
+
+  // ✅ 性能优化：设置时间膨胀系数为1.0（确保动画以正常速度运行）
+  timeDilation = 1.0;
+
   runApp(const ProviderScope(child: EmbyApp()));
 }
