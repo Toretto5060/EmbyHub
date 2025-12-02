@@ -801,13 +801,15 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
             ),
           );
     }
-    // 正在加载且没有旧图片，显示呼吸占位图
+    // 正在加载且没有旧图片
     else if (_isLoading) {
-      child = const _ShimmerPlaceholder();
+      // ✅ 如果有自定义 placeholder，直接显示（避免头像场景闪烁）
+      // 如果没有 placeholder，显示呼吸占位图
+      child = widget.placeholder ?? const _ShimmerPlaceholder();
     }
     // 默认透明占位符（未开始加载）
     else {
-      child = Container(color: Colors.transparent);
+      child = widget.placeholder ?? Container(color: Colors.transparent);
     }
 
     // 如果启用懒加载，使用 VisibilityDetector 包裹

@@ -617,25 +617,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       } else {
         // ✅ 播放时，如果控制栏显示则启动自动隐藏计时器
         if (_showControls) {
-          // ✅ 如果是首次自动播放，立刻隐藏控制栏（但要检查是否有菜单显示）
+          // ✅ 标记首次自动播放已完成
           if (_isFirstTimeAutoPlay) {
             _isFirstTimeAutoPlay = false;
-            // ✅ 如果有音频或字幕菜单显示，不隐藏控制栏
-            if (!_showAudioMenu && !_showSubtitleMenu) {
-              _playerLog(
-                  '🎬 [Player] First time auto play, hide controls immediately');
-              _controlsAnimationController.reverse();
-              SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-              if (mounted) {
-                setState(() {
-                  _showControls = false;
-                });
-              }
-            }
-          } else {
-            // ✅ 非首次播放（用户手动显示控制栏后），3秒后自动隐藏
-            _startHideControlsTimer();
           }
+          // ✅ 无论是否首次播放，都使用 3 秒延迟自动隐藏
+          _startHideControlsTimer();
         }
 
         // ✅ 只在未汇报过播放开始时才汇报（防止重复汇报）

@@ -7,6 +7,7 @@ import '../../core/emby_api.dart';
 import '../../providers/account_history_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../providers/emby_api_provider.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../widgets/custom_toast.dart';
 import '../../utils/theme_utils.dart';
@@ -1143,7 +1144,7 @@ class SettingsPage extends ConsumerWidget {
 }
 
 // ✅ 用户头像组件 - 圆形（用于账号切换列表）
-class _UserAvatar extends StatelessWidget {
+class _UserAvatar extends ConsumerWidget {
   const _UserAvatar({
     super.key,
     required this.username,
@@ -1156,20 +1157,17 @@ class _UserAvatar extends StatelessWidget {
   final bool isCurrent;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // 如果没有 userId，直接显示默认头像
     if (userId == null || userId!.isEmpty) {
       return _buildDefaultAvatar();
     }
 
-    return FutureBuilder<EmbyApi>(
-      future: EmbyApi.create(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return _buildDefaultAvatar();
-        }
+    final apiAsync = ref.watch(embyApiProvider);
 
-        final api = snapshot.data!;
+    // ✅ 立即显示默认头像，避免闪烁
+    return apiAsync.when(
+      data: (api) {
         final avatarUrl = api.buildUserImageUrl(userId!);
 
         return ClipOval(
@@ -1180,11 +1178,13 @@ class _UserAvatar extends StatelessWidget {
               imageUrl: avatarUrl,
               fit: BoxFit.cover,
               placeholder: _buildDefaultAvatar(),
-              fadeDuration: const Duration(milliseconds: 300),
+              fadeDuration: const Duration(milliseconds: 200),
             ),
           ),
         );
       },
+      loading: () => _buildDefaultAvatar(),
+      error: (_, __) => _buildDefaultAvatar(),
     );
   }
 
@@ -1203,7 +1203,7 @@ class _UserAvatar extends StatelessWidget {
 }
 
 // ✅ 用户头像组件 - 圆角矩形（用于设置页"当前用户"）
-class _UserAvatarRounded extends StatelessWidget {
+class _UserAvatarRounded extends ConsumerWidget {
   const _UserAvatarRounded({
     super.key,
     required this.username,
@@ -1216,20 +1216,17 @@ class _UserAvatarRounded extends StatelessWidget {
   final Color color;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // 如果没有 userId，直接显示默认图标
     if (userId == null || userId!.isEmpty) {
       return _buildDefaultIcon();
     }
 
-    return FutureBuilder<EmbyApi>(
-      future: EmbyApi.create(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return _buildDefaultIcon();
-        }
+    final apiAsync = ref.watch(embyApiProvider);
 
-        final api = snapshot.data!;
+    // ✅ 立即显示默认图标，避免闪烁
+    return apiAsync.when(
+      data: (api) {
         final avatarUrl = api.buildUserImageUrl(userId!);
 
         return Container(
@@ -1245,11 +1242,13 @@ class _UserAvatarRounded extends StatelessWidget {
               imageUrl: avatarUrl,
               fit: BoxFit.cover,
               placeholder: _buildDefaultIcon(),
-              fadeDuration: const Duration(milliseconds: 300),
+              fadeDuration: const Duration(milliseconds: 200),
             ),
           ),
         );
       },
+      loading: () => _buildDefaultIcon(),
+      error: (_, __) => _buildDefaultIcon(),
     );
   }
 

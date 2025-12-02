@@ -1042,12 +1042,21 @@ class _PlayPauseButton extends StatelessWidget {
                       GestureDetector(
                         onTap: state.onPlayPause,
                         child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
+                          duration: const Duration(milliseconds: 200),
+                          switchInCurve: Curves.easeOut,
+                          switchOutCurve: Curves.easeIn,
                           transitionBuilder: (child, animation) {
-                            return ScaleTransition(
-                              scale: animation,
-                              child: FadeTransition(
-                                opacity: animation,
+                            // ✅ 使用更流畅的淡入淡出 + 轻微缩放动画
+                            return FadeTransition(
+                              opacity: animation,
+                              child: ScaleTransition(
+                                scale: Tween<double>(
+                                  begin: 0.85,
+                                  end: 1.0,
+                                ).animate(CurvedAnimation(
+                                  parent: animation,
+                                  curve: Curves.easeOutCubic,
+                                )),
                                 child: child,
                               ),
                             );

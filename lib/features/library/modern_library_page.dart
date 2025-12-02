@@ -392,13 +392,10 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                 Builder(
                   builder: (context) {
                     final viewList = views.valueOrNull;
+                    final isLoading = views.isLoading;
 
                     // ✅ 如果有数据（来自缓存或API），直接显示
-                    if (viewList != null) {
-                      if (viewList.isEmpty) {
-                        return _buildEmptyState(context, isLoggedIn: true);
-                      }
-
+                    if (viewList != null && viewList.isNotEmpty) {
                       // ✅ 过滤出非直播和音乐的媒体库
                       final mediaViews = viewList
                           .where((v) =>
@@ -442,6 +439,16 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                       );
                     }
 
+                    // ✅ 如果数据为空但还在加载中，显示空白（等待加载完成）
+                    if (isLoading) {
+                      return const SizedBox.shrink();
+                    }
+
+                    // ✅ 如果数据为空且加载完成（不在加载中），显示空状态
+                    if (viewList != null && viewList.isEmpty) {
+                      return _buildEmptyState(context, isLoggedIn: true);
+                    }
+
                     // ✅ 无数据且有错误，显示错误提示
                     if (views.hasError) {
                       return Center(
@@ -482,7 +489,7 @@ class _ModernLibraryPageState extends ConsumerState<ModernLibraryPage>
                       );
                     }
 
-                    // ✅ 无数据且正在加载：显示空白（不显示骨架屏）
+                    // ✅ 其他情况：显示空白
                     return const SizedBox.shrink();
                   },
                 ),
@@ -1564,42 +1571,46 @@ class _UserAvatarMenu extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return GestureDetector(
       onTap: () => _showUserMenu(context, ref),
-      child: FutureBuilder<EmbyApi>(
-        future: EmbyApi.create(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return _buildDefaultAvatar();
-          }
+      child: _buildAvatar(ref),
+    );
+  }
 
-          final api = snapshot.data!;
-          final avatarUrl = api.buildUserImageUrl(userId);
+  Widget _buildAvatar(WidgetRef ref) {
+    final apiAsync = ref.watch(embyApiProvider);
 
-          return ClipOval(
-            child: SizedBox(
-              width: 28, // ✅ 缩小到 28
-              height: 28,
-              child: EmbyFadeInImage(
-                imageUrl: avatarUrl,
-                fit: BoxFit.cover,
-                placeholder: _buildDefaultAvatar(),
-                fadeDuration: const Duration(milliseconds: 300),
-              ),
+    // ✅ 立即显示默认头像，避免闪烁
+    return apiAsync.when(
+      data: (api) {
+        final avatarUrl = api.buildUserImageUrl(userId);
+
+        return ClipOval(
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: EmbyFadeInImage(
+              key: ValueKey('avatar_$userId'), // ✅ 使用 userId 作为 key，避免重复加载
+              imageUrl: avatarUrl,
+              fit: BoxFit.cover,
+              placeholder: _buildDefaultAvatar(),
+              fadeDuration: const Duration(milliseconds: 150),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
+      loading: () => _buildDefaultAvatar(),
+      error: (_, __) => _buildDefaultAvatar(),
     );
   }
 
   Widget _buildDefaultAvatar() {
     return CircleAvatar(
-      radius: 14, // ✅ 缩小到 14
+      radius: 14,
       backgroundColor: Colors.blue.shade100,
       child: Text(
         username[0].toUpperCase(),
         style: TextStyle(
           color: Colors.blue.shade700,
-          fontSize: 12, // ✅ 缩小字体
+          fontSize: 12,
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -1938,7 +1949,7 @@ class _UserAvatarMenu extends ConsumerWidget {
 }
 
 // ✅ 小尺寸用户头像（用于下拉菜单）
-class _UserAvatarSmall extends StatelessWidget {
+class _UserAvatarSmall extends ConsumerWidget {
   const _UserAvatarSmall({
     required this.username,
     this.userId,
@@ -1948,46 +1959,47 @@ class _UserAvatarSmall extends StatelessWidget {
   final String username;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (userId == null || userId!.isEmpty) {
       return _buildDefaultAvatar();
     }
 
-    return FutureBuilder<EmbyApi>(
-      future: EmbyApi.create(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return _buildDefaultAvatar();
-        }
+    final apiAsync = ref.watch(embyApiProvider);
 
-        final api = snapshot.data!;
+    // ✅ 立即显示默认头像，避免闪烁
+    return apiAsync.when(
+      data: (api) {
         final avatarUrl = api.buildUserImageUrl(userId!);
 
         return ClipOval(
           child: SizedBox(
-            width: 28, // ✅ 与当前用户头像大小一致
+            width: 28,
             height: 28,
             child: EmbyFadeInImage(
+              key:
+                  ValueKey('avatar_small_$userId'), // ✅ 使用 userId 作为 key，避免重复加载
               imageUrl: avatarUrl,
               fit: BoxFit.cover,
               placeholder: _buildDefaultAvatar(),
-              fadeDuration: const Duration(milliseconds: 300),
+              fadeDuration: const Duration(milliseconds: 150),
             ),
           ),
         );
       },
+      loading: () => _buildDefaultAvatar(),
+      error: (_, __) => _buildDefaultAvatar(),
     );
   }
 
   Widget _buildDefaultAvatar() {
     return CircleAvatar(
-      radius: 14, // ✅ 28 / 2 = 14
+      radius: 14,
       backgroundColor: Colors.blue.shade100,
       child: Text(
         username[0].toUpperCase(),
         style: TextStyle(
           color: Colors.blue.shade700,
-          fontSize: 12, // ✅ 缩小字体
+          fontSize: 12,
           fontWeight: FontWeight.bold,
         ),
       ),
