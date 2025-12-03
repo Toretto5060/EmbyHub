@@ -18,6 +18,17 @@ import '../../widgets/blur_navigation_bar.dart';
 import '../../widgets/fade_in_image.dart';
 import '../../utils/theme_utils.dart';
 
+/// ✅ 格式化剩余时间（全局函数，避免重复定义）
+String _formatRemaining(Duration d) {
+  if (d <= Duration.zero) return '0s';
+  if (d.inHours >= 1) {
+    final minutes = d.inMinutes.remainder(60);
+    return minutes > 0 ? '${d.inHours}h ${minutes}m' : '${d.inHours}h';
+  }
+  if (d.inMinutes >= 1) return '${d.inMinutes}m';
+  return '${d.inSeconds}s';
+}
+
 // 排序选项
 enum SortOption {
   // 电影和电视剧通用选项
@@ -1769,6 +1780,10 @@ class _ItemTileState extends ConsumerState<_ItemTile>
   ItemInfo get item => widget.item;
   bool _hasPreloadedDetailImages = false; // ✅ 标记是否已预加载详情页图片
 
+  // ✅ 缓存计算结果，避免每次 build 重复计算
+  String? _cachedYearText;
+  bool _yearTextCalculated = false;
+
   @override
   bool get wantKeepAlive => true;
 
@@ -1814,99 +1829,79 @@ class _ItemTileState extends ConsumerState<_ItemTile>
     }
   }
 
+  /// ✅ 计算年份文本（缓存结果）
+  String? _getYearText() {
+    if (_yearTextCalculated) return _cachedYearText;
+    _yearTextCalculated = true;
+    _cachedYearText = _calculateYearText();
+    return _cachedYearText;
+  }
+
+  /// ✅ 实际计算年份文本的逻辑
+  String? _calculateYearText() {
+    if (item.premiereDate != null && item.premiereDate!.isNotEmpty) {
+      final startYear = int.tryParse(item.premiereDate!.substring(0, 4));
+      if (startYear != null) {
+        if (item.type == 'Series') {
+          final status = item.status;
+          if (status == 'Ended') {
+            if (item.endDate != null && item.endDate!.isNotEmpty) {
+              final endYear = int.tryParse(item.endDate!.substring(0, 4));
+              if (endYear != null && endYear != startYear) {
+                return '$startYear-$endYear';
+              }
+            }
+            return '$startYear';
+          } else if (status == 'Continuing') {
+            return '$startYear-现在';
+          }
+          return '$startYear';
+        } else {
+          if (item.endDate != null && item.endDate!.isNotEmpty) {
+            final endYear = int.tryParse(item.endDate!.substring(0, 4));
+            if (endYear != null && endYear != startYear) {
+              return '$startYear-$endYear';
+            }
+          }
+          return '$startYear';
+        }
+      }
+    } else if (item.productionYear != null) {
+      final startYear = item.productionYear;
+      if (item.type == 'Series') {
+        final status = item.status;
+        if (status == 'Ended') {
+          if (item.endDate != null && item.endDate!.isNotEmpty) {
+            final endYear = int.tryParse(item.endDate!.substring(0, 4));
+            if (endYear != null && endYear != startYear) {
+              return '$startYear-$endYear';
+            }
+          }
+          return '$startYear';
+        } else if (status == 'Continuing') {
+          return '$startYear-现在';
+        }
+        return '$startYear';
+      }
+      return '$startYear';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final isDark = isDarkModeFromContext(context, ref);
 
-    // 提取年份信息
-    String? yearText;
-    if (item.premiereDate != null && item.premiereDate!.isNotEmpty) {
-      final startYear = int.tryParse(item.premiereDate!.substring(0, 4));
-      if (startYear != null) {
-        // ✅ 对于Series类型，根据Status和EndDate判断
-        if (item.type == 'Series') {
-          final status = item.status;
-          if (status == 'Ended') {
-            // ✅ Status 为 Ended
-            if (item.endDate != null && item.endDate!.isNotEmpty) {
-              // ✅ 存在 EndDate，显示 xxxx-xxxx
-              final endYear = int.tryParse(item.endDate!.substring(0, 4));
-              if (endYear != null && endYear != startYear) {
-                yearText = '$startYear-$endYear';
-              } else {
-                yearText = '$startYear';
-              }
-            } else {
-              // ✅ 不存在 EndDate，显示 xxxx
-              yearText = '$startYear';
-            }
-          } else if (status == 'Continuing') {
-            // ✅ Status 为 Continuing，显示 xxxx-现在
-            yearText = '$startYear-现在';
-          } else {
-            // ✅ 其他状态，显示开始年份
-            yearText = '$startYear';
-          }
-        } else {
-          // ✅ 非Series类型，使用EndDate判断
-          if (item.endDate != null && item.endDate!.isNotEmpty) {
-            final endYear = int.tryParse(item.endDate!.substring(0, 4));
-            if (endYear != null && endYear != startYear) {
-              yearText = '$startYear-$endYear';
-            } else {
-              yearText = '$startYear';
-            }
-          } else {
-            yearText = '$startYear';
-          }
-        }
-      }
-    } else if (item.productionYear != null) {
-      // ✅ 如果没有 premiereDate，使用 productionYear
-      final startYear = item.productionYear;
-      if (item.type == 'Series') {
-        // ✅ 对于Series类型，根据Status和EndDate判断
-        final status = item.status;
-        if (status == 'Ended') {
-          // ✅ Status 为 Ended
-          if (item.endDate != null && item.endDate!.isNotEmpty) {
-            // ✅ 存在 EndDate，显示 xxxx-xxxx
-            final endYear = int.tryParse(item.endDate!.substring(0, 4));
-            if (endYear != null && endYear != startYear) {
-              yearText = '$startYear-$endYear';
-            } else {
-              yearText = '$startYear';
-            }
-          } else {
-            // ✅ 不存在 EndDate，显示 xxxx
-            yearText = '$startYear';
-          }
-        } else if (status == 'Continuing') {
-          // ✅ Status 为 Continuing，显示 xxxx-现在
-          yearText = '$startYear-现在';
-        } else {
-          // ✅ 其他状态，显示开始年份
-          yearText = '$startYear';
-        }
-      } else {
-        // ✅ 非Series类型，直接显示年份
-        yearText = '$startYear';
-      }
-    }
+    // ✅ 使用缓存的年份文本
+    final yearText = _getYearText();
 
-    int clampTicks(int value, int max) {
-      if (value < 0) return 0;
-      if (max <= 0) return value;
-      if (value > max) return max;
-      return value;
-    }
-
-    final userData = item.userData ?? {};
+    final userData = item.userData ?? const {};
     final totalTicks = item.runTimeTicks ?? 0;
     final playbackTicks =
         (userData['PlaybackPositionTicks'] as num?)?.toInt() ?? 0;
-    final playedTicks = clampTicks(playbackTicks, totalTicks);
+    final playedTicks =
+        playbackTicks.clamp(0, totalTicks > 0 ? totalTicks : playbackTicks);
     final played = userData['Played'] == true ||
         (totalTicks > 0 && playedTicks >= totalTicks);
     final showProgress =
@@ -1916,69 +1911,73 @@ class _ItemTileState extends ConsumerState<_ItemTile>
         totalTicks > playedTicks ? totalTicks - playedTicks : 0;
     final remainingDuration = Duration(microseconds: remainingTicks ~/ 10);
 
-    String formatRemaining(Duration d) {
-      if (d <= Duration.zero) {
-        return '0s';
-      }
-      if (d.inHours >= 1) {
-        final minutes = d.inMinutes.remainder(60);
-        return minutes > 0 ? '${d.inHours}h ${minutes}m' : '${d.inHours}h';
-      }
-      if (d.inMinutes >= 1) {
-        return '${d.inMinutes}m';
-      }
-      return '${d.inSeconds}s';
-    }
+    final ratingChip = _buildRatingChip();
 
-    Widget? buildRatingChip() {
-      if (item.getRating() == null) {
-        return null;
-      }
-      return Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 4,
-          vertical: 2,
-        ),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (item.getRatingSource() == 'douban')
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: const Text(
-                  '豆',
-                  style: TextStyle(
-                    color: Colors.green,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
+    return _buildTileContent(
+      context,
+      isDark: isDark,
+      yearText: yearText,
+      played: played,
+      showProgress: showProgress,
+      progress: progress,
+      remainingDuration: remainingDuration,
+      ratingChip: ratingChip,
+    );
+  }
+
+  /// ✅ 构建评分标签
+  Widget? _buildRatingChip() {
+    final rating = item.getRating();
+    if (rating == null) return null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (item.getRatingSource() == 'douban')
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: const Text(
+                '豆',
+                style: TextStyle(
+                  color: Colors.green,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
                 ),
-              )
-            else
-              const Icon(
-                CupertinoIcons.star_fill,
-                color: Colors.amber,
-                size: 12,
               ),
-            const SizedBox(width: 2),
-            Text(
-              item.getRating()!.toStringAsFixed(1),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-              ),
+            )
+          else
+            const Icon(CupertinoIcons.star_fill, color: Colors.amber, size: 12),
+          const SizedBox(width: 2),
+          Text(
+            rating.toStringAsFixed(1),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
             ),
-          ],
-        ),
-      );
-    }
+          ),
+        ],
+      ),
+    );
+  }
 
-    final ratingChip = buildRatingChip();
+  /// ✅ 构建卡片内容
+  Widget _buildTileContent(
+    BuildContext context, {
+    required bool isDark,
+    required String? yearText,
+    required bool played,
+    required bool showProgress,
+    required double progress,
+    required Duration remainingDuration,
+    required Widget? ratingChip,
+  }) {
     final aspectRatio = widget.hasHorizontalArtwork ? 9 / 14 : 16 / 9;
 
     return CupertinoButton(
@@ -2098,7 +2097,7 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                                     Row(
                                       children: [
                                         Text(
-                                          '剩余 ${formatRemaining(remainingDuration)}',
+                                          '剩余 ${_formatRemaining(remainingDuration)}',
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 10,
@@ -2251,7 +2250,7 @@ class _ItemTileState extends ConsumerState<_ItemTile>
                                     Row(
                                       children: [
                                         Text(
-                                          '剩余 ${formatRemaining(remainingDuration)}',
+                                          '剩余 ${_formatRemaining(remainingDuration)}',
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 10,
@@ -2489,7 +2488,7 @@ class _OptimizedRow extends StatelessWidget {
       builder: (context, constraints) {
         final hasHorizontal = row.any((entry) => entry.hasHorizontalArtwork);
         final columns = hasHorizontal ? 3 : 2;
-        final spacing = columns > 1 ? 16.0 : 0.0;
+        const spacing = 16.0;
         final availableWidth = constraints.maxWidth;
         final totalSpacing = spacing * (columns - 1);
         final cardWidth = (availableWidth - totalSpacing) / columns;
@@ -2498,7 +2497,7 @@ class _OptimizedRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (var i = 0; i < columns; i++) ...[
-              if (i > 0) SizedBox(width: spacing),
+              if (i > 0) const SizedBox(width: spacing),
               SizedBox(
                 width: cardWidth,
                 child: i < row.length
@@ -2590,20 +2589,6 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
         ? Duration(microseconds: remainingTicks ~/ 10)
         : Duration.zero;
 
-    String formatRemaining(Duration duration) {
-      if (duration <= Duration.zero) return '0s';
-      if (duration.inHours >= 1) {
-        final minutes = duration.inMinutes.remainder(60);
-        return minutes > 0
-            ? '${duration.inHours}h ${minutes}m'
-            : '${duration.inHours}h';
-      }
-      if (duration.inMinutes >= 1) {
-        return '${duration.inMinutes}m';
-      }
-      return '${duration.inSeconds}s';
-    }
-
     return RepaintBoundary(
       child: CupertinoButton(
         padding: EdgeInsets.zero,
@@ -2646,7 +2631,7 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                '剩余 ${formatRemaining(remainingDuration)}',
+                                '剩余 ${_formatRemaining(remainingDuration)}',
                                 style: TextStyle(
                                   color: Colors.white.withOpacity(0.85),
                                   fontSize: 11,
@@ -2862,20 +2847,6 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
         ? Duration(microseconds: remainingTicks ~/ 10)
         : Duration.zero;
 
-    String formatRemaining(Duration duration) {
-      if (duration <= Duration.zero) return '0s';
-      if (duration.inHours >= 1) {
-        final minutes = duration.inMinutes.remainder(60);
-        return minutes > 0
-            ? '${duration.inHours}h ${minutes}m'
-            : '${duration.inHours}h';
-      }
-      if (duration.inMinutes >= 1) {
-        return '${duration.inMinutes}m';
-      }
-      return '${duration.inSeconds}s';
-    }
-
     // 构建标题文本
     String titleText;
     String? subtitleText;
@@ -2948,7 +2919,7 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                '剩余 ${formatRemaining(remainingDuration)}',
+                                '剩余 ${_formatRemaining(remainingDuration)}',
                                 style: TextStyle(
                                   color: Colors.white.withOpacity(0.85),
                                   fontSize: 11,
