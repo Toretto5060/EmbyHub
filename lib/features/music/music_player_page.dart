@@ -7,6 +7,149 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/local_music_provider.dart';
 import '../../utils/theme_utils.dart';
 
+/// 滚动文字组件 - 当文字超出宽度时自动滚动
+class _MarqueeText extends StatefulWidget {
+  const _MarqueeText({
+    required this.text,
+    required this.style,
+  });
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  State<_MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<_MarqueeText> {
+  ScrollController? _scrollController;
+  bool _needsScroll = false;
+  bool _isScrolling = false;
+  bool _measured = false;
+  double _scrollDistance = 0;
+
+  @override
+  void didUpdateWidget(_MarqueeText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) {
+      _reset();
+    }
+  }
+
+  void _reset() {
+    _isScrolling = false;
+    _needsScroll = false;
+    _measured = false;
+    _scrollController?.dispose();
+    _scrollController = null;
+    if (mounted) setState(() {});
+  }
+
+  void _onTextLayout(double textWidth, double maxWidth) {
+    if (_measured) return;
+    _measured = true;
+
+    // 文字宽度超过可用宽度 5 像素以上才滚动
+    if (textWidth > maxWidth + 5) {
+      _scrollDistance = textWidth - maxWidth + 20;
+      _needsScroll = true;
+      _scrollController = ScrollController();
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startScrolling();
+      });
+    }
+  }
+
+  void _startScrolling() async {
+    if (!mounted || !_needsScroll || _isScrolling) return;
+    _isScrolling = true;
+
+    await Future.delayed(const Duration(seconds: 1));
+
+    while (mounted && _needsScroll && _isScrolling) {
+      if (_scrollController == null || !_scrollController!.hasClients) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        continue;
+      }
+
+      await _scrollController!.animateTo(
+        _scrollDistance,
+        duration: Duration(milliseconds: (_scrollDistance * 30).toInt()),
+        curve: Curves.linear,
+      );
+
+      if (!mounted || !_needsScroll) break;
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted || !_needsScroll) break;
+
+      if (_scrollController != null && _scrollController!.hasClients) {
+        await _scrollController!.animateTo(
+          0,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeOut,
+        );
+      }
+
+      if (!mounted || !_needsScroll) break;
+      await Future.delayed(const Duration(seconds: 1));
+    }
+  }
+
+  @override
+  void dispose() {
+    _isScrolling = false;
+    _scrollController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 已确定需要滚动
+    if (_needsScroll) {
+      return SingleChildScrollView(
+        controller: _scrollController,
+        scrollDirection: Axis.horizontal,
+        physics: const NeverScrollableScrollPhysics(),
+        child: Text(
+          widget.text,
+          style: widget.style,
+          maxLines: 1,
+        ),
+      );
+    }
+
+    // 使用自定义的测量组件
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth;
+
+        // 计算文字实际宽度
+        final textPainter = TextPainter(
+          text: TextSpan(text: widget.text, style: widget.style),
+          maxLines: 1,
+          textDirection: TextDirection.ltr,
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout();
+
+        final textWidth = textPainter.width;
+
+        // 在布局后回调
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _onTextLayout(textWidth, maxWidth);
+        });
+
+        return Text(
+          widget.text,
+          style: widget.style,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      },
+    );
+  }
+}
+
 class MusicPlayerPage extends ConsumerStatefulWidget {
   const MusicPlayerPage({
     required this.onCollapseWithOffset,
@@ -21,10 +164,31 @@ class MusicPlayerPage extends ConsumerStatefulWidget {
 }
 
 class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   double _dragOffset = 0;
   late AnimationController _resetAnimationController;
   late Animation<double> _resetAnimation;
+
+  // 封面切换动画
+  late AnimationController _coverAnimationController;
+  late Animation<double> _coverScaleAnimation;
+  String? _previousSongId;
+  int _previousSongIndex = 0; // 上一首歌曲的索引，用于判断切换方向
+  bool _isAnimatingCover = false;
+
+  // 封面旋转动画
+  late AnimationController _rotationAnimationController;
+  double _currentRotation = 0; // 当前旋转角度
+  bool _wasPlaying = false; // 上一次的播放状态
+
+  // 歌曲信息滑动动画
+  late AnimationController _songInfoSlideController;
+  late Animation<double> _songInfoSlideAnimation;
+  bool _isNextSong = true; // true: 下一首（从右滑入），false: 上一首（从左滑入）
+
+  // 圆容器缩放动画（播放时正常大小，暂停时缩小）
+  late AnimationController _containerScaleController;
+  late Animation<double> _containerScaleAnimation;
 
   @override
   void initState() {
@@ -42,11 +206,67 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
         _dragOffset = _resetAnimation.value;
       });
     });
+
+    // 初始化封面切换动画控制器（从大缩小到正常）
+    _coverAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _coverScaleAnimation = Tween<double>(begin: 1.5, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _coverAnimationController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+    _coverAnimationController.value = 1.0; // 初始状态为完成
+
+    // 初始化封面旋转动画控制器（45秒转一圈，更慢更优雅）
+    _rotationAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 45),
+    );
+    _rotationAnimationController.addListener(() {
+      setState(() {
+        _currentRotation =
+            _rotationAnimationController.value * 2 * 3.14159265359;
+      });
+    });
+
+    // 初始化歌曲信息滑动动画控制器
+    _songInfoSlideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _songInfoSlideAnimation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(
+        parent: _songInfoSlideController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+    _songInfoSlideController.value = 1.0; // 初始状态为完成
+
+    // 初始化圆容器缩放动画控制器（播放时1.0，暂停时0.85）
+    _containerScaleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _containerScaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _containerScaleController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+    _containerScaleController.value = 0.0; // 初始状态为暂停（缩小）
   }
 
   @override
   void dispose() {
     _resetAnimationController.dispose();
+    _coverAnimationController.dispose();
+    _rotationAnimationController.dispose();
+    _returnToOriginController?.dispose();
+    _songInfoSlideController.dispose();
+    _containerScaleController.dispose();
     super.dispose();
   }
 
@@ -62,14 +282,203 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     _resetAnimationController.forward(from: 0);
   }
 
+  void _triggerCoverAnimation(int newIndex) {
+    if (_isAnimatingCover) return;
+    _isAnimatingCover = true;
+
+    // 判断切换方向：新索引 > 旧索引 = 下一首，新索引 < 旧索引 = 上一首
+    _isNextSong = newIndex > _previousSongIndex;
+    _previousSongIndex = newIndex;
+
+    // 启动歌曲信息滑动动画
+    _songInfoSlideController.forward(from: 0);
+
+    // 切换歌曲时，停止旋转
+    _rotationAnimationController.stop();
+    _returnToOriginController?.dispose();
+    _returnToOriginController = null;
+
+    // 同时播放：旋转回原点 + 封面图片缩放动画
+    _animateRotationAndScale();
+  }
+
+  // 切换歌曲时：旋转回原点和缩放动画同时进行
+  void _animateRotationAndScale() {
+    const twoPi = 2 * 3.14159265359;
+    final normalizedRotation = _currentRotation % twoPi;
+
+    // 计算旋转回原点的参数
+    double targetRotation = 0;
+    double rotationDistance = normalizedRotation;
+
+    if (normalizedRotation > 0.05) {
+      if (normalizedRotation > twoPi / 2) {
+        targetRotation = twoPi;
+        rotationDistance = twoPi - normalizedRotation;
+      }
+    }
+
+    // 计算动画时长：取旋转和缩放动画的较长者
+    final rotationDurationMs = normalizedRotation < 0.05
+        ? 0
+        : (rotationDistance / twoPi * 1200).toInt().clamp(400, 1200);
+    final scaleDurationMs = 600;
+    final totalDurationMs = rotationDurationMs > scaleDurationMs
+        ? rotationDurationMs
+        : scaleDurationMs;
+
+    final startRotation = normalizedRotation;
+
+    // 创建统一的动画控制器
+    _returnToOriginController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: totalDurationMs),
+    );
+
+    _returnToOriginController!.addListener(() {
+      if (!mounted) return;
+      setState(() {
+        // 旋转动画（如果需要）
+        if (normalizedRotation >= 0.05) {
+          final rotationProgress = rotationDurationMs > 0
+              ? (_returnToOriginController!.value *
+                      totalDurationMs /
+                      rotationDurationMs)
+                  .clamp(0.0, 1.0)
+              : 1.0;
+          _currentRotation = startRotation +
+              (targetRotation - startRotation) *
+                  Curves.easeOutCubic.transform(rotationProgress);
+        }
+      });
+    });
+
+    _returnToOriginController!.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _currentRotation = 0;
+        _returnToOriginController?.dispose();
+        _returnToOriginController = null;
+        _isAnimatingCover = false;
+        if (mounted) {
+          setState(() {});
+          // 如果正在播放，重新开始旋转
+          final isPlaying = ref.read(localMusicPlayerProvider).isPlaying;
+          if (isPlaying) {
+            _rotationAnimationController.forward(from: 0);
+            _rotationAnimationController.repeat();
+          }
+        }
+      }
+    });
+
+    // 同时启动封面图片缩放动画
+    _coverAnimationController.forward(from: 0);
+
+    // 启动旋转回原点动画
+    _returnToOriginController!.forward();
+  }
+
+  // 回到原点动画控制器
+  AnimationController? _returnToOriginController;
+
+  // 旋转回到原始位置的动画
+  void _animateRotationToOrigin() {
+    // 取消之前的回到原点动画
+    _returnToOriginController?.dispose();
+    _returnToOriginController = null;
+
+    // 计算当前旋转角度（取模到0-2π范围）
+    const twoPi = 2 * 3.14159265359;
+    final normalizedRotation = _currentRotation % twoPi;
+
+    if (normalizedRotation < 0.05) {
+      // 已经接近原点，直接重置
+      _currentRotation = 0;
+      setState(() {});
+      return;
+    }
+
+    // 计算回到原点需要的时间（根据剩余角度，最短路径）
+    // 如果超过半圈，就继续转完；否则就往回转
+    final double targetRotation;
+    final double rotationDistance;
+
+    if (normalizedRotation > twoPi / 2) {
+      // 超过半圈，继续转到下一个原点
+      targetRotation = twoPi;
+      rotationDistance = twoPi - normalizedRotation;
+    } else {
+      // 不到半圈，往回转到原点
+      targetRotation = 0;
+      rotationDistance = normalizedRotation;
+    }
+
+    // 根据距离计算动画时长（300ms - 800ms）
+    final durationMs = (rotationDistance / twoPi * 800).toInt().clamp(300, 800);
+
+    final startRotation = normalizedRotation;
+
+    _returnToOriginController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: durationMs),
+    );
+
+    _returnToOriginController!.addListener(() {
+      if (!mounted) return;
+      setState(() {
+        _currentRotation = startRotation +
+            (targetRotation - startRotation) *
+                Curves.easeOutCubic.transform(_returnToOriginController!.value);
+      });
+    });
+
+    _returnToOriginController!.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _currentRotation = 0;
+        _returnToOriginController?.dispose();
+        _returnToOriginController = null;
+        if (mounted) setState(() {});
+      }
+    });
+
+    _returnToOriginController!.forward();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = isDarkModeFromContext(context, ref);
     final playerState = ref.watch(localMusicPlayerProvider);
     final currentSong = playerState.currentSong;
+    final isPlaying = playerState.isPlaying;
 
     if (currentSong == null) {
       return const SizedBox.shrink();
+    }
+
+    // 检测歌曲切换，触发封面动画
+    if (_previousSongId != null && _previousSongId != currentSong.id) {
+      _triggerCoverAnimation(playerState.currentIndex);
+    }
+    _previousSongId = currentSong.id;
+
+    // 检测播放状态变化，控制旋转动画和圆容器缩放
+    if (isPlaying != _wasPlaying) {
+      _wasPlaying = isPlaying;
+      if (isPlaying) {
+        // 开始播放：取消回到原点动画，从0开始重新旋转，圆容器放大
+        _returnToOriginController?.stop();
+        _returnToOriginController?.dispose();
+        _returnToOriginController = null;
+        _currentRotation = 0;
+        _rotationAnimationController.forward(from: 0);
+        _rotationAnimationController.repeat();
+        _containerScaleController.forward(); // 圆容器放大到正常
+      } else {
+        // 暂停播放：停止旋转并回到原始位置，圆容器缩小
+        _rotationAnimationController.stop();
+        _animateRotationToOrigin();
+        _containerScaleController.reverse(); // 圆容器缩小
+      }
     }
 
     return GestureDetector(
@@ -120,22 +529,19 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
           child: SafeArea(
             child: Column(
               children: [
-                // 顶部拖动指示器和关闭按钮
-                _buildHeader(context, isDark),
+                // 顶部：歌曲信息 + 更多按钮
+                _buildTopSection(context, isDark, currentSong),
                 // 专辑封面
                 Expanded(
-                  flex: 4,
                   child: _buildAlbumArt(context, isDark, currentSong),
                 ),
-                // 歌曲信息
-                _buildSongInfo(context, isDark, currentSong),
                 // 进度条
                 _buildProgressBar(context, isDark, playerState),
                 // 控制按钮
                 _buildControls(context, isDark, playerState),
                 // 底部额外操作
                 _buildBottomActions(context, isDark),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
               ],
             ),
           ),
@@ -144,58 +550,77 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     );
   }
 
-  Widget _buildHeader(BuildContext context, bool isDark) {
+  Widget _buildTopSection(BuildContext context, bool isDark, LocalSong song) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
+      padding: const EdgeInsets.fromLTRB(40, 20, 16, 12),
+      child: Row(
         children: [
-          // 拖动指示器
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: isDark ? Colors.white24 : Colors.black12,
-              borderRadius: BorderRadius.circular(2),
+          // 歌曲信息（左侧）- 带滑动动画
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // 使用容器的最大宽度作为滑动距离
+                final maxWidth = constraints.maxWidth;
+                return ClipRect(
+                  child: AnimatedBuilder(
+                    animation: _songInfoSlideAnimation,
+                    builder: (context, child) {
+                      // 计算滑动偏移量（使用容器最大宽度）
+                      // 下一首：从右边滑入（正值到0）
+                      // 上一首：从左边滑入（负值到0）
+                      final slideOffset = _isNextSong
+                          ? (1 - _songInfoSlideAnimation.value) * maxWidth
+                          : -(1 - _songInfoSlideAnimation.value) * maxWidth;
+
+                      return Transform.translate(
+                        offset: Offset(slideOffset, 0),
+                        child: Opacity(
+                          opacity: _songInfoSlideAnimation.value,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _MarqueeText(
+                            text: song.title,
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          _MarqueeText(
+                            text: song.artist,
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: isDark ? Colors.white60 : Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // 下拉关闭按钮
-              CupertinoButton(
-                padding: EdgeInsets.zero,
-                minSize: 40,
-                onPressed: () => widget.onCollapseWithOffset(0),
-                child: Icon(
-                  CupertinoIcons.chevron_down,
-                  size: 28,
-                  color: isDark ? Colors.white70 : Colors.black54,
-                ),
-              ),
-              // 标题
-              Text(
-                '正在播放',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: isDark ? Colors.white70 : Colors.black54,
-                ),
-              ),
-              // 更多选项
-              CupertinoButton(
-                padding: EdgeInsets.zero,
-                minSize: 40,
-                onPressed: () {
-                  // TODO: 显示更多选项
-                },
-                child: Icon(
-                  CupertinoIcons.ellipsis,
-                  size: 24,
-                  color: isDark ? Colors.white70 : Colors.black54,
-                ),
-              ),
-            ],
+          // 更多选项（右侧）
+          CupertinoButton(
+            padding: EdgeInsets.zero,
+            minSize: 40,
+            onPressed: () {
+              // TODO: 显示更多选项
+            },
+            child: Icon(
+              CupertinoIcons.ellipsis,
+              size: 24,
+              color: isDark ? Colors.white70 : Colors.black54,
+            ),
           ),
         ],
       ),
@@ -204,80 +629,84 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
   Widget _buildAlbumArt(BuildContext context, bool isDark, LocalSong song) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 40),
-      child: Center(
-        child: AspectRatio(
-          aspectRatio: 1,
-          child: Container(
-            decoration: BoxDecoration(
-              color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 30,
-                  offset: const Offset(0, 15),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: song.albumArt != null && File(song.albumArt!).existsSync()
-                  ? Image.file(
-                      File(song.albumArt!),
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Center(
-                          child: Icon(
-                            CupertinoIcons.double_music_note,
-                            size: 80,
-                            color: isDark ? Colors.white24 : Colors.black12,
-                          ),
-                        );
-                      },
-                    )
-                  : Center(
-                      child: Icon(
-                        CupertinoIcons.double_music_note,
-                        size: 80,
-                        color: isDark ? Colors.white24 : Colors.black12,
-                      ),
+      padding: const EdgeInsets.fromLTRB(35, 60, 35, 0),
+      child: Align(
+        alignment: Alignment.topCenter,
+        // 圆容器缩放动画（播放时正常大小，暂停时缩小）
+        child: AnimatedBuilder(
+          animation: _containerScaleAnimation,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: _containerScaleAnimation.value,
+              child: child,
+            );
+          },
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: Transform.rotate(
+              angle: _currentRotation,
+              child: Container(
+                decoration: BoxDecoration(
+                  color:
+                      isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    // 外圈光晕阴影
+                    BoxShadow(
+                      color: (isDark
+                          ? CupertinoColors.activeBlue.withOpacity(0.3)
+                          : CupertinoColors.activeBlue.withOpacity(0.2)),
+                      blurRadius: 25,
+                      spreadRadius: 2,
                     ),
+                    // 底部投影
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.3),
+                      blurRadius: 30,
+                      offset: const Offset(0, 15),
+                    ),
+                  ],
+                ),
+                child: ClipOval(
+                  // 切换歌曲时图片有缩放动画
+                  child: AnimatedBuilder(
+                    animation: _coverScaleAnimation,
+                    builder: (context, child) {
+                      return Transform.scale(
+                        scale: _coverScaleAnimation.value,
+                        child: child,
+                      );
+                    },
+                    child: song.albumArt != null &&
+                            File(song.albumArt!).existsSync()
+                        ? Image.file(
+                            File(song.albumArt!),
+                            fit: BoxFit.cover,
+                            gaplessPlayback: true,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Center(
+                                child: Icon(
+                                  CupertinoIcons.double_music_note,
+                                  size: 80,
+                                  color:
+                                      isDark ? Colors.white24 : Colors.black12,
+                                ),
+                              );
+                            },
+                          )
+                        : Center(
+                            child: Icon(
+                              CupertinoIcons.double_music_note,
+                              size: 80,
+                              color: isDark ? Colors.white24 : Colors.black12,
+                            ),
+                          ),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSongInfo(BuildContext context, bool isDark, LocalSong song) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
-      child: Column(
-        children: [
-          Text(
-            song.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white : Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            song.artist,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 18,
-              color: CupertinoColors.activeBlue,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -375,35 +804,13 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
               color: isDark ? Colors.white : Colors.black87,
             ),
           ),
-          // 播放/暂停
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            minSize: 72,
+          // 播放/暂停（带点击动画）
+          _PlayPauseButton(
+            isPlaying: playerState.isPlaying,
+            isDark: isDark,
             onPressed: () {
               ref.read(localMusicPlayerProvider.notifier).togglePlayPause();
             },
-            child: Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: CupertinoColors.activeBlue,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: CupertinoColors.activeBlue.withOpacity(0.4),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Icon(
-                playerState.isPlaying
-                    ? CupertinoIcons.pause_fill
-                    : CupertinoIcons.play_fill,
-                size: 36,
-                color: Colors.white,
-              ),
-            ),
           ),
           // 下一首
           CupertinoButton(
@@ -503,5 +910,126 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     final minutes = duration.inMinutes;
     final seconds = duration.inSeconds % 60;
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+}
+
+// 播放/暂停按钮（带点击缩放动画和图标切换动画）
+class _PlayPauseButton extends StatefulWidget {
+  final bool isPlaying;
+  final bool isDark;
+  final VoidCallback onPressed;
+
+  const _PlayPauseButton({
+    required this.isPlaying,
+    required this.isDark,
+    required this.onPressed,
+  });
+
+  @override
+  State<_PlayPauseButton> createState() => _PlayPauseButtonState();
+}
+
+class _PlayPauseButtonState extends State<_PlayPauseButton>
+    with TickerProviderStateMixin {
+  late AnimationController _scaleController;
+  late Animation<double> _scaleAnimation;
+  late AnimationController _iconController;
+  late Animation<double> _iconAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    // 点击缩放动画
+    _scaleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 100),
+    );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.85).animate(
+      CurvedAnimation(parent: _scaleController, curve: Curves.easeInOut),
+    );
+
+    // 图标切换动画
+    _iconController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _iconAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _iconController, curve: Curves.easeOutCubic),
+    );
+    _iconController.value = 1.0; // 初始状态为完成
+  }
+
+  @override
+  void didUpdateWidget(covariant _PlayPauseButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 播放状态变化时触发图标切换动画
+    if (oldWidget.isPlaying != widget.isPlaying) {
+      _iconController.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _scaleController.dispose();
+    _iconController.dispose();
+    super.dispose();
+  }
+
+  void _onTapDown(TapDownDetails details) {
+    _scaleController.forward();
+  }
+
+  void _onTapUp(TapUpDetails details) {
+    _scaleController.reverse();
+    widget.onPressed();
+  }
+
+  void _onTapCancel() {
+    _scaleController.reverse();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: _onTapDown,
+      onTapUp: _onTapUp,
+      onTapCancel: _onTapCancel,
+      child: AnimatedBuilder(
+        animation: _scaleAnimation,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: _scaleAnimation.value,
+            child: child,
+          );
+        },
+        child: SizedBox(
+          width: 72,
+          height: 72,
+          child: AnimatedBuilder(
+            animation: _iconAnimation,
+            builder: (context, child) {
+              // 计算当前偏移量（动画过程中平滑过渡）
+              final currentOffset = widget.isPlaying ? 0.0 : 3.0;
+              return Transform.translate(
+                offset: Offset(currentOffset, 0),
+                child: Transform.scale(
+                  scale: 0.5 + 0.5 * _iconAnimation.value,
+                  child: Opacity(
+                    opacity: _iconAnimation.value,
+                    child: Icon(
+                      widget.isPlaying
+                          ? CupertinoIcons.pause_fill
+                          : CupertinoIcons.play_fill,
+                      size: 48,
+                      color: widget.isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -157,13 +157,11 @@ class _MusicPlaylistsPageState extends ConsumerState<MusicPlaylistsPage> {
         .toList();
 
     if (songs.isNotEmpty) {
-      // 设置播放列表并开始播放
+      // 设置播放列表并开始播放（不展开全屏播放页面）
       ref.read(localMusicPlayerProvider.notifier).setPlaylist(
             songs,
             startIndex: 0,
           );
-      // 展开播放器
-      ref.read(expandPlayerTriggerProvider.notifier).state++;
     }
   }
 

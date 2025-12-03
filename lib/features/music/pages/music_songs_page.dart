@@ -256,8 +256,8 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
     if (songs.isEmpty) return;
     // 随机打乱歌曲顺序
     final shuffledSongs = List<LocalSong>.from(songs)..shuffle();
+    // 播放歌曲（不展开全屏播放页面）
     ref.read(localMusicPlayerProvider.notifier).setPlaylist(shuffledSongs);
-    ref.read(expandPlayerTriggerProvider.notifier).state++;
   }
 
   void _toggleMultiSelectMode() {
@@ -508,12 +508,11 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                     // 多选模式：切换选中状态
                     _toggleSongSelection(song.id);
                   } else {
-                    // 正常模式：播放歌曲
+                    // 正常模式：播放歌曲（不展开全屏播放页面）
                     ref.read(localMusicPlayerProvider.notifier).setPlaylist(
                           songs,
                           startIndex: index,
                         );
-                    ref.read(expandPlayerTriggerProvider.notifier).state++;
                   }
                 },
                 child: Container(

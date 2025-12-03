@@ -59,6 +59,23 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   }
 
   void _expandPlayer() {
+    // 只有当有歌曲时才展开播放器
+    final currentSong = ref.read(localMusicPlayerProvider).currentSong;
+    if (currentSong == null) {
+      // 如果当前没有歌曲，延迟一帧后重试（等待状态同步）
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final song = ref.read(localMusicPlayerProvider).currentSong;
+        if (song != null && mounted) {
+          _doExpandPlayer();
+        }
+      });
+      return;
+    }
+
+    _doExpandPlayer();
+  }
+
+  void _doExpandPlayer() {
     setState(() {
       _isPlayerExpanded = true;
     });
