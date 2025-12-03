@@ -185,7 +185,7 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
                                     ),
                                     _buildTabItem(
                                       context: context,
-                                      icon: CupertinoIcons.music_note,
+                                      icon: CupertinoIcons.music_note_2,
                                       label: '音乐',
                                       index: 1,
                                       isActive: _index == 1,
