@@ -8,11 +8,12 @@ import '../../utils/theme_utils.dart';
 
 class MusicPlayerPage extends ConsumerStatefulWidget {
   const MusicPlayerPage({
-    required this.onCollapse,
+    required this.onCollapseWithOffset,
     super.key,
   });
 
-  final VoidCallback onCollapse;
+  /// 折叠回调，参数为当前拖拽偏移量
+  final void Function(double dragOffset) onCollapseWithOffset;
 
   @override
   ConsumerState<MusicPlayerPage> createState() => _MusicPlayerPageState();
@@ -43,17 +44,21 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage> {
         if (_dragOffset > 150 ||
             (details.primaryVelocity != null &&
                 details.primaryVelocity! > 500)) {
-          widget.onCollapse();
+          // 传递当前拖拽偏移量，让动画从当前位置开始
+          widget.onCollapseWithOffset(_dragOffset);
+          // 不重置 _dragOffset，让父组件控制
+        } else {
+          // 未触发折叠，恢复到顶部
+          setState(() {
+            _dragOffset = 0;
+          });
         }
-        setState(() {
-          _dragOffset = 0;
-        });
       },
       onHorizontalDragEnd: (details) {
         // 侧滑返回
         if (details.primaryVelocity != null &&
             details.primaryVelocity!.abs() > 500) {
-          widget.onCollapse();
+          widget.onCollapseWithOffset(_dragOffset);
         }
       },
       child: Transform.translate(
@@ -123,7 +128,7 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage> {
               CupertinoButton(
                 padding: EdgeInsets.zero,
                 minSize: 40,
-                onPressed: widget.onCollapse,
+                onPressed: () => widget.onCollapseWithOffset(0),
                 child: Icon(
                   CupertinoIcons.chevron_down,
                   size: 28,

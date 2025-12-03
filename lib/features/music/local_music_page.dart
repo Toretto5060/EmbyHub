@@ -67,10 +67,21 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   }
 
   void _collapsePlayer() {
+    _collapsePlayerWithOffset(0);
+  }
+
+  void _collapsePlayerWithOffset(double dragOffset) {
     // 立即更新状态，防止重复触发
     if (!_isPlayerExpanded) return;
 
     ref.read(musicPlayerExpandedProvider.notifier).state = false;
+
+    // 计算动画起始值：根据拖拽偏移量计算当前位置对应的动画值
+    final screenHeight = MediaQuery.of(context).size.height;
+    final startValue = 1.0 - (dragOffset / screenHeight);
+
+    // 从当前位置开始动画
+    _playerAnimationController.value = startValue.clamp(0.0, 1.0);
     _playerAnimationController.reverse().then((_) {
       if (mounted) {
         setState(() {
@@ -139,6 +150,13 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
       }
     });
 
+    // 监听展开播放页面的请求
+    ref.listen<int>(expandPlayerTriggerProvider, (previous, next) {
+      if (!_isPlayerExpanded && previous != next) {
+        _expandPlayer();
+      }
+    });
+
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor:
@@ -170,18 +188,17 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
               SizedBox(height: miniPlayerHeight),
             ],
           ),
-          // 底部迷你播放器（始终显示）
-          if (!_isPlayerExpanded)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: MusicMiniPlayer(
-                onTap: _expandPlayer,
-              ),
+          // 底部迷你播放器（始终显示，全屏播放器覆盖其上）
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: MusicMiniPlayer(
+              onTap: _expandPlayer,
             ),
-          // 全屏播放页面
-          if (_isPlayerExpanded)
+          ),
+          // 全屏播放页面（覆盖在迷你播放器上方）
+          if (_isPlayerExpanded || _playerAnimationController.isAnimating)
             AnimatedBuilder(
               animation: _playerAnimation,
               builder: (context, child) {
@@ -193,7 +210,7 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
                           (1 - _playerAnimation.value),
                     ),
                     child: MusicPlayerPage(
-                      onCollapse: _collapsePlayer,
+                      onCollapseWithOffset: _collapsePlayerWithOffset,
                     ),
                   ),
                 );

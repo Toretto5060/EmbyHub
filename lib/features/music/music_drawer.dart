@@ -18,7 +18,11 @@ class MusicDrawer extends ConsumerWidget {
     final isDark = isDarkModeFromContext(context, ref);
     final currentNav = ref.watch(currentMusicNavProvider);
 
+    // 抽屉宽度
+    final drawerWidth = MediaQuery.of(context).size.width / 2;
+
     return Drawer(
+      width: drawerWidth,
       backgroundColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
       child: SafeArea(
         child: Column(

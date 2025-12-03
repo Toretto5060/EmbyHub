@@ -74,10 +74,13 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
         return CupertinoButton(
           padding: EdgeInsets.zero,
           onPressed: () {
+            // 设置播放列表并开始播放
             ref.read(localMusicPlayerProvider.notifier).setPlaylist(
                   _mockSongs,
                   startIndex: index,
                 );
+            // 触发展开全屏播放页面
+            ref.read(expandPlayerTriggerProvider.notifier).state++;
           },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

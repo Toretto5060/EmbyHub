@@ -118,8 +118,10 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
         canPop: false, // 拦截返回事件
         onPopInvokedWithResult: (bool didPop, dynamic result) async {
           if (!didPop) {
-            // 使用 provider 判断是否在音乐页面
-            final isInMusicPage = ref.read(musicPageVisibleProvider);
+            // 使用 provider 和 _index 双重判断是否在音乐页面
+            // 确保状态同步，避免偶发的状态不一致问题
+            final isInMusicPage =
+                ref.read(musicPageVisibleProvider) || _index == 1;
 
             // 如果在音乐页面
             if (isInMusicPage) {

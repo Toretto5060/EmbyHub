@@ -142,6 +142,9 @@ final musicPlayerExpandedProvider = StateProvider<bool>((ref) => false);
 /// 请求折叠播放页面的触发器（每次增加表示请求折叠）
 final collapsePlayerTriggerProvider = StateProvider<int>((ref) => 0);
 
+/// 请求展开播放页面的触发器（每次增加表示请求展开）
+final expandPlayerTriggerProvider = StateProvider<int>((ref) => 0);
+
 /// 当前选中的音乐导航项
 enum MusicNavItem {
   songs, // 歌曲
