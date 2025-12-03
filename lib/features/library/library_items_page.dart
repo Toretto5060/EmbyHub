@@ -1196,11 +1196,10 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     );
   }
 
-  // ✅ 构建类型占位符（使用 EmbyFadeInImage 的默认占位符）
+  // ✅ 构建类型占位符
   Widget _buildGenrePlaceholder() {
-    // 返回一个空的 EmbyFadeInImage，它会自动显示呼吸效果
     return const EmbyFadeInImage(
-      imageUrl: '', // 空URL会显示默认占位符
+      imageUrl: '',
       enableLazyLoad: false,
     );
   }
@@ -1592,10 +1591,20 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
 
   @override
   Widget build(BuildContext context) {
-    // ✅ 只有在页面可见时才请求数据
+    // ✅ 转场期间显示简单的骨架屏，避免构建复杂的列表组件
     if (!_isPageVisible && _cachedItemsList == null) {
-      debugPrint('[LibraryItemsPage] build: 页面不可见且无缓存: ${widget.viewName}');
+      return CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.systemBackground,
+        navigationBar: BlurNavigationBar(
+          leading: buildBlurBackButton(context),
+          middle: buildNavTitle(widget.viewName, context),
+          scrollController: _scrollController,
+        ),
+        // ✅ 转场期间显示空白，不构建任何列表组件
+        child: const SizedBox.expand(),
+      );
     }
+
     final items = _isPageVisible
         ? ref.watch(itemsProvider(widget.viewId))
         : AsyncValue<List<ItemInfo>>.data(_cachedItemsList ?? []);
@@ -2384,10 +2393,10 @@ class _PosterSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 使用 EmbyFadeInImage 的默认占位符（呼吸效果）
+    // ✅ 使用 EmbyFadeInImage 的内置占位符逻辑
     return const SizedBox.expand(
       child: EmbyFadeInImage(
-        imageUrl: '', // 空URL会显示默认占位符
+        imageUrl: '',
         enableLazyLoad: false,
       ),
     );
@@ -2420,14 +2429,29 @@ class _OptimizedItemList extends StatefulWidget {
 }
 
 class _OptimizedItemListState extends State<_OptimizedItemList> {
-  late List<List<_RowEntry>> _cachedRows;
-  late List<ItemInfo> _lastItems;
+  List<List<_RowEntry>>? _cachedRows;
+  List<ItemInfo>? _lastItems;
+  bool _isBuilding = false;
 
   @override
   void initState() {
     super.initState();
-    _lastItems = widget.items;
-    _cachedRows = widget.buildRows(widget.items);
+    // ✅ 延迟构建 rows，避免在转场期间执行
+    _scheduleRowsBuild();
+  }
+
+  void _scheduleRowsBuild() {
+    if (_isBuilding) return;
+    _isBuilding = true;
+
+    // ✅ 使用 addPostFrameCallback 延迟到下一帧，避免阻塞转场动画
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _lastItems = widget.items;
+      _cachedRows = widget.buildRows(widget.items);
+      _isBuilding = false;
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -2442,6 +2466,11 @@ class _OptimizedItemListState extends State<_OptimizedItemList> {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ 如果 rows 还没构建完成，显示空白
+    if (_cachedRows == null) {
+      return const SizedBox.expand();
+    }
+
     return ListView.builder(
       controller: widget.scrollController,
       padding: EdgeInsets.only(
@@ -2452,14 +2481,14 @@ class _OptimizedItemListState extends State<_OptimizedItemList> {
       ),
       // ✅ 添加缓存范围，提升滚动性能
       cacheExtent: 500,
-      itemCount: _cachedRows.length,
+      itemCount: _cachedRows!.length,
       itemBuilder: (context, rowIndex) {
-        final row = _cachedRows[rowIndex];
+        final row = _cachedRows![rowIndex];
         return RepaintBoundary(
           key: ValueKey('row_$rowIndex'),
           child: Padding(
             padding: EdgeInsets.only(
-              bottom: rowIndex == _cachedRows.length - 1 ? 0 : 16,
+              bottom: rowIndex == _cachedRows!.length - 1 ? 0 : 16,
             ),
             child: _OptimizedRow(
               row: row,
@@ -2692,21 +2721,14 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
       BuildContext context, WidgetRef ref, ItemInfo item) {
     final apiAsync = ref.watch(embyApiProvider);
 
-    // 使用 EmbyFadeInImage 的默认占位符
-    Widget placeholder() => const EmbyFadeInImage(
-          imageUrl: '',
-          enableLazyLoad: false,
-        );
-
     final itemId = item.id;
     if (itemId == null || itemId.isEmpty) {
-      return placeholder();
+      return const EmbyFadeInImage(imageUrl: '', enableLazyLoad: false);
     }
 
     return apiAsync.when(
       data: (api) {
         String? imageUrl;
-        String? imageType;
         final imageTags = item.imageTags ?? const <String, String>{};
         final backdropTags = item.backdropImageTags ?? const <String>[];
 
@@ -2722,7 +2744,6 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
               tag: imageTags['Primary']!,
               maxWidth: 800,
             );
-            imageType = 'Primary';
           } else if (backdropTags.isNotEmpty) {
             // Fallback to Backdrop
             imageUrl = api.buildImageUrl(
@@ -2732,7 +2753,6 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
               imageIndex: 0,
               maxWidth: 800,
             );
-            imageType = 'Backdrop';
           }
         } else {
           // ✅ 非16:9影片：使用原来的逻辑（Backdrop > Primary）
@@ -2744,7 +2764,6 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
               imageIndex: 0,
               maxWidth: 800,
             );
-            imageType = 'Backdrop';
           } else if (imageTags['Primary'] != null) {
             imageUrl = api.buildImageUrl(
               itemId: itemId,
@@ -2752,23 +2771,19 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
               tag: imageTags['Primary']!,
               maxWidth: 800,
             );
-            imageType = 'Primary';
           }
         }
 
-        if (imageUrl == null) {
-          return placeholder();
-        }
-
+        // ✅ 直接使用 EmbyFadeInImage，它内置了占位符逻辑
         return EmbyFadeInImage(
           key: ValueKey('resume_movie_poster_${item.id}_$imageUrl'),
-          imageUrl: imageUrl,
-          placeholder: placeholder(),
+          imageUrl: imageUrl ?? '',
           fit: BoxFit.cover,
         );
       },
-      loading: () => placeholder(),
-      error: (_, __) => placeholder(),
+      loading: () => const EmbyFadeInImage(imageUrl: '', enableLazyLoad: false),
+      error: (_, __) =>
+          const EmbyFadeInImage(imageUrl: '', enableLazyLoad: false),
     );
   }
 }
@@ -2994,21 +3009,14 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
       BuildContext context, WidgetRef ref, ItemInfo item) {
     final apiAsync = ref.watch(embyApiProvider);
 
-    // 使用 EmbyFadeInImage 的默认占位符
-    Widget placeholder() => const EmbyFadeInImage(
-          imageUrl: '',
-          enableLazyLoad: false,
-        );
-
     final itemId = item.id;
     if (itemId == null || itemId.isEmpty) {
-      return placeholder();
+      return const EmbyFadeInImage(imageUrl: '', enableLazyLoad: false);
     }
 
     return apiAsync.when(
       data: (api) {
         String? imageUrl;
-        String? imageType;
         final imageTags = item.imageTags ?? const <String, String>{};
         final backdropTags = item.backdropImageTags ?? const <String>[];
 
@@ -3021,7 +3029,7 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
                 (item.parentBackdropImageTags?.isNotEmpty ?? false));
 
         if (hasBackdrop) {
-          // ✅ 16:9剧集：优先使用Thumb，然后Primary，最后才是Backdrop（与影片tab的Primary逻辑类似）
+          // ✅ 16:9剧集：优先使用Thumb，然后Primary，最后才是Backdrop
           if (imageTags['Thumb'] != null) {
             imageUrl = api.buildImageUrl(
               itemId: itemId,
@@ -3029,7 +3037,6 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
               tag: imageTags['Thumb']!,
               maxWidth: 800,
             );
-            imageType = 'Thumb';
           } else if (imageTags['Primary'] != null) {
             imageUrl = api.buildImageUrl(
               itemId: itemId,
@@ -3037,7 +3044,6 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
               tag: imageTags['Primary']!,
               maxWidth: 800,
             );
-            imageType = 'Primary';
           } else if (backdropTags.isNotEmpty) {
             imageUrl = api.buildImageUrl(
               itemId: itemId,
@@ -3046,7 +3052,6 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
               imageIndex: 0,
               maxWidth: 800,
             );
-            imageType = 'Backdrop';
           } else if (item.parentThumbItemId != null &&
               item.parentThumbImageTag != null) {
             imageUrl = api.buildImageUrl(
@@ -3055,7 +3060,6 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
               tag: item.parentThumbImageTag!,
               maxWidth: 800,
             );
-            imageType = 'ParentThumb';
           } else if (item.parentBackdropItemId != null &&
               (item.parentBackdropImageTags?.isNotEmpty ?? false)) {
             imageUrl = api.buildImageUrl(
@@ -3065,7 +3069,6 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
               imageIndex: 0,
               maxWidth: 800,
             );
-            imageType = 'ParentBackdrop';
           }
         } else {
           // ✅ 非16:9剧集：使用原来的逻辑
@@ -3076,7 +3079,6 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
               tag: imageTags['Primary']!,
               maxWidth: 800,
             );
-            imageType = 'Primary';
           } else if (item.seasonId != null &&
               item.seasonPrimaryImageTag != null) {
             imageUrl = api.buildImageUrl(
@@ -3085,7 +3087,6 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
               tag: item.seasonPrimaryImageTag!,
               maxWidth: 800,
             );
-            imageType = 'SeasonPrimary';
           } else if (item.seriesId != null &&
               item.seriesPrimaryImageTag != null) {
             imageUrl = api.buildImageUrl(
@@ -3094,23 +3095,19 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
               tag: item.seriesPrimaryImageTag!,
               maxWidth: 800,
             );
-            imageType = 'SeriesPrimary';
           }
         }
 
-        if (imageUrl == null) {
-          return placeholder();
-        }
-
+        // ✅ 直接使用 EmbyFadeInImage，它内置了占位符逻辑
         return EmbyFadeInImage(
           key: ValueKey('resume_episode_poster_${item.id}_$imageUrl'),
-          imageUrl: imageUrl,
-          placeholder: placeholder(),
+          imageUrl: imageUrl ?? '',
           fit: BoxFit.cover,
         );
       },
-      loading: () => placeholder(),
-      error: (_, __) => placeholder(),
+      loading: () => const EmbyFadeInImage(imageUrl: '', enableLazyLoad: false),
+      error: (_, __) =>
+          const EmbyFadeInImage(imageUrl: '', enableLazyLoad: false),
     );
   }
 }
