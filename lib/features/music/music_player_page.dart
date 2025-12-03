@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -221,10 +222,19 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(20),
-              child: song.albumArt != null
-                  ? Image.network(
-                      song.albumArt!,
+              child: song.albumArt != null && File(song.albumArt!).existsSync()
+                  ? Image.file(
+                      File(song.albumArt!),
                       fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Center(
+                          child: Icon(
+                            CupertinoIcons.double_music_note,
+                            size: 80,
+                            color: isDark ? Colors.white24 : Colors.black12,
+                          ),
+                        );
+                      },
                     )
                   : Center(
                       child: Icon(

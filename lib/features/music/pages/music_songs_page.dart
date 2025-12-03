@@ -10,6 +10,171 @@ import '../../../utils/theme_utils.dart';
 /// 封面图片缓存
 final Map<String, ImageProvider> _albumArtCache = {};
 
+/// 滚动文字组件 - 当文字超出宽度时自动滚动
+class _MarqueeText extends StatefulWidget {
+  const _MarqueeText({
+    required this.text,
+    required this.style,
+  });
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  State<_MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<_MarqueeText> {
+  ScrollController? _scrollController;
+  bool _needsScroll = false;
+  bool _isScrolling = false;
+  bool _measured = false;
+  double _scrollDistance = 0;
+
+  @override
+  void didUpdateWidget(_MarqueeText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) {
+      _reset();
+    }
+  }
+
+  void _reset() {
+    _isScrolling = false;
+    _needsScroll = false;
+    _measured = false;
+    _scrollController?.dispose();
+    _scrollController = null;
+    if (mounted) setState(() {});
+  }
+
+  void _onTextLayout(double textWidth, double maxWidth) {
+    if (_measured) return;
+    _measured = true;
+
+    // 文字宽度超过可用宽度 5 像素以上才滚动
+    if (textWidth > maxWidth + 5) {
+      _scrollDistance = textWidth - maxWidth + 20;
+      _needsScroll = true;
+      _scrollController = ScrollController();
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startScrolling();
+      });
+    }
+  }
+
+  void _startScrolling() async {
+    if (!mounted || !_needsScroll || _isScrolling) return;
+    _isScrolling = true;
+
+    await Future.delayed(const Duration(seconds: 1));
+
+    while (mounted && _needsScroll && _isScrolling) {
+      if (_scrollController == null || !_scrollController!.hasClients) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        continue;
+      }
+
+      await _scrollController!.animateTo(
+        _scrollDistance,
+        duration: Duration(milliseconds: (_scrollDistance * 30).toInt()),
+        curve: Curves.linear,
+      );
+
+      if (!mounted || !_needsScroll) break;
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted || !_needsScroll) break;
+
+      if (_scrollController != null && _scrollController!.hasClients) {
+        await _scrollController!.animateTo(
+          0,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeOut,
+        );
+      }
+
+      if (!mounted || !_needsScroll) break;
+      await Future.delayed(const Duration(seconds: 1));
+    }
+  }
+
+  @override
+  void dispose() {
+    _isScrolling = false;
+    _scrollController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 已确定需要滚动
+    if (_needsScroll) {
+      return SingleChildScrollView(
+        controller: _scrollController,
+        scrollDirection: Axis.horizontal,
+        physics: const NeverScrollableScrollPhysics(),
+        child: Text(
+          widget.text,
+          style: widget.style,
+          maxLines: 1,
+        ),
+      );
+    }
+
+    // 使用自定义的测量组件
+    return _TextMeasurer(
+      text: widget.text,
+      style: widget.style,
+      onMeasured: _onTextLayout,
+    );
+  }
+}
+
+/// 测量文字是否溢出的组件
+class _TextMeasurer extends StatelessWidget {
+  const _TextMeasurer({
+    required this.text,
+    required this.style,
+    required this.onMeasured,
+  });
+
+  final String text;
+  final TextStyle style;
+  final void Function(double textWidth, double maxWidth) onMeasured;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth;
+
+        // 计算文字实际宽度
+        final textPainter = TextPainter(
+          text: TextSpan(text: text, style: style),
+          maxLines: 1,
+          textDirection: TextDirection.ltr,
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout();
+
+        final textWidth = textPainter.width;
+
+        // 在布局后回调
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          onMeasured(textWidth, maxWidth);
+        });
+
+        return Text(
+          text,
+          style: style,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      },
+    );
+  }
+}
+
 class MusicSongsPage extends ConsumerStatefulWidget {
   const MusicSongsPage({super.key});
 
@@ -28,36 +193,34 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
     final seconds = totalSeconds % 60;
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
-  
+
   /// 获取缓存的封面图片
   ImageProvider? _getCachedAlbumArt(String? path) {
     if (path == null) return null;
-    
+
     if (_albumArtCache.containsKey(path)) {
       return _albumArtCache[path];
     }
-    
+
     final file = File(path);
     if (file.existsSync()) {
       final provider = FileImage(file);
       _albumArtCache[path] = provider;
       return provider;
     }
-    
+
     return null;
   }
-  
+
   /// 构建专辑封面组件
   Widget _buildAlbumArt(LocalSong song, bool isPlaying, bool isDark) {
     final albumArtProvider = _getCachedAlbumArt(song.albumArt);
-    
+
     return Container(
       width: 48,
       height: 48,
       decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white10
-            : Colors.black.withOpacity(0.05),
+        color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
         borderRadius: BorderRadius.circular(6),
       ),
       clipBehavior: Clip.antiAlias,
@@ -75,7 +238,7 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
           : _buildDefaultMusicIcon(isPlaying, isDark),
     );
   }
-  
+
   /// 构建默认音乐图标
   Widget _buildDefaultMusicIcon(bool isPlaying, bool isDark) {
     return Center(
@@ -392,25 +555,34 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                song.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: isPlaying
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                                  color: isPlaying
-                                      ? CupertinoColors.activeBlue
-                                      : (isDark ? Colors.white : Colors.black87),
+                              // 歌曲标题 - 播放中且超出宽度时滚动显示
+                              if (isPlaying)
+                                _MarqueeText(
+                                  text: song.title,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: CupertinoColors.activeBlue,
+                                  ),
+                                )
+                              else
+                                Text(
+                                  song.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.normal,
+                                    color:
+                                        isDark ? Colors.white : Colors.black87,
+                                  ),
                                 ),
-                              ),
                               const SizedBox(height: 4),
                               Row(
                                 children: [
                                   // 音质标签
-                                  if (song.bitrate != null && song.bitrate! > 96) ...[
+                                  if (song.bitrate != null &&
+                                      song.bitrate! > 96) ...[
                                     Container(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 4,
@@ -418,8 +590,10 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                                       ),
                                       decoration: BoxDecoration(
                                         color: song.bitrate! > 256
-                                            ? CupertinoColors.activeBlue.withOpacity(0.15)
-                                            : CupertinoColors.activeGreen.withOpacity(0.15),
+                                            ? CupertinoColors.activeBlue
+                                                .withOpacity(0.15)
+                                            : CupertinoColors.activeGreen
+                                                .withOpacity(0.15),
                                         borderRadius: BorderRadius.circular(3),
                                       ),
                                       child: Text(
@@ -435,19 +609,35 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                                     ),
                                     const SizedBox(width: 6),
                                   ],
-                                  // 艺术家和专辑
+                                  // 艺术家和专辑 - 播放中且超出宽度时滚动显示
                                   Expanded(
-                                    child: Text(
-                                      song.album != null && song.album!.isNotEmpty
-                                          ? '${song.artist} · ${song.album}'
-                                          : song.artist,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: isDark ? Colors.white54 : Colors.black45,
-                                      ),
-                                    ),
+                                    child: isPlaying
+                                        ? _MarqueeText(
+                                            text: song.album != null &&
+                                                    song.album!.isNotEmpty
+                                                ? '${song.artist} · ${song.album}'
+                                                : song.artist,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: isDark
+                                                  ? Colors.white54
+                                                  : Colors.black45,
+                                            ),
+                                          )
+                                        : Text(
+                                            song.album != null &&
+                                                    song.album!.isNotEmpty
+                                                ? '${song.artist} · ${song.album}'
+                                                : song.artist,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: isDark
+                                                  ? Colors.white54
+                                                  : Colors.black45,
+                                            ),
+                                          ),
                                   ),
                                 ],
                               ),

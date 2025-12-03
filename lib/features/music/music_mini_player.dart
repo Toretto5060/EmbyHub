@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -65,13 +66,21 @@ class MusicMiniPlayer extends ConsumerWidget {
                             : Colors.black.withOpacity(0.05),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: hasCurrentSong && currentSong.albumArt != null
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.network(
-                                currentSong.albumArt!,
-                                fit: BoxFit.cover,
-                              ),
+                      clipBehavior: Clip.antiAlias,
+                      child: hasCurrentSong &&
+                              currentSong.albumArt != null &&
+                              File(currentSong.albumArt!).existsSync()
+                          ? Image.file(
+                              File(currentSong.albumArt!),
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Icon(
+                                  CupertinoIcons.double_music_note,
+                                  size: 24,
+                                  color:
+                                      isDark ? Colors.white38 : Colors.black26,
+                                );
+                              },
                             )
                           : Icon(
                               CupertinoIcons.double_music_note,

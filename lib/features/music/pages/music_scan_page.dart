@@ -43,7 +43,7 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
   int _scannedCount = 0;
   List<String> _scanDirectories = [];
   int _minDurationSeconds = 30; // 默认30秒
-  
+
   // 扫描结果状态（持久化）
   DateTime? _lastScanTime;
   int _lastScanCount = 0;
@@ -65,7 +65,8 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
     setState(() {
       _scanDirectories = directories;
       _minDurationSeconds = minDuration;
-      _lastScanTime = lastScanTimeStr != null ? DateTime.tryParse(lastScanTimeStr) : null;
+      _lastScanTime =
+          lastScanTimeStr != null ? DateTime.tryParse(lastScanTimeStr) : null;
       _lastScanCount = lastScanCount;
     });
   }
@@ -76,7 +77,7 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
     final now = DateTime.now();
     await prefs.setString(_lastScanTimeKey, now.toIso8601String());
     await prefs.setInt(_lastScanCountKey, count);
-    
+
     setState(() {
       _lastScanTime = now;
       _lastScanCount = count;
@@ -172,7 +173,8 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
                                     children: [
                                       Icon(
                                         _lastScanCount > 0
-                                            ? CupertinoIcons.checkmark_circle_fill
+                                            ? CupertinoIcons
+                                                .checkmark_circle_fill
                                             : CupertinoIcons.info_circle_fill,
                                         size: 16,
                                         color: _lastScanCount > 0
@@ -186,7 +188,9 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
                                             : '未发现音乐文件',
                                         style: TextStyle(
                                           fontSize: 14,
-                                          color: isDark ? Colors.white70 : Colors.black54,
+                                          color: isDark
+                                              ? Colors.white70
+                                              : Colors.black54,
                                         ),
                                       ),
                                     ],
@@ -196,7 +200,9 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
                                     '上次扫描：${_formatScanTime(_lastScanTime!)}',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: isDark ? Colors.white38 : Colors.black38,
+                                      color: isDark
+                                          ? Colors.white38
+                                          : Colors.black38,
                                     ),
                                   ),
                                 ],
@@ -205,7 +211,8 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
                                 '扫描设备上的音乐文件',
                                 style: TextStyle(
                                   fontSize: 14,
-                                  color: isDark ? Colors.white54 : Colors.black45,
+                                  color:
+                                      isDark ? Colors.white54 : Colors.black45,
                                 ),
                               ),
                   ),
@@ -244,7 +251,8 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
           _buildSettingItem(
             icon: CupertinoIcons.clock,
             title: '不扫描 $_minDurationSeconds 秒以下音频',
-            subtitle: _minDurationSeconds == 0 ? '不过滤' : '$_minDurationSeconds 秒',
+            subtitle:
+                _minDurationSeconds == 0 ? '不过滤' : '$_minDurationSeconds 秒',
             isDark: isDark,
             onTap: () => _showMinDurationInputDialog(isDark),
           ),
@@ -398,7 +406,7 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
   Future<void> _showScanDirectoriesDialog() async {
     // 请求存储权限
     final permissionResult = await _requestStoragePermission();
-    
+
     if (permissionResult == true) {
       // 有权限，选择目录
       await _pickDirectory();
@@ -847,26 +855,28 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
                   durationSeconds = tag.duration!;
                   // 根据文件大小和时长计算比特率 (kbps)
                   // bitrate = (fileSize * 8) / (duration * 1000)
-                  bitrate = ((stat.size * 8) / (durationSeconds * 1000)).round();
+                  bitrate =
+                      ((stat.size * 8) / (durationSeconds * 1000)).round();
                 }
-                
+
                 // 读取专辑封面
                 if (tag.pictures.isNotEmpty) {
                   final picture = tag.pictures.first;
                   if (picture.bytes.isNotEmpty) {
-                    albumArtPath = await _saveArtwork(entity.path, Uint8List.fromList(picture.bytes));
+                    albumArtPath = await _saveArtwork(
+                        entity.path, Uint8List.fromList(picture.bytes));
                   }
                 }
               }
             } catch (e) {
               // 读取元数据失败，使用默认值
             }
-            
+
             // 如果没有从元数据获取到比特率，根据文件大小估算
             if (bitrate == null && durationSeconds > 0) {
               bitrate = ((stat.size * 8) / (durationSeconds * 1000)).round();
             }
-            
+
             // 尝试读取同目录下的 .lrc 歌词文件
             lyrics = await _loadLyricsFile(entity.path);
 
@@ -903,19 +913,19 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
       final directory = audioPath.substring(0, lastSeparator);
       final fileName = audioPath.substring(lastSeparator + 1);
       final nameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.'));
-      
+
       // 尝试查找同名的 .lrc 文件
       final lrcPath = '$directory${Platform.pathSeparator}$nameWithoutExt.lrc';
       final lrcFile = File(lrcPath);
-      
+
       if (await lrcFile.exists()) {
         return await lrcFile.readAsString();
       }
-      
+
       // 尝试查找同名的 .txt 歌词文件
       final txtPath = '$directory${Platform.pathSeparator}$nameWithoutExt.txt';
       final txtFile = File(txtPath);
-      
+
       if (await txtFile.exists()) {
         final content = await txtFile.readAsString();
         // 简单判断是否像歌词文件（包含时间戳或多行文本）
@@ -923,7 +933,7 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
           return content;
         }
       }
-      
+
       return null;
     } catch (e) {
       return null;
