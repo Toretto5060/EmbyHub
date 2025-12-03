@@ -387,42 +387,51 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                       const SizedBox(width: 12),
                       // 歌曲信息
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              song.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: isPlaying
-                                    ? FontWeight.w600
-                                    : FontWeight.normal,
-                                color: isPlaying
-                                    ? CupertinoColors.activeBlue
-                                    : (isDark ? Colors.white : Colors.black87),
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                song.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: isPlaying
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                  color: isPlaying
+                                      ? CupertinoColors.activeBlue
+                                      : (isDark ? Colors.white : Colors.black87),
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${song.artist} · ${song.album ?? '未知专辑'}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: isDark ? Colors.white54 : Colors.black45,
+                              const SizedBox(height: 4),
+                              Text(
+                                song.album != null && song.album!.isNotEmpty
+                                    ? '${song.artist} · ${song.album}'
+                                    : song.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: isDark ? Colors.white54 : Colors.black45,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                       // 时长
-                      Text(
-                        _formatDuration(song.duration),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: isDark ? Colors.white38 : Colors.black38,
+                      SizedBox(
+                        width: 45,
+                        child: Text(
+                          _formatDuration(song.duration),
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isDark ? Colors.white38 : Colors.black38,
+                          ),
                         ),
                       ),
                       // 非多选模式下显示更多按钮
