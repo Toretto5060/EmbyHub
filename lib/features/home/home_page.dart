@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../library/modern_library_page.dart';
+import '../music/local_music_page.dart';
 import '../settings/settings_page.dart';
 import 'bottom_nav_wrapper.dart';
 
@@ -49,7 +50,7 @@ class _HomePageState extends State<HomePage> {
     return PageView.builder(
       controller: _pageController,
       physics: const NeverScrollableScrollPhysics(), // ✅ 禁用手势滑动，只通过底部导航切换
-      itemCount: 3,
+      itemCount: 4,
       onPageChanged: (index) {
         // ✅ 同步更新底部导航栏的选中状态
         if (_currentIndex != index) {
@@ -73,12 +74,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildPageAtIndex(int index) {
+    // 索引顺序：0-媒体库, 1-音乐, 2-收藏/下载, 3-设置
     switch (index) {
       case 0:
         return const ModernLibraryPage();
       case 1:
-        return const _PlaceholderPage(title: '收藏/下载');
+        return const LocalMusicPage();
       case 2:
+        return const _PlaceholderPage(title: '收藏/下载');
+      case 3:
         return const SettingsPage();
       default:
         return const SizedBox.shrink();

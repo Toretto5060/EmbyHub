@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../providers/local_music_provider.dart';
 import '../../utils/platform_utils.dart';
 import '../../utils/status_bar_manager.dart';
 import '../../utils/theme_utils.dart';
@@ -42,16 +43,61 @@ class BottomNavWrapper extends ConsumerStatefulWidget {
   }
 }
 
-class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
+class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
+    with SingleTickerProviderStateMixin {
   int _index = 0;
+  bool _showBottomNav = true;
+  late AnimationController _navAnimationController;
+  late Animation<Offset> _navSlideAnimation;
 
   int get currentIndex => _index;
+  bool get showBottomNav => _showBottomNav;
+
+  @override
+  void initState() {
+    super.initState();
+    _navAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _navSlideAnimation = Tween<Offset>(
+      begin: Offset.zero,
+      end: const Offset(0, 1), // 向下滑出
+    ).animate(CurvedAnimation(
+      parent: _navAnimationController,
+      curve: Curves.easeInOut,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _navAnimationController.dispose();
+    super.dispose();
+  }
 
   // ✅ 切换到指定的 tab
   void switchToTab(int index) {
     if (_index != index) {
       setState(() {
         _index = index;
+      });
+    }
+  }
+
+  // ✅ 控制底部导航栏显示/隐藏（带动画）
+  void setBottomNavVisible(bool visible) {
+    if (visible) {
+      // 显示：先设置状态，再播放动画（从下往上）
+      setState(() {
+        _showBottomNav = true;
+      });
+      _navAnimationController.reverse();
+    } else {
+      // 隐藏：先播放动画（从上往下），再设置状态
+      _navAnimationController.forward().then((_) {
+        setState(() {
+          _showBottomNav = false;
+        });
       });
     }
   }
@@ -88,9 +134,14 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
         child: Scaffold(
           body: Stack(
             children: [
-              // ✅ 内容区域 - 使用 RepaintBoundary 隔离重绘
-              Positioned.fill(
-                bottom: bottomNavHeight,
+              // ✅ 内容区域 - 使用 AnimatedPositioned 平滑过渡底部间距
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: _showBottomNav ? bottomNavHeight : 0,
                 child: RepaintBoundary(
                   child: BottomNavProvider(
                     currentIndex: _index,
@@ -98,51 +149,65 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
                   ),
                 ),
               ),
-              // ✅ 底部导航栏 - 使用 RepaintBoundary 隔离重绘
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: RepaintBoundary(
-                  child: ClipRect(
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-                      child: Container(
-                        height: bottomNavHeight,
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? const Color(0xFF1C1C1E).withOpacity(0)
-                              : const Color(0xFFF2F2F7).withOpacity(0),
-                        ),
-                        child: SafeArea(
-                          top: false,
-                          child: SizedBox(
-                            height: navBarHeight,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                _buildTabItem(
-                                  context: context,
-                                  icon: CupertinoIcons.square_grid_2x2,
-                                  label: '媒体库',
-                                  index: 0,
-                                  isActive: _index == 0,
+              // ✅ 底部导航栏 - 使用 RepaintBoundary 隔离重绘（带动画）
+              if (_showBottomNav || _navAnimationController.isAnimating)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: SlideTransition(
+                    position: _navSlideAnimation,
+                    child: RepaintBoundary(
+                      child: ClipRect(
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                          child: Container(
+                            height: bottomNavHeight,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF1C1C1E).withOpacity(0)
+                                  : const Color(0xFFF2F2F7).withOpacity(0),
+                            ),
+                            child: SafeArea(
+                              top: false,
+                              child: SizedBox(
+                                height: navBarHeight,
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceAround,
+                                  children: [
+                                    _buildTabItem(
+                                      context: context,
+                                      icon: CupertinoIcons.square_grid_2x2,
+                                      label: '媒体库',
+                                      index: 0,
+                                      isActive: _index == 0,
+                                    ),
+                                    _buildTabItem(
+                                      context: context,
+                                      icon: CupertinoIcons.music_note,
+                                      label: '音乐',
+                                      index: 1,
+                                      isActive: _index == 1,
+                                      hideNavOnTap: true,
+                                    ),
+                                    _buildTabItem(
+                                      context: context,
+                                      icon: CupertinoIcons.heart,
+                                      label: '收藏/下载',
+                                      index: 2,
+                                      isActive: _index == 2,
+                                    ),
+                                    _buildTabItem(
+                                      context: context,
+                                      icon: CupertinoIcons.settings,
+                                      label: '设置',
+                                      index: 3,
+                                      isActive: _index == 3,
+                                    ),
+                                  ],
                                 ),
-                                _buildTabItem(
-                                  context: context,
-                                  icon: CupertinoIcons.heart,
-                                  label: '收藏/下载',
-                                  index: 1,
-                                  isActive: _index == 1,
-                                ),
-                                _buildTabItem(
-                                  context: context,
-                                  icon: CupertinoIcons.settings,
-                                  label: '设置',
-                                  index: 2,
-                                  isActive: _index == 2,
-                                ),
-                              ],
+                              ),
                             ),
                           ),
                         ),
@@ -150,7 +215,6 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
                     ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -164,6 +228,7 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
     required String label,
     required int index,
     required bool isActive,
+    bool hideNavOnTap = false,
   }) {
     return Expanded(
       child: GestureDetector(
@@ -174,9 +239,15 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
           }
           setState(() => _index = index);
 
-          // ✅ 如果切换到设置页面（index == 2），触发缓存刷新
-          if (index == 2) {
+          // ✅ 如果切换到设置页面（index == 3），触发缓存刷新
+          if (index == 3) {
             ref.read(cacheRefreshTriggerProvider.notifier).state++;
+          }
+
+          // ✅ 如果是音乐tab，隐藏底部导航栏并设置音乐页面可见状态
+          if (hideNavOnTap) {
+            setBottomNavVisible(false);
+            ref.read(musicPageVisibleProvider.notifier).state = true;
           }
         },
         behavior: HitTestBehavior.opaque,
@@ -205,5 +276,24 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper> {
         ),
       ),
     );
+  }
+
+// ✅ 退出音乐页面，恢复底部导航栏
+  void exitMusicPage() {
+    ref.read(musicPageVisibleProvider.notifier).state = false;
+
+    // 1. 先显示底部导航栏并播放上滑动画
+    setState(() {
+      _showBottomNav = true;
+    });
+    _navAnimationController.value = 1.0; // 设置到隐藏状态
+    _navAnimationController.reverse().then((_) {
+      // 2. 底部导航栏动画结束后，再切换页面（带动画）
+      if (mounted) {
+        setState(() {
+          _index = 0;
+        });
+      }
+    });
   }
 }
