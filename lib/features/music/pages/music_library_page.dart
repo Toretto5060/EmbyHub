@@ -63,7 +63,7 @@ class MusicLibraryPage extends ConsumerWidget {
             children: [
               Expanded(
                 child: _buildStatCard(
-                  icon: CupertinoIcons.music_note,
+                  icon: CupertinoIcons.double_music_note,
                   label: '歌曲',
                   value: '85',
                   isDark: isDark,

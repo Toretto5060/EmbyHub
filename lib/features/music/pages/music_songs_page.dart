@@ -1,9 +1,14 @@
+import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../providers/local_music_provider.dart';
+import '../../../providers/local_music_storage_provider.dart';
 import '../../../utils/theme_utils.dart';
+
+/// 封面图片缓存
+final Map<String, ImageProvider> _albumArtCache = {};
 
 class MusicSongsPage extends ConsumerStatefulWidget {
   const MusicSongsPage({super.key});
@@ -16,56 +21,78 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
   bool _isMultiSelectMode = false;
   final Set<String> _selectedSongIds = {};
 
-  // 模拟歌曲数据
-  final List<LocalSong> _mockSongs = [
-    const LocalSong(
-      id: '1',
-      title: '示例歌曲 1',
-      artist: '艺术家 A',
-      album: '专辑一',
-      duration: Duration(minutes: 3, seconds: 45),
-    ),
-    const LocalSong(
-      id: '2',
-      title: '示例歌曲 2',
-      artist: '艺术家 B',
-      album: '专辑二',
-      duration: Duration(minutes: 4, seconds: 20),
-    ),
-    const LocalSong(
-      id: '3',
-      title: '示例歌曲 3',
-      artist: '艺术家 A',
-      album: '专辑一',
-      duration: Duration(minutes: 2, seconds: 58),
-    ),
-    const LocalSong(
-      id: '4',
-      title: '示例歌曲 4',
-      artist: '艺术家 C',
-      album: '专辑三',
-      duration: Duration(minutes: 5, seconds: 12),
-    ),
-    const LocalSong(
-      id: '5',
-      title: '示例歌曲 5',
-      artist: '艺术家 B',
-      album: '专辑二',
-      duration: Duration(minutes: 3, seconds: 33),
-    ),
-  ];
-
   String _formatDuration(Duration? duration) {
     if (duration == null) return '--:--';
-    final minutes = duration.inMinutes;
-    final seconds = duration.inSeconds % 60;
+    final totalSeconds = duration.inSeconds;
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
+  
+  /// 获取缓存的封面图片
+  ImageProvider? _getCachedAlbumArt(String? path) {
+    if (path == null) return null;
+    
+    if (_albumArtCache.containsKey(path)) {
+      return _albumArtCache[path];
+    }
+    
+    final file = File(path);
+    if (file.existsSync()) {
+      final provider = FileImage(file);
+      _albumArtCache[path] = provider;
+      return provider;
+    }
+    
+    return null;
+  }
+  
+  /// 构建专辑封面组件
+  Widget _buildAlbumArt(LocalSong song, bool isPlaying, bool isDark) {
+    final albumArtProvider = _getCachedAlbumArt(song.albumArt);
+    
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white10
+            : Colors.black.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: albumArtProvider != null
+          ? Image(
+              image: albumArtProvider,
+              width: 48,
+              height: 48,
+              fit: BoxFit.cover,
+              gaplessPlayback: true, // 防止滚动时闪烁
+              errorBuilder: (context, error, stackTrace) {
+                return _buildDefaultMusicIcon(isPlaying, isDark);
+              },
+            )
+          : _buildDefaultMusicIcon(isPlaying, isDark),
+    );
+  }
+  
+  /// 构建默认音乐图标
+  Widget _buildDefaultMusicIcon(bool isPlaying, bool isDark) {
+    return Center(
+      child: Icon(
+        CupertinoIcons.double_music_note,
+        size: 24,
+        color: isPlaying
+            ? CupertinoColors.activeBlue
+            : (isDark ? Colors.white38 : Colors.black26),
+      ),
+    );
+  }
 
-  void _shufflePlay() {
-    if (_mockSongs.isEmpty) return;
+  void _shufflePlay(List<LocalSong> songs) {
+    if (songs.isEmpty) return;
     // 随机打乱歌曲顺序
-    final shuffledSongs = List<LocalSong>.from(_mockSongs)..shuffle();
+    final shuffledSongs = List<LocalSong>.from(songs)..shuffle();
     ref.read(localMusicPlayerProvider.notifier).setPlaylist(shuffledSongs);
     ref.read(expandPlayerTriggerProvider.notifier).state++;
   }
@@ -90,12 +117,12 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
   }
 
   // 播放选中的歌曲队列
-  void _playSelectedSongs() {
+  void _playSelectedSongs(List<LocalSong> songs) {
     if (_selectedSongIds.isEmpty) return;
 
     // 获取选中的歌曲，保持原始顺序
     final selectedSongs =
-        _mockSongs.where((song) => _selectedSongIds.contains(song.id)).toList();
+        songs.where((song) => _selectedSongIds.contains(song.id)).toList();
 
     // 设置播放列表并开始播放
     ref.read(localMusicPlayerProvider.notifier).setPlaylist(selectedSongs);
@@ -112,12 +139,7 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
   void _showAddToPlaylistDialog(BuildContext context, bool isDark) {
     if (_selectedSongIds.isEmpty) return;
 
-    // 模拟歌单数据
-    final mockPlaylists = [
-      {'id': '1', 'name': '我喜欢的音乐'},
-      {'id': '2', 'name': '运动歌单'},
-      {'id': '3', 'name': '睡前音乐'},
-    ];
+    final playlists = ref.read(localMusicStorageProvider).playlists;
 
     showCupertinoModalPopup(
       context: context,
@@ -146,15 +168,16 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
               ],
             ),
           ),
-          // 现有歌单列表
-          ...mockPlaylists.map((playlist) => CupertinoActionSheetAction(
-                onPressed: () {
-                  Navigator.pop(context);
-                  // TODO: 添加到歌单
-                  _onAddToPlaylist(playlist['id']!, playlist['name']!);
-                },
-                child: Text(playlist['name']!),
-              )),
+          // 现有歌单列表（排除最近播放）
+          ...playlists
+              .where((p) => p.id != 'recent')
+              .map((playlist) => CupertinoActionSheetAction(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _onAddToPlaylist(playlist.id, playlist.name);
+                    },
+                    child: Text(playlist.name),
+                  )),
         ],
         cancelButton: CupertinoActionSheetAction(
           onPressed: () => Navigator.pop(context),
@@ -203,8 +226,10 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
   }
 
   // 添加到现有歌单
-  void _onAddToPlaylist(String playlistId, String playlistName) {
-    // TODO: 实现添加到歌单的逻辑
+  Future<void> _onAddToPlaylist(String playlistId, String playlistName) async {
+    await ref
+        .read(localMusicStorageProvider.notifier)
+        .addSongsToPlaylist(playlistId, _selectedSongIds.toList());
     // 退出多选模式
     setState(() {
       _isMultiSelectMode = false;
@@ -213,8 +238,13 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
   }
 
   // 创建新歌单并添加歌曲
-  void _onCreatePlaylistAndAdd(String playlistName) {
-    // TODO: 实现创建歌单并添加歌曲的逻辑
+  Future<void> _onCreatePlaylistAndAdd(String playlistName) async {
+    final newPlaylist = await ref
+        .read(localMusicStorageProvider.notifier)
+        .createPlaylist(playlistName);
+    await ref
+        .read(localMusicStorageProvider.notifier)
+        .addSongsToPlaylist(newPlaylist.id, _selectedSongIds.toList());
     // 退出多选模式
     setState(() {
       _isMultiSelectMode = false;
@@ -265,15 +295,36 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
     );
   }
 
+  // 跳转到扫描页面
+  void _goToScanPage() {
+    ref.read(currentMusicNavProvider.notifier).state = MusicNavItem.scan;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = isDarkModeFromContext(context, ref);
     final playerState = ref.watch(localMusicPlayerProvider);
+    final storageState = ref.watch(localMusicStorageProvider);
+    final musicSourceMode = ref.watch(musicSourceModeProvider);
+
+    final songs = storageState.songs;
+
+    // 加载中状态
+    if (storageState.isLoading) {
+      return const Center(
+        child: CupertinoActivityIndicator(),
+      );
+    }
+
+    // 空状态
+    if (songs.isEmpty) {
+      return _buildEmptyState(context, isDark, musicSourceMode);
+    }
 
     return Column(
       children: [
         // 顶部操作栏
-        _buildToolbar(context, isDark),
+        _buildToolbar(context, isDark, songs),
         // 歌曲列表
         Expanded(
           child: ListView.builder(
@@ -281,9 +332,9 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
               top: 8,
               bottom: _isMultiSelectMode ? 72 : 8, // 多选模式时底部留出操作栏空间
             ),
-            itemCount: _mockSongs.length,
+            itemCount: songs.length,
             itemBuilder: (context, index) {
-              final song = _mockSongs[index];
+              final song = songs[index];
               final isPlaying = playerState.currentSong?.id == song.id;
               final isSelected = _selectedSongIds.contains(song.id);
 
@@ -296,7 +347,7 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                   } else {
                     // 正常模式：播放歌曲
                     ref.read(localMusicPlayerProvider.notifier).setPlaylist(
-                          _mockSongs,
+                          songs,
                           startIndex: index,
                         );
                     ref.read(expandPlayerTriggerProvider.notifier).state++;
@@ -331,24 +382,8 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                         ),
                         const SizedBox(width: 12),
                       ],
-                      // 专辑封面占位
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white10
-                              : Colors.black.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Icon(
-                          CupertinoIcons.music_note,
-                          size: 24,
-                          color: isPlaying
-                              ? CupertinoColors.activeBlue
-                              : (isDark ? Colors.white38 : Colors.black26),
-                        ),
-                      ),
+                      // 专辑封面
+                      _buildAlbumArt(song, isPlaying, isDark),
                       const SizedBox(width: 12),
                       // 歌曲信息
                       Expanded(
@@ -414,13 +449,85 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
           ),
         ),
         // 多选模式下的底部操作栏
-        if (_isMultiSelectMode) _buildMultiSelectActionBar(context, isDark),
+        if (_isMultiSelectMode)
+          _buildMultiSelectActionBar(context, isDark, songs),
       ],
     );
   }
 
+  // 空状态显示
+  Widget _buildEmptyState(
+      BuildContext context, bool isDark, MusicSourceMode sourceMode) {
+    final isServerMode = sourceMode == MusicSourceMode.server;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              CupertinoIcons.double_music_note,
+              size: 64,
+              color: isDark ? Colors.white24 : Colors.black12,
+            ),
+            const SizedBox(height: 24),
+            Text(
+              '暂无播放列表',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (isServerMode)
+              Text(
+                '快去服务器添加音乐文件吧',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white54 : Colors.black38,
+                ),
+                textAlign: TextAlign.center,
+              )
+            else
+              Column(
+                children: [
+                  Text(
+                    '当前为本地播放，快去扫描吧',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? Colors.white54 : Colors.black38,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  CupertinoButton(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                    color: CupertinoColors.activeBlue,
+                    borderRadius: BorderRadius.circular(20),
+                    onPressed: _goToScanPage,
+                    child: const Text(
+                      '扫描音乐',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // 多选模式底部操作栏
-  Widget _buildMultiSelectActionBar(BuildContext context, bool isDark) {
+  Widget _buildMultiSelectActionBar(
+      BuildContext context, bool isDark, List<LocalSong> songs) {
     final hasSelection = _selectedSongIds.isNotEmpty;
 
     return Container(
@@ -485,7 +592,8 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                     ? CupertinoColors.activeBlue
                     : CupertinoColors.activeBlue.withOpacity(0.3),
                 borderRadius: BorderRadius.circular(10),
-                onPressed: hasSelection ? _playSelectedSongs : null,
+                onPressed:
+                    hasSelection ? () => _playSelectedSongs(songs) : null,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -513,7 +621,8 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
     );
   }
 
-  Widget _buildToolbar(BuildContext context, bool isDark) {
+  Widget _buildToolbar(
+      BuildContext context, bool isDark, List<LocalSong> songs) {
     final iconColor = isDark ? Colors.white70 : Colors.black54;
     final activeColor = CupertinoColors.activeBlue;
 
@@ -533,7 +642,7 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
           CupertinoButton(
             padding: EdgeInsets.zero,
             minSize: 36,
-            onPressed: _shufflePlay,
+            onPressed: () => _shufflePlay(songs),
             child: Icon(
               CupertinoIcons.shuffle,
               size: 20,
@@ -543,7 +652,7 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
           const SizedBox(width: 8),
           // 歌曲数量（只显示数字）
           Text(
-            '${_mockSongs.length}',
+            '${songs.length}',
             style: TextStyle(
               fontSize: 14,
               color: isDark ? Colors.white54 : Colors.black45,

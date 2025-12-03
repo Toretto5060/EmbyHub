@@ -2,22 +2,27 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../providers/local_music_provider.dart';
 import '../../../utils/theme_utils.dart';
 
 class MusicArtistsPage extends ConsumerWidget {
   const MusicArtistsPage({super.key});
 
+  void _goToScanPage(WidgetRef ref) {
+    ref.read(currentMusicNavProvider.notifier).state = MusicNavItem.scan;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = isDarkModeFromContext(context, ref);
+    final musicSourceMode = ref.watch(musicSourceModeProvider);
 
-    // 模拟艺术家数据
-    final artists = [
-      {'name': '艺术家 A', 'albums': 3, 'songs': 25},
-      {'name': '艺术家 B', 'albums': 2, 'songs': 18},
-      {'name': '艺术家 C', 'albums': 1, 'songs': 15},
-      {'name': '艺术家 D', 'albums': 4, 'songs': 32},
-    ];
+    // TODO: 从存储中获取艺术家数据
+    final artists = <Map<String, dynamic>>[];
+
+    if (artists.isEmpty) {
+      return _buildEmptyState(context, isDark, musicSourceMode, ref);
+    }
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -38,7 +43,9 @@ class MusicArtistsPage extends ConsumerWidget {
                   width: 56,
                   height: 56,
                   decoration: BoxDecoration(
-                    color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+                    color: isDark
+                        ? Colors.white10
+                        : Colors.black.withOpacity(0.05),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -84,5 +91,73 @@ class MusicArtistsPage extends ConsumerWidget {
       },
     );
   }
-}
 
+  Widget _buildEmptyState(BuildContext context, bool isDark,
+      MusicSourceMode sourceMode, WidgetRef ref) {
+    final isServerMode = sourceMode == MusicSourceMode.server;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              CupertinoIcons.person_2_fill,
+              size: 64,
+              color: isDark ? Colors.white24 : Colors.black12,
+            ),
+            const SizedBox(height: 24),
+            Text(
+              '暂无艺术家',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (isServerMode)
+              Text(
+                '快去服务器添加音乐文件吧',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white54 : Colors.black38,
+                ),
+                textAlign: TextAlign.center,
+              )
+            else
+              Column(
+                children: [
+                  Text(
+                    '当前为本地播放，快去扫描吧',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? Colors.white54 : Colors.black38,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  CupertinoButton(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                    color: CupertinoColors.activeBlue,
+                    borderRadius: BorderRadius.circular(20),
+                    onPressed: () => _goToScanPage(ref),
+                    child: const Text(
+                      '扫描音乐',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

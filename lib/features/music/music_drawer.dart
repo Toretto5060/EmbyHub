@@ -17,6 +17,7 @@ class MusicDrawer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = isDarkModeFromContext(context, ref);
     final currentNav = ref.watch(currentMusicNavProvider);
+    final musicSourceMode = ref.watch(musicSourceModeProvider);
 
     // 抽屉宽度
     final drawerWidth = MediaQuery.of(context).size.width / 2;
@@ -28,7 +29,7 @@ class MusicDrawer extends ConsumerWidget {
         child: Column(
           children: [
             // 顶部操作栏
-            _buildHeader(context, isDark, ref),
+            _buildHeader(context, isDark, ref, musicSourceMode),
             const SizedBox(height: 8),
             // 导航列表
             Expanded(
@@ -130,7 +131,8 @@ class MusicDrawer extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context, bool isDark, WidgetRef ref) {
+  Widget _buildHeader(BuildContext context, bool isDark, WidgetRef ref,
+      MusicSourceMode musicSourceMode) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -175,12 +177,17 @@ class MusicDrawer extends ConsumerWidget {
             ),
           ),
           const Spacer(),
-          // 切换媒体库按钮（待实现）
+          // 切换本地/媒体库按钮
           CupertinoButton(
             padding: EdgeInsets.zero,
             minSize: 40,
             onPressed: () {
-              // TODO: 切换媒体库音乐数据
+              // 切换音乐来源模式
+              final currentMode = ref.read(musicSourceModeProvider);
+              ref.read(musicSourceModeProvider.notifier).state =
+                  currentMode == MusicSourceMode.local
+                      ? MusicSourceMode.server
+                      : MusicSourceMode.local;
               Navigator.of(context).pop();
             },
             child: Container(
@@ -193,13 +200,15 @@ class MusicDrawer extends ConsumerWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    CupertinoIcons.arrow_2_circlepath,
+                    musicSourceMode == MusicSourceMode.local
+                        ? CupertinoIcons.device_phone_portrait
+                        : CupertinoIcons.cloud,
                     size: 18,
                     color: CupertinoColors.activeBlue,
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    '媒体库',
+                    musicSourceMode == MusicSourceMode.local ? '本地' : '媒体库',
                     style: TextStyle(
                       fontSize: 14,
                       color: CupertinoColors.activeBlue,

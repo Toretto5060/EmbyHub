@@ -2,22 +2,27 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../providers/local_music_provider.dart';
 import '../../../utils/theme_utils.dart';
 
 class MusicAlbumsPage extends ConsumerWidget {
   const MusicAlbumsPage({super.key});
 
+  void _goToScanPage(WidgetRef ref) {
+    ref.read(currentMusicNavProvider.notifier).state = MusicNavItem.scan;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = isDarkModeFromContext(context, ref);
+    final musicSourceMode = ref.watch(musicSourceModeProvider);
 
-    // 模拟专辑数据
-    final albums = [
-      {'name': '专辑一', 'artist': '艺术家 A', 'songs': 12},
-      {'name': '专辑二', 'artist': '艺术家 B', 'songs': 8},
-      {'name': '专辑三', 'artist': '艺术家 C', 'songs': 15},
-      {'name': '专辑四', 'artist': '艺术家 A', 'songs': 10},
-    ];
+    // TODO: 从存储中获取专辑数据
+    final albums = <Map<String, dynamic>>[];
+
+    if (albums.isEmpty) {
+      return _buildEmptyState(context, isDark, musicSourceMode, ref);
+    }
 
     return GridView.builder(
       padding: const EdgeInsets.all(16),
@@ -83,6 +88,75 @@ class MusicAlbumsPage extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context, bool isDark,
+      MusicSourceMode sourceMode, WidgetRef ref) {
+    final isServerMode = sourceMode == MusicSourceMode.server;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              CupertinoIcons.music_albums,
+              size: 64,
+              color: isDark ? Colors.white24 : Colors.black12,
+            ),
+            const SizedBox(height: 24),
+            Text(
+              '暂无专辑',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (isServerMode)
+              Text(
+                '快去服务器添加音乐文件吧',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white54 : Colors.black38,
+                ),
+                textAlign: TextAlign.center,
+              )
+            else
+              Column(
+                children: [
+                  Text(
+                    '当前为本地播放，快去扫描吧',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? Colors.white54 : Colors.black38,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  CupertinoButton(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                    color: CupertinoColors.activeBlue,
+                    borderRadius: BorderRadius.circular(20),
+                    onPressed: () => _goToScanPage(ref),
+                    child: const Text(
+                      '扫描音乐',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

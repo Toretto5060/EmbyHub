@@ -228,7 +228,7 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                     )
                   : Center(
                       child: Icon(
-                        CupertinoIcons.music_note,
+                        CupertinoIcons.double_music_note,
                         size: 80,
                         color: isDark ? Colors.white24 : Colors.black12,
                       ),

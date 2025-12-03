@@ -46,6 +46,7 @@ class LocalSong {
     required this.artist,
     this.album,
     this.albumArt,
+    this.lyrics,
     this.duration,
     this.path,
   });
@@ -55,6 +56,7 @@ class LocalSong {
   final String artist;
   final String? album;
   final String? albumArt;
+  final String? lyrics; // 歌词
   final Duration? duration;
   final String? path;
 }
@@ -161,6 +163,16 @@ enum MusicNavItem {
 
 final currentMusicNavProvider =
     StateProvider<MusicNavItem>((ref) => MusicNavItem.songs);
+
+/// 音乐来源模式
+enum MusicSourceMode {
+  local, // 本地音乐
+  server, // 服务器媒体库音乐
+}
+
+/// 当前音乐来源模式
+final musicSourceModeProvider =
+    StateProvider<MusicSourceMode>((ref) => MusicSourceMode.local);
 
 /// 启动页面模式
 enum StartupPageMode {

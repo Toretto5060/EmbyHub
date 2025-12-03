@@ -63,7 +63,8 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
       _isPlayerExpanded = true;
     });
     ref.read(musicPlayerExpandedProvider.notifier).state = true;
-    _playerAnimationController.forward();
+    // 确保从头开始播放动画
+    _playerAnimationController.forward(from: 0);
   }
 
   void _collapsePlayer() {

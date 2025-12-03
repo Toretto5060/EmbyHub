@@ -74,7 +74,7 @@ class MusicMiniPlayer extends ConsumerWidget {
                               ),
                             )
                           : Icon(
-                              CupertinoIcons.music_note,
+                              CupertinoIcons.double_music_note,
                               size: 24,
                               color: isDark ? Colors.white38 : Colors.black26,
                             ),
