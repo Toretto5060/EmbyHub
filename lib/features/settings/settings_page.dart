@@ -1558,6 +1558,9 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
     // ✅ 图片缓存是服务器级别的，所有用户共享
     await ServerCacheManager.clearImageCache();
 
+    // ✅ 同时清除内存中的图片缓存
+    clearImageMemoryCache();
+
     if (mounted) {
       setState(() => _isLoading = false);
       await _loadCacheSize();

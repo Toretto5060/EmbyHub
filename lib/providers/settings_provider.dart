@@ -1,8 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:crypto/crypto.dart';
-import 'dart:convert';
 import '../widgets/fade_in_image.dart';
+import '../services/server_cache_manager.dart';
 
 class ServerSettings {
   ServerSettings(
@@ -61,47 +60,18 @@ class AuthController extends StateNotifier<AsyncValue<AuthState>> {
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getString('emby_user_id');
-    final serverHost = prefs.getString('server_host');
 
-    // ✅ 计算服务器ID（与ServerCacheManager保持一致）
-    String? serverId;
-    if (serverHost != null && serverHost.isNotEmpty) {
-      serverId = await _getServerId(serverHost);
-    }
+    // ✅ 直接使用 ServerCacheManager 获取服务器ID，确保一致性
+    final serverId = await ServerCacheManager.getCurrentServerId();
 
     // ✅ 设置图片缓存的用户ID和服务器ID（用于缓存隔离）
-    setImageCacheUserAndServer(userId, serverId);
+    setImageCacheUserAndServer(userId, serverId.isNotEmpty ? serverId : null);
 
     state = AsyncValue.data(AuthState(
       userId: userId,
       userName: prefs.getString('emby_user_name'),
       token: prefs.getString('emby_token'),
     ));
-  }
-
-  // ✅ 计算服务器ID（与ServerCacheManager保持一致）
-  Future<String> _getServerId(String host) async {
-    // 移除端口号
-    String hostWithoutPort = host;
-    if (host.startsWith('[')) {
-      final closeBracket = host.indexOf(']');
-      if (closeBracket != -1) {
-        hostWithoutPort = host.substring(0, closeBracket + 1);
-      }
-    } else {
-      final colonIndex = host.lastIndexOf(':');
-      if (colonIndex != -1) {
-        final colonCount = ':'.allMatches(host).length;
-        if (colonCount == 1) {
-          hostWithoutPort = host.substring(0, colonIndex);
-        }
-      }
-    }
-
-    // 使用MD5生成服务器ID
-    final bytes = utf8.encode(hostWithoutPort.toLowerCase());
-    final digest = md5.convert(bytes);
-    return digest.toString();
   }
 
   Future<void> clear() async {

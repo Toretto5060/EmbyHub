@@ -287,6 +287,16 @@ class _ImageCache {
       _log('❌ Failed to clear disk cache: $e');
     }
   }
+
+  // ✅ 只清空内存缓存（磁盘缓存由 ServerCacheManager 负责）
+  static void clearMemory() {
+    for (var image in _memoryCache.values) {
+      image.dispose();
+    }
+    _memoryCache.clear();
+    _loading.clear();
+    _log('🗑️ Memory image cache cleared');
+  }
 }
 
 /// 带淡入效果的图片加载组件
@@ -796,19 +806,9 @@ class _EmbyFadeInImageState extends State<EmbyFadeInImage> {
         );
       }
     }
-    // 如果加载失败，显示错误占位符
+    // 如果加载失败，显示错误占位符（使用主题色）
     else if (_hasError) {
-      child = widget.placeholder ??
-          Container(
-            color: CupertinoColors.systemGrey6,
-            child: const Center(
-              child: Icon(
-                CupertinoIcons.photo,
-                size: 32,
-                color: CupertinoColors.systemGrey3,
-              ),
-            ),
-          );
+      child = widget.placeholder ?? const _ErrorPlaceholder();
     }
     // 正在加载且没有旧图片
     else if (_isLoading) {
@@ -864,6 +864,29 @@ class EmbyFadeInImage extends StatelessWidget {
       imageUrl,
       fit: fit,
 */
+
+/// 错误占位符（使用主题色背景）
+class _ErrorPlaceholder extends ConsumerWidget {
+  const _ErrorPlaceholder();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDark = isDarkModeFromContext(context, ref);
+
+    return Container(
+      color: isDark ? const Color(0xFF1A1A1A) : const Color(0xFFE8E8E8),
+      child: Center(
+        child: Icon(
+          CupertinoIcons.photo,
+          size: 32,
+          color: isDark
+              ? Colors.white.withOpacity(0.3)
+              : Colors.black.withOpacity(0.2),
+        ),
+      ),
+    );
+  }
+}
 
 /// 骨架屏占位符（闪烁动画）
 class _ShimmerPlaceholder extends ConsumerStatefulWidget {
@@ -984,4 +1007,11 @@ Future<void> preloadImage(String url) async {
 Future<void> preloadImages(List<String> urls) async {
   final futures = urls.map((url) => preloadImage(url));
   await Future.wait(futures, eagerError: false);
+}
+
+/// ✅ 公共方法：清除内存中的图片缓存
+/// 用于设置页面的"清除缓存"功能，配合 ServerCacheManager.clearImageCache() 使用
+/// 磁盘缓存由 ServerCacheManager 负责清除
+void clearImageMemoryCache() {
+  _ImageCache.clearMemory();
 }

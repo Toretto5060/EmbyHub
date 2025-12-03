@@ -496,6 +496,8 @@ Future<List<ItemInfo>> _fetchAndCacheLibraryItems(
     int? totalCount;
 
     while (true) {
+      debugPrint(
+          '[LibraryItemsPage] 加载数据: startIndex=$startIndex, libraryType=$libraryType');
       final result = await api.getItemsByParentWithTotal(
         userId: userId,
         parentId: viewId,
@@ -509,6 +511,7 @@ Future<List<ItemInfo>> _fetchAndCacheLibraryItems(
 
       allItems.addAll(result.items);
       totalCount = result.totalCount;
+      debugPrint('[LibraryItemsPage] 已加载: ${allItems.length}/$totalCount');
 
       // ✅ 如果已加载所有数据，或者返回的数据少于 pageSize，说明已经加载完
       if (totalCount != null && allItems.length >= totalCount) {
@@ -613,6 +616,7 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     // ✅ 等待转场结束后再标记页面可见
     TransitionOptimizer.deferUntilTransitionEnd(() {
       if (mounted) {
+        debugPrint('[LibraryItemsPage] 转场结束，标记页面可见: ${widget.viewName}');
         setState(() {
           _isPageVisible = true;
         });
@@ -1181,17 +1185,12 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
     );
   }
 
-  // ✅ 构建类型占位符
+  // ✅ 构建类型占位符（使用 EmbyFadeInImage 的默认占位符）
   Widget _buildGenrePlaceholder() {
-    return Container(
-      color: CupertinoColors.systemGrey4,
-      child: Center(
-        child: Icon(
-          CupertinoIcons.tag,
-          color: CupertinoColors.systemGrey2,
-          size: 48,
-        ),
-      ),
+    // 返回一个空的 EmbyFadeInImage，它会自动显示呼吸效果
+    return const EmbyFadeInImage(
+      imageUrl: '', // 空URL会显示默认占位符
+      enableLazyLoad: false,
     );
   }
 
@@ -1472,7 +1471,10 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   // ✅ 构建导航栏（独立方法，避免依赖itemsProvider的变化）
   ObstructingPreferredSizeWidget _buildNavigationBar(BuildContext context,
       WidgetRef ref, List<ItemInfo> itemsList, int filteredCount) {
-    final sortState = ref.watch(sortStateProvider(widget.viewId));
+    // ✅ 使用 read 而不是 watch，避免在转场期间触发 itemsProvider 重新计算
+    final sortState = _isPageVisible
+        ? ref.watch(sortStateProvider(widget.viewId))
+        : ref.read(sortStateProvider(widget.viewId));
     final libraryType = _getLibraryType(itemsList);
     final tabs = _getTabsForType(libraryType, itemsList);
     final sortLabel = sortState.sortBy.label;
@@ -1580,6 +1582,9 @@ class _LibraryItemsPageState extends ConsumerState<LibraryItemsPage>
   @override
   Widget build(BuildContext context) {
     // ✅ 只有在页面可见时才请求数据
+    if (!_isPageVisible && _cachedItemsList == null) {
+      debugPrint('[LibraryItemsPage] build: 页面不可见且无缓存: ${widget.viewName}');
+    }
     final items = _isPageVisible
         ? ref.watch(itemsProvider(widget.viewId))
         : AsyncValue<List<ItemInfo>>.data(_cachedItemsList ?? []);
@@ -1770,11 +1775,15 @@ class _ItemTileState extends ConsumerState<_ItemTile>
   @override
   void initState() {
     super.initState();
-    // ✅ 在组件初始化时预加载详情页图片（背景图和Logo）
-    _preloadDetailImages();
+    // ✅ 等待转场结束后再预加载详情页图片，避免在转场期间造成卡顿
+    TransitionOptimizer.deferUntilTransitionEnd(() {
+      if (mounted) {
+        _preloadDetailImages();
+      }
+    });
   }
 
-  /// ✅ 预加载详情页需要的图片（背景图、Logo、季海报）
+  /// ✅ 预加载详情页需要的图片（只预加载背景图和Logo，不预加载季海报）
   Future<void> _preloadDetailImages() async {
     if (_hasPreloadedDetailImages) return;
     _hasPreloadedDetailImages = true;
@@ -1798,49 +1807,8 @@ class _ItemTileState extends ConsumerState<_ItemTile>
         });
       }
 
-      // 3. 如果是电视剧类型，预加载季海报
-      if (item.type == 'Series' && item.id != null) {
-        _preloadSeasonPosters(api, item.id!);
-      }
-    } catch (e) {
-      // 忽略预加载错误，不影响主流程
-    }
-  }
-
-  /// ✅ 预加载季海报（异步，不阻塞主流程）
-  Future<void> _preloadSeasonPosters(EmbyApi api, String seriesId) async {
-    try {
-      final auth = ref.read(authStateProvider).value;
-      if (auth == null || !auth.isLoggedIn) return;
-
-      // 获取季列表
-      final seasons = await api.getSeasons(
-        userId: auth.userId!,
-        seriesId: seriesId,
-      );
-
-      // 预加载每个季的海报
-      for (final season in seasons) {
-        if (season.id == null) continue;
-
-        final imageTags = season.imageTags ?? const <String, String>{};
-        final primaryTag = imageTags['Primary'];
-
-        if (primaryTag != null && primaryTag.isNotEmpty) {
-          final posterUrl = api.buildImageUrl(
-            itemId: season.id!,
-            type: 'Primary',
-            tag: primaryTag,
-            maxWidth: 400,
-          );
-
-          if (posterUrl.isNotEmpty) {
-            preloadImage(posterUrl).catchError((e) {
-              // 忽略预加载错误
-            });
-          }
-        }
-      }
+      // ❌ 移除季海报预加载 - 这会为每个电视剧发起额外的 API 请求，导致严重卡顿
+      // 季海报会在用户进入详情页时加载
     } catch (e) {
       // 忽略预加载错误，不影响主流程
     }
@@ -2415,22 +2383,13 @@ class _PosterSkeleton extends StatelessWidget {
   const _PosterSkeleton({this.itemType});
   final String? itemType;
 
-  IconData get _icon => (itemType == 'Series' || itemType == 'Episode')
-      ? CupertinoIcons.tv
-      : CupertinoIcons.film;
-
   @override
   Widget build(BuildContext context) {
-    return SizedBox.expand(
-      child: ColoredBox(
-        color: CupertinoColors.systemGrey4,
-        child: Center(
-          child: Icon(
-            _icon,
-            color: CupertinoColors.systemGrey2,
-            size: 48,
-          ),
-        ),
+    // 使用 EmbyFadeInImage 的默认占位符（呼吸效果）
+    return const SizedBox.expand(
+      child: EmbyFadeInImage(
+        imageUrl: '', // 空URL会显示默认占位符
+        enableLazyLoad: false,
       ),
     );
   }
@@ -2578,7 +2537,12 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
   @override
   void initState() {
     super.initState();
-    _preloadDetailImages();
+    // ✅ 等待转场结束后再预加载，避免在转场期间造成卡顿
+    TransitionOptimizer.deferUntilTransitionEnd(() {
+      if (mounted) {
+        _preloadDetailImages();
+      }
+    });
   }
 
   /// ✅ 预加载详情页需要的图片（背景图和Logo）
@@ -2743,11 +2707,10 @@ class _ResumeMovieCardState extends ConsumerState<_ResumeMovieCard> {
       BuildContext context, WidgetRef ref, ItemInfo item) {
     final apiAsync = ref.watch(embyApiProvider);
 
-    Widget placeholder() => Container(
-          color: CupertinoColors.systemGrey5,
-          child: const Center(
-            child: Icon(CupertinoIcons.film, size: 48),
-          ),
+    // 使用 EmbyFadeInImage 的默认占位符
+    Widget placeholder() => const EmbyFadeInImage(
+          imageUrl: '',
+          enableLazyLoad: false,
         );
 
     final itemId = item.id;
@@ -2844,10 +2807,15 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
   @override
   void initState() {
     super.initState();
-    _preloadDetailImages();
+    // ✅ 等待转场结束后再预加载，避免在转场期间造成卡顿
+    TransitionOptimizer.deferUntilTransitionEnd(() {
+      if (mounted) {
+        _preloadDetailImages();
+      }
+    });
   }
 
-  /// ✅ 预加载详情页需要的图片（背景图、Logo、季海报）
+  /// ✅ 预加载详情页需要的图片（只预加载背景图和Logo）
   Future<void> _preloadDetailImages() async {
     if (_hasPreloadedDetailImages) return;
     _hasPreloadedDetailImages = true;
@@ -2871,53 +2839,9 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
         });
       }
 
-      // 3. 如果是剧集类型，预加载季海报
-      if (widget.item.type == 'Episode' &&
-          widget.item.seriesId != null &&
-          widget.item.seriesId!.isNotEmpty) {
-        _preloadSeasonPosters(api, widget.item.seriesId!);
-      }
+      // ❌ 移除季海报预加载 - 避免为每个剧集发起额外的 API 请求
     } catch (e) {
       // 忽略预加载错误
-    }
-  }
-
-  /// ✅ 预加载季海报（异步，不阻塞主流程）
-  Future<void> _preloadSeasonPosters(EmbyApi api, String seriesId) async {
-    try {
-      final auth = ref.read(authStateProvider).value;
-      if (auth == null || !auth.isLoggedIn) return;
-
-      // 获取季列表
-      final seasons = await api.getSeasons(
-        userId: auth.userId!,
-        seriesId: seriesId,
-      );
-
-      // 预加载每个季的海报
-      for (final season in seasons) {
-        if (season.id == null) continue;
-
-        final imageTags = season.imageTags ?? const <String, String>{};
-        final primaryTag = imageTags['Primary'];
-
-        if (primaryTag != null && primaryTag.isNotEmpty) {
-          final posterUrl = api.buildImageUrl(
-            itemId: season.id!,
-            type: 'Primary',
-            tag: primaryTag,
-            maxWidth: 400,
-          );
-
-          if (posterUrl.isNotEmpty) {
-            preloadImage(posterUrl).catchError((e) {
-              // 忽略预加载错误
-            });
-          }
-        }
-      }
-    } catch (e) {
-      // 忽略预加载错误，不影响主流程
     }
   }
 
@@ -3099,11 +3023,10 @@ class _ResumeEpisodeCardState extends ConsumerState<_ResumeEpisodeCard> {
       BuildContext context, WidgetRef ref, ItemInfo item) {
     final apiAsync = ref.watch(embyApiProvider);
 
-    Widget placeholder() => Container(
-          color: CupertinoColors.systemGrey5,
-          child: const Center(
-            child: Icon(CupertinoIcons.tv, size: 48),
-          ),
+    // 使用 EmbyFadeInImage 的默认占位符
+    Widget placeholder() => const EmbyFadeInImage(
+          imageUrl: '',
+          enableLazyLoad: false,
         );
 
     final itemId = item.id;
