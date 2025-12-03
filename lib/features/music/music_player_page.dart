@@ -19,8 +19,47 @@ class MusicPlayerPage extends ConsumerStatefulWidget {
   ConsumerState<MusicPlayerPage> createState() => _MusicPlayerPageState();
 }
 
-class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage> {
+class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
+    with SingleTickerProviderStateMixin {
   double _dragOffset = 0;
+  late AnimationController _resetAnimationController;
+  late Animation<double> _resetAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _resetAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _resetAnimation = CurvedAnimation(
+      parent: _resetAnimationController,
+      curve: Curves.easeOut,
+    );
+    _resetAnimationController.addListener(() {
+      setState(() {
+        _dragOffset = _resetAnimation.value;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _resetAnimationController.dispose();
+    super.dispose();
+  }
+
+  void _animateToTop() {
+    // 从当前偏移量动画到 0
+    _resetAnimation = Tween<double>(
+      begin: _dragOffset,
+      end: 0,
+    ).animate(CurvedAnimation(
+      parent: _resetAnimationController,
+      curve: Curves.easeOut,
+    ));
+    _resetAnimationController.forward(from: 0);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,10 +87,8 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage> {
           widget.onCollapseWithOffset(_dragOffset);
           // 不重置 _dragOffset，让父组件控制
         } else {
-          // 未触发折叠，恢复到顶部
-          setState(() {
-            _dragOffset = 0;
-          });
+          // 未触发折叠，动画恢复到顶部
+          _animateToTop();
         }
       },
       onHorizontalDragEnd: (details) {

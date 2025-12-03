@@ -40,7 +40,7 @@ class MusicDrawer extends ConsumerWidget {
                   _buildNavItem(
                     context: context,
                     ref: ref,
-                    icon: CupertinoIcons.music_note,
+                    icon: CupertinoIcons.double_music_note,
                     label: '歌曲',
                     item: MusicNavItem.songs,
                     isSelected: currentNav == MusicNavItem.songs,

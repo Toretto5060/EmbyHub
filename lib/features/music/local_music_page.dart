@@ -44,7 +44,7 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     _playerAnimation = CurvedAnimation(
       parent: _playerAnimationController,
       curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
+      reverseCurve: Curves.easeOut, // 使用更平滑的曲线，避免开始时太慢
     );
   }
 
@@ -80,6 +80,13 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     final screenHeight = MediaQuery.of(context).size.height;
     final startValue = 1.0 - (dragOffset / screenHeight);
 
+    // 根据剩余距离计算动画时长，让动画更跟手
+    // 剩余距离越小，动画时长越短
+    final remainingDistance = screenHeight - dragOffset;
+    final duration =
+        (remainingDistance / screenHeight * 250).clamp(100, 250).toInt();
+    _playerAnimationController.duration = Duration(milliseconds: duration);
+
     // 从当前位置开始动画
     _playerAnimationController.value = startValue.clamp(0.0, 1.0);
     _playerAnimationController.reverse().then((_) {
@@ -87,6 +94,8 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
         setState(() {
           _isPlayerExpanded = false;
         });
+        // 恢复默认动画时长
+        _playerAnimationController.duration = const Duration(milliseconds: 350);
       }
     });
   }
