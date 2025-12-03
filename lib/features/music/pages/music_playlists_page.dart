@@ -7,7 +7,9 @@ import '../../../providers/local_music_storage_provider.dart';
 import '../../../utils/theme_utils.dart';
 
 class MusicPlaylistsPage extends ConsumerStatefulWidget {
-  const MusicPlaylistsPage({super.key});
+  const MusicPlaylistsPage({super.key, this.scrollController});
+
+  final ScrollController? scrollController;
 
   @override
   ConsumerState<MusicPlaylistsPage> createState() => _MusicPlaylistsPageState();
@@ -395,8 +397,15 @@ class _MusicPlaylistsPageState extends ConsumerState<MusicPlaylistsPage> {
     final storageState = ref.watch(localMusicStorageProvider);
     final playlists = storageState.playlists;
 
+    // 顶部安全区域 + 标题栏高度
+    final topPadding = MediaQuery.of(context).padding.top + 56;
+    // 迷你播放器高度
+    const miniPlayerHeight = 72.0;
+
     return Column(
       children: [
+        // 顶部安全区域占位
+        SizedBox(height: topPadding),
         // 创建歌单按钮
         Padding(
           padding: const EdgeInsets.all(16),
@@ -441,7 +450,9 @@ class _MusicPlaylistsPageState extends ConsumerState<MusicPlaylistsPage> {
               : playlists.isEmpty
                   ? _buildEmptyState(isDark)
                   : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      controller: widget.scrollController,
+                      padding: EdgeInsets.only(
+                          left: 16, right: 16, bottom: miniPlayerHeight + 8),
                       itemCount: playlists.length,
                       itemBuilder: (context, index) {
                         final playlist = playlists[index];

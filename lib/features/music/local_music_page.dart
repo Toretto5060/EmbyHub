@@ -1,8 +1,10 @@
+import 'dart:ui' as ui;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/local_music_provider.dart';
+import '../../providers/local_music_storage_provider.dart';
 import '../../utils/theme_utils.dart';
 import '../home/bottom_nav_wrapper.dart';
 import 'music_drawer.dart';
@@ -17,6 +19,13 @@ import 'pages/music_scan_page.dart';
 import 'pages/music_settings_page.dart';
 import 'pages/music_songs_page.dart';
 import 'pages/music_stats_page.dart';
+
+/// 音乐页面 ScrollController Provider - 用于共享滚动状态以实现毛玻璃效果
+final musicScrollControllerProvider =
+    Provider<ScrollController?>((ref) => null);
+
+/// 音乐页面滚动进度 Provider - 用于控制毛玻璃效果
+final musicScrollProgressProvider = StateProvider<double>((ref) => 0.0);
 
 class LocalMusicPage extends ConsumerStatefulWidget {
   const LocalMusicPage({super.key});
@@ -34,6 +43,12 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   late AnimationController _playerAnimationController;
   late Animation<double> _playerAnimation;
 
+  // 滚动控制器 - 用于毛玻璃效果
+  final ScrollController _scrollController = ScrollController();
+  double _blurProgress = 0.0;
+  static const double _blurStart = 10.0;
+  static const double _blurEnd = 200.0;
+
   @override
   void initState() {
     super.initState();
@@ -46,13 +61,40 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeOut, // 使用更平滑的曲线，避免开始时太慢
     );
+    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _playerAnimationController.dispose();
     super.dispose();
   }
+
+  void _onScroll() {
+    final offset =
+        _scrollController.hasClients ? _scrollController.offset : 0.0;
+    double newProgress;
+    if (offset <= _blurStart) {
+      newProgress = 0.0;
+    } else {
+      final totalRange =
+          (_blurEnd - _blurStart).abs().clamp(1.0, double.infinity);
+      final effective = (offset - _blurStart).clamp(0.0, totalRange);
+      newProgress = (effective / totalRange).clamp(0.0, 1.0);
+    }
+    if ((newProgress - _blurProgress).abs() > 0.001) {
+      setState(() {
+        _blurProgress = newProgress;
+      });
+      // 更新 Provider 以便子组件可以访问
+      ref.read(musicScrollProgressProvider.notifier).state = newProgress;
+    }
+  }
+
+  /// 获取当前页面的 ScrollController
+  ScrollController get currentScrollController => _scrollController;
 
   void _openDrawer() {
     _scaffoldKey.currentState?.openDrawer();
@@ -144,23 +186,23 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   Widget _buildContentPage(MusicNavItem item) {
     switch (item) {
       case MusicNavItem.songs:
-        return const MusicSongsPage();
+        return MusicSongsPage(scrollController: _scrollController);
       case MusicNavItem.albums:
-        return const MusicAlbumsPage();
+        return MusicAlbumsPage(scrollController: _scrollController);
       case MusicNavItem.artists:
-        return const MusicArtistsPage();
+        return MusicArtistsPage(scrollController: _scrollController);
       case MusicNavItem.folders:
-        return const MusicFoldersPage();
+        return MusicFoldersPage(scrollController: _scrollController);
       case MusicNavItem.playlists:
-        return const MusicPlaylistsPage();
+        return MusicPlaylistsPage(scrollController: _scrollController);
       case MusicNavItem.scan:
-        return const MusicScanPage();
+        return MusicScanPage(scrollController: _scrollController);
       case MusicNavItem.library:
-        return const MusicLibraryPage();
+        return MusicLibraryPage(scrollController: _scrollController);
       case MusicNavItem.stats:
-        return const MusicStatsPage();
+        return MusicStatsPage(scrollController: _scrollController);
       case MusicNavItem.settings:
-        return const MusicSettingsPage();
+        return MusicSettingsPage(scrollController: _scrollController);
     }
   }
 
@@ -168,7 +210,6 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   Widget build(BuildContext context) {
     final isDark = isDarkModeFromContext(context, ref);
     final currentNav = ref.watch(currentMusicNavProvider);
-    final miniPlayerHeight = 72.0;
 
     // 监听折叠播放页面的请求
     ref.listen<int>(collapsePlayerTriggerProvider, (previous, next) {
@@ -202,18 +243,16 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
       ),
       body: Stack(
         children: [
-          // 主内容区域
-          Column(
-            children: [
-              // 顶部导航栏
-              _buildTopBar(context, isDark, currentNav),
-              // 内容区域
-              Expanded(
-                child: _buildContentPage(currentNav),
-              ),
-              // 底部迷你播放器占位
-              SizedBox(height: miniPlayerHeight),
-            ],
+          // 主内容区域（内容从顶部开始，顶部栏浮动在上方）
+          Positioned.fill(
+            child: _buildContentPage(currentNav),
+          ),
+          // 顶部导航栏（浮动，带毛玻璃效果）
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildTopBar(context, isDark, currentNav),
           ),
           // 底部迷你播放器（始终显示，全屏播放器覆盖其上）
           Positioned(
@@ -250,50 +289,136 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
 
   Widget _buildTopBar(
       BuildContext context, bool isDark, MusicNavItem currentNav) {
-    return Container(
-      padding: EdgeInsets.only(
-        top: MediaQuery.of(context).padding.top,
-      ),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF8F8F8),
-        border: Border(
-          bottom: BorderSide(
-            color: isDark ? Colors.white10 : Colors.black12,
-            width: 0.5,
+    final topPadding = MediaQuery.of(context).padding.top;
+    final backgroundColor =
+        isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF8F8F8);
+
+    return ClipRect(
+      child: BackdropFilter(
+        filter: _blurProgress > 0
+            ? ui.ImageFilter.blur(
+                sigmaX: 20 * _blurProgress,
+                sigmaY: 20 * _blurProgress,
+              )
+            : ui.ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+        child: Container(
+          padding: EdgeInsets.only(top: topPadding),
+          decoration: BoxDecoration(
+            color: _blurProgress > 0
+                ? backgroundColor.withOpacity(0.7 * _blurProgress)
+                : Colors.transparent,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 标题栏
+              SizedBox(
+                height: 56,
+                child: Row(
+                  children: [
+                    // 左侧菜单按钮
+                    CupertinoButton(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      onPressed: _openDrawer,
+                      child: Icon(
+                        CupertinoIcons.bars,
+                        color: isDark ? Colors.white : Colors.black87,
+                        size: 24,
+                      ),
+                    ),
+                    // 中间标题
+                    Expanded(
+                      child: Center(
+                        child: Text(
+                          _getNavTitle(currentNav),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 右侧占位（保持对称）
+                    const SizedBox(width: 56),
+                  ],
+                ),
+              ),
+              // 工具栏（仅歌曲页面显示）
+              if (currentNav == MusicNavItem.songs)
+                _buildSongsToolbar(context, isDark),
+            ],
           ),
         ),
       ),
-      child: SizedBox(
-        height: 56,
-        child: Row(
-          children: [
-            // 左侧菜单按钮
-            CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              onPressed: _openDrawer,
-              child: Icon(
-                CupertinoIcons.bars,
-                color: isDark ? Colors.white : Colors.black87,
-                size: 24,
-              ),
+    );
+  }
+
+  /// 构建歌曲页面的工具栏
+  Widget _buildSongsToolbar(BuildContext context, bool isDark) {
+    final storageState = ref.watch(localMusicStorageProvider);
+    final songs = storageState.songs;
+    final iconColor = isDark ? Colors.white70 : Colors.black54;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          // 左侧：随机播放按钮 + 歌曲数量
+          CupertinoButton(
+            padding: EdgeInsets.zero,
+            minSize: 36,
+            onPressed: songs.isNotEmpty
+                ? () {
+                    final shuffledSongs = List<LocalSong>.from(songs)
+                      ..shuffle();
+                    ref
+                        .read(localMusicPlayerProvider.notifier)
+                        .setPlaylist(shuffledSongs);
+                  }
+                : null,
+            child: Icon(
+              CupertinoIcons.shuffle,
+              size: 20,
+              color: iconColor,
             ),
-            // 中间标题
-            Expanded(
-              child: Center(
-                child: Text(
-                  _getNavTitle(currentNav),
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-              ),
+          ),
+          const SizedBox(width: 8),
+          // 歌曲数量（只显示数字）
+          Text(
+            '${songs.length}',
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white54 : Colors.black45,
             ),
-            // 右侧占位（保持对称）
-            const SizedBox(width: 56),
-          ],
-        ),
+          ),
+          const Spacer(),
+          // 右侧：排序按钮 + 多选按钮（暂时简化）
+          CupertinoButton(
+            padding: EdgeInsets.zero,
+            minSize: 36,
+            onPressed: () {
+              // TODO: 显示排序选项
+            },
+            child: Icon(
+              CupertinoIcons.sort_down,
+              size: 20,
+              color: iconColor,
+            ),
+          ),
+          CupertinoButton(
+            padding: EdgeInsets.zero,
+            minSize: 36,
+            onPressed: () {
+              // TODO: 切换多选模式
+            },
+            child: Icon(
+              CupertinoIcons.list_bullet,
+              size: 20,
+              color: iconColor,
+            ),
+          ),
+        ],
       ),
     );
   }

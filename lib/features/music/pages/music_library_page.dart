@@ -5,14 +5,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../utils/theme_utils.dart';
 
 class MusicLibraryPage extends ConsumerWidget {
-  const MusicLibraryPage({super.key});
+  const MusicLibraryPage({super.key, this.scrollController});
+
+  final ScrollController? scrollController;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = isDarkModeFromContext(context, ref);
+    
+    // 顶部安全区域 + 标题栏高度
+    final topPadding = MediaQuery.of(context).padding.top + 56;
+    // 迷你播放器高度
+    const miniPlayerHeight = 72.0;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      controller: scrollController,
+      padding: EdgeInsets.only(top: topPadding + 20, left: 20, right: 20, bottom: miniPlayerHeight + 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

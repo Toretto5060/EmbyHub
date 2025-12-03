@@ -176,7 +176,9 @@ class _TextMeasurer extends StatelessWidget {
 }
 
 class MusicSongsPage extends ConsumerStatefulWidget {
-  const MusicSongsPage({super.key});
+  const MusicSongsPage({super.key, this.scrollController});
+
+  final ScrollController? scrollController;
 
   @override
   ConsumerState<MusicSongsPage> createState() => _MusicSongsPageState();
@@ -470,6 +472,11 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
     final storageState = ref.watch(localMusicStorageProvider);
     final musicSourceMode = ref.watch(musicSourceModeProvider);
 
+    // 顶部安全区域 + 标题栏高度
+    final topPadding = MediaQuery.of(context).padding.top + 56;
+    // 迷你播放器高度
+    const miniPlayerHeight = 72.0;
+
     final songs = storageState.songs;
 
     // 加载中状态
@@ -484,204 +491,214 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
       return _buildEmptyState(context, isDark, musicSourceMode);
     }
 
-    return Column(
-      children: [
-        // 顶部操作栏
-        _buildToolbar(context, isDark, songs),
-        // 歌曲列表
-        Expanded(
-          child: ListView.builder(
-            padding: EdgeInsets.only(
-              top: 8,
-              bottom: _isMultiSelectMode ? 72 : 8, // 多选模式时底部留出操作栏空间
-            ),
-            itemCount: songs.length,
-            itemBuilder: (context, index) {
-              final song = songs[index];
-              final isPlaying = playerState.currentSong?.id == song.id;
-              final isSelected = _selectedSongIds.contains(song.id);
+    // 工具栏高度
+    const toolbarHeight = 52.0;
+    // 列表顶部 padding = 状态栏 + 标题栏 + 工具栏
+    final listTopPadding = topPadding + toolbarHeight;
 
-              return CupertinoButton(
-                padding: EdgeInsets.zero,
-                onPressed: () {
-                  if (_isMultiSelectMode) {
-                    // 多选模式：切换选中状态
-                    _toggleSongSelection(song.id);
-                  } else {
-                    // 正常模式：播放歌曲（不展开全屏播放页面）
-                    ref.read(localMusicPlayerProvider.notifier).setPlaylist(
-                          songs,
-                          startIndex: index,
-                        );
-                  }
-                },
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: isPlaying
-                        ? (isDark
-                            ? CupertinoColors.activeBlue.withOpacity(0.15)
-                            : CupertinoColors.activeBlue.withOpacity(0.08))
-                        : (isSelected && _isMultiSelectMode
-                            ? (isDark
-                                ? Colors.white.withOpacity(0.05)
-                                : Colors.black.withOpacity(0.03))
-                            : Colors.transparent),
-                  ),
-                  child: Row(
-                    children: [
-                      // 多选模式下显示选择框
-                      if (_isMultiSelectMode) ...[
-                        Icon(
-                          isSelected
-                              ? CupertinoIcons.checkmark_circle_fill
-                              : CupertinoIcons.circle,
-                          size: 22,
-                          color: isSelected
-                              ? CupertinoColors.activeBlue
-                              : (isDark ? Colors.white38 : Colors.black26),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-                      // 专辑封面
-                      _buildAlbumArt(song, isPlaying, isDark),
+    // 使用 Stack 布局：列表在底层，工具栏浮动在上方带毛玻璃效果
+    return Stack(
+      children: [
+        // 歌曲列表（从顶部开始，内容可以滚动到工具栏下面）
+        ListView.builder(
+          controller: widget.scrollController,
+          padding: EdgeInsets.only(
+            top: listTopPadding,
+            bottom: _isMultiSelectMode
+                ? 72 + miniPlayerHeight
+                : 8 + miniPlayerHeight, // 底部留出迷你播放器空间
+          ),
+          itemCount: songs.length,
+          itemBuilder: (context, index) {
+            final song = songs[index];
+            final isPlaying = playerState.currentSong?.id == song.id;
+            final isSelected = _selectedSongIds.contains(song.id);
+
+            return CupertinoButton(
+              padding: EdgeInsets.zero,
+              onPressed: () {
+                if (_isMultiSelectMode) {
+                  // 多选模式：切换选中状态
+                  _toggleSongSelection(song.id);
+                } else {
+                  // 正常模式：播放歌曲（不展开全屏播放页面）
+                  ref.read(localMusicPlayerProvider.notifier).setPlaylist(
+                        songs,
+                        startIndex: index,
+                      );
+                }
+              },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: isPlaying
+                      ? (isDark
+                          ? const Color.fromARGB(255, 75, 80, 85)
+                              .withOpacity(0.15)
+                          : CupertinoColors.activeBlue.withOpacity(0.08))
+                      : (isSelected && _isMultiSelectMode
+                          ? (isDark
+                              ? Colors.white.withOpacity(0.05)
+                              : Colors.black.withOpacity(0.03))
+                          : Colors.transparent),
+                ),
+                child: Row(
+                  children: [
+                    // 多选模式下显示选择框
+                    if (_isMultiSelectMode) ...[
+                      Icon(
+                        isSelected
+                            ? CupertinoIcons.checkmark_circle_fill
+                            : CupertinoIcons.circle,
+                        size: 22,
+                        color: isSelected
+                            ? CupertinoColors.activeBlue
+                            : (isDark ? Colors.white38 : Colors.black26),
+                      ),
                       const SizedBox(width: 12),
-                      // 歌曲信息
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // 歌曲标题 - 播放中且超出宽度时滚动显示
-                              if (isPlaying)
-                                _MarqueeText(
-                                  text: song.title,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: CupertinoColors.activeBlue,
-                                  ),
-                                )
-                              else
-                                Text(
-                                  song.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.normal,
-                                    color:
-                                        isDark ? Colors.white : Colors.black87,
-                                  ),
+                    ],
+                    // 专辑封面
+                    _buildAlbumArt(song, isPlaying, isDark),
+                    const SizedBox(width: 12),
+                    // 歌曲信息
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 歌曲标题 - 播放中且超出宽度时滚动显示
+                            if (isPlaying)
+                              _MarqueeText(
+                                text: song.title,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: CupertinoColors.activeBlue,
                                 ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  // 音质标签
-                                  if (song.bitrate != null &&
-                                      song.bitrate! > 96) ...[
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 4,
-                                        vertical: 1,
-                                      ),
-                                      decoration: BoxDecoration(
+                              )
+                            else
+                              Text(
+                                song.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.normal,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                // 音质标签
+                                if (song.bitrate != null &&
+                                    song.bitrate! > 96) ...[
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 1,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: song.bitrate! > 256
+                                          ? CupertinoColors.activeBlue
+                                              .withOpacity(0.15)
+                                          : CupertinoColors.activeGreen
+                                              .withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(3),
+                                    ),
+                                    child: Text(
+                                      song.bitrate! > 256 ? 'SQ' : 'HQ',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
                                         color: song.bitrate! > 256
                                             ? CupertinoColors.activeBlue
-                                                .withOpacity(0.15)
-                                            : CupertinoColors.activeGreen
-                                                .withOpacity(0.15),
-                                        borderRadius: BorderRadius.circular(3),
-                                      ),
-                                      child: Text(
-                                        song.bitrate! > 256 ? 'SQ' : 'HQ',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          color: song.bitrate! > 256
-                                              ? CupertinoColors.activeBlue
-                                              : CupertinoColors.activeGreen,
-                                        ),
+                                            : CupertinoColors.activeGreen,
                                       ),
                                     ),
-                                    const SizedBox(width: 6),
-                                  ],
-                                  // 艺术家和专辑 - 播放中且超出宽度时滚动显示
-                                  Expanded(
-                                    child: isPlaying
-                                        ? _MarqueeText(
-                                            text: song.album != null &&
-                                                    song.album!.isNotEmpty
-                                                ? '${song.artist} · ${song.album}'
-                                                : song.artist,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: isDark
-                                                  ? Colors.white54
-                                                  : Colors.black45,
-                                            ),
-                                          )
-                                        : Text(
-                                            song.album != null &&
-                                                    song.album!.isNotEmpty
-                                                ? '${song.artist} · ${song.album}'
-                                                : song.artist,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: isDark
-                                                  ? Colors.white54
-                                                  : Colors.black45,
-                                            ),
-                                          ),
                                   ),
+                                  const SizedBox(width: 6),
                                 ],
-                              ),
-                            ],
-                          ),
+                                // 艺术家和专辑 - 播放中且超出宽度时滚动显示
+                                Expanded(
+                                  child: isPlaying
+                                      ? _MarqueeText(
+                                          text: song.album != null &&
+                                                  song.album!.isNotEmpty
+                                              ? '${song.artist} · ${song.album}'
+                                              : song.artist,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: isDark
+                                                ? Colors.white54
+                                                : Colors.black45,
+                                          ),
+                                        )
+                                      : Text(
+                                          song.album != null &&
+                                                  song.album!.isNotEmpty
+                                              ? '${song.artist} · ${song.album}'
+                                              : song.artist,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: isDark
+                                                ? Colors.white54
+                                                : Colors.black45,
+                                          ),
+                                        ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
-                      // 时长
-                      SizedBox(
-                        width: 45,
-                        child: Text(
-                          _formatDuration(song.duration),
-                          textAlign: TextAlign.right,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? Colors.white38 : Colors.black38,
-                          ),
+                    ),
+                    // 时长
+                    SizedBox(
+                      width: 45,
+                      child: Text(
+                        _formatDuration(song.duration),
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white38 : Colors.black38,
                         ),
                       ),
-                      // 非多选模式下显示更多按钮
-                      if (!_isMultiSelectMode) ...[
-                        const SizedBox(width: 8),
-                        CupertinoButton(
-                          padding: EdgeInsets.zero,
-                          minSize: 32,
-                          onPressed: () {
-                            // TODO: 显示更多选项
-                          },
-                          child: Icon(
-                            CupertinoIcons.ellipsis,
-                            size: 20,
-                            color: isDark ? Colors.white38 : Colors.black38,
-                          ),
+                    ),
+                    // 非多选模式下显示更多按钮
+                    if (!_isMultiSelectMode) ...[
+                      const SizedBox(width: 8),
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        minSize: 32,
+                        onPressed: () {
+                          // TODO: 显示更多选项
+                        },
+                        child: Icon(
+                          CupertinoIcons.ellipsis,
+                          size: 20,
+                          color: isDark ? Colors.white38 : Colors.black38,
                         ),
-                      ],
+                      ),
                     ],
-                  ),
+                  ],
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
         // 多选模式下的底部操作栏
         if (_isMultiSelectMode)
-          _buildMultiSelectActionBar(context, isDark, songs),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: miniPlayerHeight,
+            child: _buildMultiSelectActionBar(context, isDark, songs),
+          ),
       ],
     );
   }
@@ -848,70 +865,6 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildToolbar(
-      BuildContext context, bool isDark, List<LocalSong> songs) {
-    final iconColor = isDark ? Colors.white70 : Colors.black54;
-    final activeColor = CupertinoColors.activeBlue;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: isDark ? Colors.white10 : Colors.black12,
-            width: 0.5,
-          ),
-        ),
-      ),
-      child: Row(
-        children: [
-          // 左侧：随机播放按钮 + 歌曲数量
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            minSize: 36,
-            onPressed: () => _shufflePlay(songs),
-            child: Icon(
-              CupertinoIcons.shuffle,
-              size: 20,
-              color: iconColor,
-            ),
-          ),
-          const SizedBox(width: 8),
-          // 歌曲数量（只显示数字）
-          Text(
-            '${songs.length}',
-            style: TextStyle(
-              fontSize: 14,
-              color: isDark ? Colors.white54 : Colors.black45,
-            ),
-          ),
-          const Spacer(),
-          // 右侧：排序按钮 + 多选按钮
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            minSize: 36,
-            onPressed: () => _showSortOptions(context, isDark),
-            child: Icon(
-              CupertinoIcons.sort_down,
-              size: 20,
-              color: iconColor,
-            ),
-          ),
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            minSize: 36,
-            onPressed: _toggleMultiSelectMode,
-            child: Icon(
-              CupertinoIcons.list_bullet,
-              size: 20,
-              color: _isMultiSelectMode ? activeColor : iconColor,
-            ),
-          ),
-        ],
       ),
     );
   }

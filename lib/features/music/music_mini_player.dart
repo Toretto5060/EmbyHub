@@ -33,15 +33,15 @@ class MusicMiniPlayer extends ConsumerWidget {
               }
             }
           : null,
-      child: ClipRRect(
+      child: ClipRect(
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
           child: Container(
             height: 72,
             decoration: BoxDecoration(
               color: isDark
-                  ? const Color(0xFF1A1A1A).withOpacity(0.9)
-                  : Colors.white.withOpacity(0.9),
+                  ? const Color(0xFF1A1A1A).withOpacity(0.7)
+                  : Colors.white.withOpacity(0.7),
               border: Border(
                 top: BorderSide(
                   color: isDark ? Colors.white10 : Colors.black12,
@@ -53,7 +53,7 @@ class MusicMiniPlayer extends ConsumerWidget {
               top: false,
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: Row(
                   children: [
                     // 专辑封面

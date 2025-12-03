@@ -6,7 +6,9 @@ import '../../../providers/local_music_provider.dart';
 import '../../../utils/theme_utils.dart';
 
 class MusicArtistsPage extends ConsumerWidget {
-  const MusicArtistsPage({super.key});
+  const MusicArtistsPage({super.key, this.scrollController});
+
+  final ScrollController? scrollController;
 
   void _goToScanPage(WidgetRef ref) {
     ref.read(currentMusicNavProvider.notifier).state = MusicNavItem.scan;
@@ -17,6 +19,11 @@ class MusicArtistsPage extends ConsumerWidget {
     final isDark = isDarkModeFromContext(context, ref);
     final musicSourceMode = ref.watch(musicSourceModeProvider);
 
+    // 顶部安全区域 + 标题栏高度
+    final topPadding = MediaQuery.of(context).padding.top + 56;
+    // 迷你播放器高度
+    const miniPlayerHeight = 72.0;
+
     // TODO: 从存储中获取艺术家数据
     final artists = <Map<String, dynamic>>[];
 
@@ -25,7 +32,9 @@ class MusicArtistsPage extends ConsumerWidget {
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      controller: scrollController,
+      padding:
+          EdgeInsets.only(top: topPadding + 8, bottom: miniPlayerHeight + 8),
       itemCount: artists.length,
       itemBuilder: (context, index) {
         final artist = artists[index];
