@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/emby_api.dart';
 import '../../utils/status_bar_manager.dart';
 import '../../services/server_cache_manager.dart';
+import '../../providers/local_music_provider.dart';
 
 class SplashPage extends ConsumerStatefulWidget {
   const SplashPage({super.key});
@@ -27,6 +28,9 @@ class _SplashPageState extends ConsumerState<SplashPage>
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
   late Animation<double> _rotationAnimation;
+
+  // 是否应该直接进入音乐页面
+  bool _shouldEnterMusic = false;
 
   @override
   void initState() {
@@ -74,6 +78,20 @@ class _SplashPageState extends ConsumerState<SplashPage>
     });
 
     try {
+      // 首先检查是否应该直接进入音乐页面
+      _shouldEnterMusic = await StartupPageManager.shouldEnterMusicPage();
+
+      // 如果需要进入音乐页面，跳过开屏动画，直接进入
+      if (_shouldEnterMusic) {
+        // 后台连接服务器
+        _testServerConnectionInBackground();
+        // 直接进入首页（音乐模式）
+        if (mounted) {
+          context.pushReplacement('/?music=true');
+        }
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
 
       // 检查是否有保存的服务器信息
@@ -103,6 +121,38 @@ class _SplashPageState extends ConsumerState<SplashPage>
           _isLoading = false;
         });
       }
+    }
+  }
+
+  // 后台连接服务器（不阻塞UI）
+  Future<void> _testServerConnectionInBackground() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('emby_user_id');
+
+      if (userId == null || userId.isEmpty) return;
+
+      final api = await EmbyApi.create();
+
+      // 并行预加载数据
+      final viewsFuture = api.getUserViews(userId);
+      final resumeFuture = api.getResumeItems(userId);
+      final serverInfoFuture = api.systemInfo();
+
+      final results = await Future.wait([
+        viewsFuture,
+        resumeFuture,
+        serverInfoFuture,
+      ]);
+
+      final serverInfo = results[2] as Map<String, dynamic>;
+      final serverName = serverInfo['ServerName'] as String?;
+
+      if (serverName != null && serverName.isNotEmpty) {
+        await prefs.setString('server_name', serverName);
+      }
+    } catch (e) {
+      // 后台连接失败，不影响UI
     }
   }
 

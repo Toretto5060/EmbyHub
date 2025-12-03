@@ -31,9 +31,14 @@ class BottomNavProvider extends InheritedWidget {
 }
 
 class BottomNavWrapper extends ConsumerStatefulWidget {
-  const BottomNavWrapper({required this.child, super.key});
+  const BottomNavWrapper({
+    required this.child,
+    this.enterMusicMode = false,
+    super.key,
+  });
 
   final Widget child;
+  final bool enterMusicMode;
 
   @override
   ConsumerState<BottomNavWrapper> createState() => _BottomNavWrapperState();
@@ -45,8 +50,8 @@ class BottomNavWrapper extends ConsumerStatefulWidget {
 
 class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
     with SingleTickerProviderStateMixin {
-  int _index = 0;
-  bool _showBottomNav = true;
+  late int _index;
+  late bool _showBottomNav;
   late AnimationController _navAnimationController;
   late Animation<Offset> _navSlideAnimation;
 
@@ -56,6 +61,16 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
   @override
   void initState() {
     super.initState();
+
+    // 如果需要直接进入音乐模式，初始化时就设置正确的状态，避免闪烁
+    if (widget.enterMusicMode) {
+      _index = 1;
+      _showBottomNav = false;
+    } else {
+      _index = 0;
+      _showBottomNav = true;
+    }
+
     _navAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -67,6 +82,18 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
       parent: _navAnimationController,
       curve: Curves.easeInOut,
     ));
+
+    // 如果需要直接进入音乐模式，设置动画控制器到隐藏状态，并在下一帧展开播放器
+    if (widget.enterMusicMode) {
+      _navAnimationController.value = 1.0; // 底部导航栏隐藏状态
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(musicPageVisibleProvider.notifier).state = true;
+        // 设置音乐tab标记
+        MusicTabMarker.setActive();
+        // 展开播放器
+        ref.read(expandPlayerTriggerProvider.notifier).state++;
+      });
+    }
   }
 
   @override
@@ -272,6 +299,8 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
           if (hideNavOnTap) {
             setBottomNavVisible(false);
             ref.read(musicPageVisibleProvider.notifier).state = true;
+            // 设置音乐tab标记
+            MusicTabMarker.setActive();
           }
         },
         behavior: HitTestBehavior.opaque,
@@ -302,9 +331,11 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
     );
   }
 
-// ✅ 退出音乐页面，恢复底部导航栏
+  // ✅ 退出音乐页面，恢复底部导航栏
   void exitMusicPage() {
     ref.read(musicPageVisibleProvider.notifier).state = false;
+    // 清除音乐tab标记
+    MusicTabMarker.clearActive();
 
     // 1. 先显示底部导航栏并播放上滑动画
     setState(() {
@@ -319,5 +350,25 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
         });
       }
     });
+  }
+
+  // ✅ 直接进入音乐页面（用于启动时直接进入音乐模式）
+  void enterMusicPageDirectly({bool expandPlayer = false}) {
+    setState(() {
+      _index = 1;
+      _showBottomNav = false;
+    });
+    _navAnimationController.value = 1.0; // 设置到隐藏状态
+    ref.read(musicPageVisibleProvider.notifier).state = true;
+    // 设置音乐tab标记
+    MusicTabMarker.setActive();
+
+    // 如果需要展开播放器
+    if (expandPlayer) {
+      // 延迟一帧后触发展开播放器
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(expandPlayerTriggerProvider.notifier).state++;
+      });
+    }
   }
 }

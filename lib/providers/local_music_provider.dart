@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 本地音乐播放状态
 class LocalMusicPlayerState {
@@ -160,3 +161,85 @@ enum MusicNavItem {
 
 final currentMusicNavProvider =
     StateProvider<MusicNavItem>((ref) => MusicNavItem.songs);
+
+/// 启动页面模式
+enum StartupPageMode {
+  defaultMode, // 默认：正常进入首页
+  music, // 音乐：进入音乐tab并全屏播放器
+  live, // 直播：暂时也进入首页
+}
+
+/// 音乐tab标记的存储key
+const String _musicTabActiveKey = 'music_tab_active';
+
+/// 启动页面模式的存储key
+const String _startupPageModeKey = 'startup_page_mode';
+
+/// 音乐tab标记管理
+class MusicTabMarker {
+  /// 设置音乐tab标记（进入音乐tab时调用）
+  static Future<void> setActive() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_musicTabActiveKey, true);
+  }
+
+  /// 清除音乐tab标记（退出音乐tab时调用）
+  static Future<void> clearActive() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_musicTabActiveKey);
+  }
+
+  /// 检查是否有音乐tab标记
+  static Future<bool> isActive() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_musicTabActiveKey) ?? false;
+  }
+}
+
+/// 启动页面模式管理
+class StartupPageManager {
+  /// 获取启动页面模式
+  static Future<StartupPageMode> getMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final modeStr = prefs.getString(_startupPageModeKey);
+    switch (modeStr) {
+      case 'music':
+        return StartupPageMode.music;
+      case 'live':
+        return StartupPageMode.live;
+      default:
+        return StartupPageMode.defaultMode;
+    }
+  }
+
+  /// 设置启动页面模式
+  static Future<void> setMode(StartupPageMode mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    String modeStr;
+    switch (mode) {
+      case StartupPageMode.music:
+        modeStr = 'music';
+        break;
+      case StartupPageMode.live:
+        modeStr = 'live';
+        break;
+      case StartupPageMode.defaultMode:
+        modeStr = 'default';
+        break;
+    }
+    await prefs.setString(_startupPageModeKey, modeStr);
+  }
+
+  /// 判断是否应该直接进入音乐页面
+  /// 条件：设置为音乐模式，或者设置为默认模式且有音乐tab标记
+  static Future<bool> shouldEnterMusicPage() async {
+    final mode = await getMode();
+    if (mode == StartupPageMode.music) {
+      return true;
+    }
+    if (mode == StartupPageMode.defaultMode) {
+      return await MusicTabMarker.isActive();
+    }
+    return false;
+  }
+}

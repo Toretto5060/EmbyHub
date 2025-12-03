@@ -14,6 +14,7 @@ import '../../widgets/custom_toast.dart';
 import '../../utils/theme_utils.dart';
 import '../home/bottom_nav_wrapper.dart';
 import '../../services/server_cache_manager.dart';
+import '../../providers/local_music_provider.dart';
 
 // ✅ 缓存刷新触发器 Provider
 final cacheRefreshTriggerProvider = StateProvider<int>((ref) => 0);
@@ -199,6 +200,24 @@ class SettingsPage extends ConsumerWidget {
                           );
                         },
                       ),
+                    ),
+                  ],
+                ),
+                _buildSection(
+                  context,
+                  title: '启动页面',
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const _StartupPageSelector(),
                     ),
                   ],
                 ),
@@ -1274,6 +1293,186 @@ class _UserAvatarRounded extends ConsumerWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Icon(Icons.person_rounded, color: color, size: 24),
+    );
+  }
+}
+
+// ✅ 启动页面选择器
+class _StartupPageSelector extends StatefulWidget {
+  const _StartupPageSelector();
+
+  @override
+  State<_StartupPageSelector> createState() => _StartupPageSelectorState();
+}
+
+class _StartupPageSelectorState extends State<_StartupPageSelector> {
+  StartupPageMode _currentMode = StartupPageMode.defaultMode;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMode();
+  }
+
+  Future<void> _loadMode() async {
+    final mode = await StartupPageManager.getMode();
+    if (mounted) {
+      setState(() {
+        _currentMode = mode;
+      });
+    }
+  }
+
+  Future<void> _changeMode(StartupPageMode newMode) async {
+    if (_currentMode == newMode) return;
+
+    await StartupPageManager.setMode(newMode);
+
+    if (mounted) {
+      setState(() {
+        _currentMode = newMode;
+      });
+    }
+  }
+
+  String _getModeLabel(StartupPageMode mode) {
+    switch (mode) {
+      case StartupPageMode.defaultMode:
+        return '默认';
+      case StartupPageMode.music:
+        return '音乐';
+      case StartupPageMode.live:
+        return '直播';
+    }
+  }
+
+  String _getModeDescription(StartupPageMode mode) {
+    switch (mode) {
+      case StartupPageMode.defaultMode:
+        return '正常进入首页，如果上次退出时在音乐页面则恢复';
+      case StartupPageMode.music:
+        return '每次启动直接进入音乐播放器，跳过开屏动画';
+      case StartupPageMode.live:
+        return '每次启动直接进入电视直播（暂未实现）';
+    }
+  }
+
+  IconData _getModeIcon(StartupPageMode mode) {
+    switch (mode) {
+      case StartupPageMode.defaultMode:
+        return Icons.home_rounded;
+      case StartupPageMode.music:
+        return Icons.music_note_rounded;
+      case StartupPageMode.live:
+        return Icons.live_tv_rounded;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 选项列表
+          ...StartupPageMode.values.map((mode) {
+            final isSelected = _currentMode == mode;
+            // 直播功能暂未实现，显示为禁用状态
+            final isDisabled = mode == StartupPageMode.live;
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: InkWell(
+                onTap: isDisabled ? null : () => _changeMode(mode),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.teal.withOpacity(0.1)
+                        : (isDisabled
+                            ? Colors.grey.withOpacity(0.05)
+                            : Colors.transparent),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected
+                          ? Colors.teal.withOpacity(0.5)
+                          : (isDisabled
+                              ? Colors.grey.withOpacity(0.2)
+                              : Colors.grey.withOpacity(0.2)),
+                      width: isSelected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _getModeIcon(mode),
+                        color: isDisabled
+                            ? Colors.grey.withOpacity(0.5)
+                            : (isSelected ? Colors.teal : Colors.grey),
+                        size: 22,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  _getModeLabel(mode),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                    color: isDisabled
+                                        ? Colors.grey.withOpacity(0.5)
+                                        : (isSelected ? Colors.teal : null),
+                                  ),
+                                ),
+                                if (isDisabled) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      '待开发',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _getModeDescription(mode),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDisabled
+                                    ? Colors.grey.withOpacity(0.4)
+                                    : Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isSelected)
+                        const Icon(Icons.check_circle_rounded,
+                            color: Colors.teal, size: 22),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 }

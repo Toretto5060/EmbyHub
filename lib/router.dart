@@ -63,8 +63,13 @@ GoRouter createRouter() {
       ShellRoute(
         navigatorKey: _shellNavigatorKey,
         pageBuilder: (context, state, child) {
+          // 检查是否需要直接进入音乐模式
+          final enterMusic = state.uri.queryParameters['music'] == 'true';
           return NoTransitionPage(
-            child: BottomNavWrapper(child: child),
+            child: BottomNavWrapper(
+              child: child,
+              enterMusicMode: enterMusic,
+            ),
           );
         },
         routes: [

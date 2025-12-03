@@ -18,11 +18,25 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late PageController _pageController;
   int _currentIndex = 0;
+  bool _isFirstBuild = true;
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: 0);
+    // 从 BottomNavProvider 获取初始索引（如果可用）
+    _currentIndex = 0;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 获取初始索引
+    final initialIndex = BottomNavProvider.of(context)?.currentIndex ?? 0;
+    if (_isFirstBuild) {
+      _currentIndex = initialIndex;
+      _pageController = PageController(initialPage: initialIndex);
+      _isFirstBuild = false;
+    }
   }
 
   @override
@@ -37,7 +51,8 @@ class _HomePageState extends State<HomePage> {
     final currentIndex = BottomNavProvider.of(context)?.currentIndex ?? 0;
 
     // ✅ 当外部索引变化时，触发 PageView 滑动动画
-    if (_currentIndex != currentIndex) {
+    // 确保 PageController 已经附加到 PageView
+    if (_currentIndex != currentIndex && _pageController.hasClients) {
       _currentIndex = currentIndex;
       _pageController.animateToPage(
         currentIndex,
