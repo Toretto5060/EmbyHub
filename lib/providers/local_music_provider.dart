@@ -1,5 +1,12 @@
+import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// 持久化存储的键
+const String _lastPlayingSongKey = 'last_playing_song';
+const String _lastPlayingPositionKey = 'last_playing_position';
+const String _lastPlaylistKey = 'last_playlist';
+const String _lastPlaylistIndexKey = 'last_playlist_index';
 
 /// 本地音乐播放状态
 class LocalMusicPlayerState {
@@ -61,17 +68,126 @@ class LocalSong {
   final int? bitrate; // 比特率 (kbps)
   final Duration? duration;
   final String? path;
+
+  /// 从 JSON 创建 LocalSong
+  factory LocalSong.fromJson(Map<String, dynamic> json) {
+    return LocalSong(
+      id: json['id'] as String,
+      title: json['title'] as String,
+      artist: json['artist'] as String,
+      album: json['album'] as String?,
+      albumArt: json['albumArt'] as String?,
+      lyrics: json['lyrics'] as String?,
+      bitrate: json['bitrate'] as int?,
+      duration: json['duration'] != null
+          ? Duration(milliseconds: json['duration'] as int)
+          : null,
+      path: json['path'] as String?,
+    );
+  }
+
+  /// 转换为 JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'artist': artist,
+      'album': album,
+      'albumArt': albumArt,
+      'lyrics': lyrics,
+      'bitrate': bitrate,
+      'duration': duration?.inMilliseconds,
+      'path': path,
+    };
+  }
 }
 
 /// 本地音乐播放器状态管理
 class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
-  LocalMusicPlayerNotifier() : super(const LocalMusicPlayerState());
+  LocalMusicPlayerNotifier() : super(const LocalMusicPlayerState()) {
+    // 初始化时加载上次播放状态
+    _loadLastPlayingState();
+  }
+
+  /// 加载上次播放状态
+  Future<void> _loadLastPlayingState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // 加载上次播放的歌曲
+      final songJson = prefs.getString(_lastPlayingSongKey);
+      if (songJson == null) return;
+
+      final songData = jsonDecode(songJson) as Map<String, dynamic>;
+      final song = LocalSong.fromJson(songData);
+
+      // 加载上次播放位置
+      final positionMs = prefs.getInt(_lastPlayingPositionKey) ?? 0;
+      final position = Duration(milliseconds: positionMs);
+
+      // 加载播放列表
+      final playlistJson = prefs.getString(_lastPlaylistKey);
+      List<LocalSong> playlist = [];
+      if (playlistJson != null) {
+        final playlistData = jsonDecode(playlistJson) as List;
+        playlist = playlistData
+            .map((e) => LocalSong.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+
+      // 加载播放列表索引
+      final playlistIndex = prefs.getInt(_lastPlaylistIndexKey) ?? 0;
+
+      // 更新状态（不自动播放，只恢复状态）
+      state = state.copyWith(
+        currentSong: song,
+        position: position,
+        playlist: playlist.isNotEmpty ? playlist : [song],
+        currentIndex: playlistIndex,
+        isPlaying: false, // 不自动播放
+      );
+    } catch (e) {
+      // 加载失败时忽略错误
+      print('Failed to load last playing state: $e');
+    }
+  }
+
+  /// 保存当前播放状态
+  Future<void> _savePlayingState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      if (state.currentSong != null) {
+        // 保存当前歌曲
+        final songJson = jsonEncode(state.currentSong!.toJson());
+        await prefs.setString(_lastPlayingSongKey, songJson);
+
+        // 保存播放位置
+        await prefs.setInt(
+            _lastPlayingPositionKey, state.position.inMilliseconds);
+
+        // 保存播放列表（最多保存100首）
+        if (state.playlist.isNotEmpty) {
+          final playlistToSave = state.playlist.take(100).toList();
+          final playlistJson = jsonEncode(
+            playlistToSave.map((s) => s.toJson()).toList(),
+          );
+          await prefs.setString(_lastPlaylistKey, playlistJson);
+          await prefs.setInt(_lastPlaylistIndexKey, state.currentIndex);
+        }
+      }
+    } catch (e) {
+      // 保存失败时忽略错误
+      print('Failed to save playing state: $e');
+    }
+  }
 
   void playSong(LocalSong song) {
     state = state.copyWith(
       currentSong: song,
       isPlaying: true,
     );
+    _savePlayingState();
   }
 
   void togglePlayPause() {
@@ -80,6 +196,7 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
   void pause() {
     state = state.copyWith(isPlaying: false);
+    _savePlayingState(); // 暂停时保存位置
   }
 
   void play() {
@@ -94,6 +211,7 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       currentSong: songs[startIndex],
       isPlaying: true,
     );
+    _savePlayingState();
   }
 
   void playNext() {
@@ -103,7 +221,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       currentIndex: nextIndex,
       currentSong: state.playlist[nextIndex],
       isPlaying: true,
+      position: Duration.zero, // 重置播放位置
     );
+    _savePlayingState();
   }
 
   void playPrevious() {
@@ -114,11 +234,17 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       currentIndex: prevIndex,
       currentSong: state.playlist[prevIndex],
       isPlaying: true,
+      position: Duration.zero, // 重置播放位置
     );
+    _savePlayingState();
   }
 
   void updatePosition(Duration position) {
     state = state.copyWith(position: position);
+    // 每10秒保存一次位置，避免频繁写入
+    if (position.inSeconds % 10 == 0) {
+      _savePlayingState();
+    }
   }
 
   void updateDuration(Duration duration) {
@@ -127,6 +253,20 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
   void clear() {
     state = const LocalMusicPlayerState();
+    _clearSavedState();
+  }
+
+  /// 清除保存的播放状态
+  Future<void> _clearSavedState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_lastPlayingSongKey);
+      await prefs.remove(_lastPlayingPositionKey);
+      await prefs.remove(_lastPlaylistKey);
+      await prefs.remove(_lastPlaylistIndexKey);
+    } catch (e) {
+      print('Failed to clear saved state: $e');
+    }
   }
 }
 
