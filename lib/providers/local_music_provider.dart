@@ -133,6 +133,15 @@ final localMusicPlayerProvider =
 /// 音乐页面是否显示的状态
 final musicPageVisibleProvider = StateProvider<bool>((ref) => false);
 
+/// 音乐页面抽屉是否展开
+final musicDrawerOpenProvider = StateProvider<bool>((ref) => false);
+
+/// 音乐播放页面是否展开
+final musicPlayerExpandedProvider = StateProvider<bool>((ref) => false);
+
+/// 请求折叠播放页面的触发器（每次增加表示请求折叠）
+final collapsePlayerTriggerProvider = StateProvider<int>((ref) => 0);
+
 /// 当前选中的音乐导航项
 enum MusicNavItem {
   songs, // 歌曲

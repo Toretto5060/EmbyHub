@@ -118,6 +118,28 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
         canPop: false, // 拦截返回事件
         onPopInvokedWithResult: (bool didPop, dynamic result) async {
           if (!didPop) {
+            // 使用 provider 判断是否在音乐页面
+            final isInMusicPage = ref.read(musicPageVisibleProvider);
+
+            // 如果在音乐页面
+            if (isInMusicPage) {
+              final isDrawerOpen = ref.read(musicDrawerOpenProvider);
+              final isPlayerExpanded = ref.read(musicPlayerExpandedProvider);
+
+              // 如果抽屉展开，关闭抽屉
+              if (isDrawerOpen) {
+                Navigator.of(context).pop();
+                return;
+              }
+              // 如果播放页面展开，请求折叠播放页面
+              if (isPlayerExpanded) {
+                ref.read(collapsePlayerTriggerProvider.notifier).state++;
+                return;
+              }
+              // 否则退出音乐页面
+              exitMusicPage();
+              return;
+            }
             // 如果在首页，将应用移到后台
             if (isHomePage) {
               await PlatformUtils.moveToBackground();

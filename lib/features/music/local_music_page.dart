@@ -62,14 +62,21 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     setState(() {
       _isPlayerExpanded = true;
     });
+    ref.read(musicPlayerExpandedProvider.notifier).state = true;
     _playerAnimationController.forward();
   }
 
   void _collapsePlayer() {
+    // 立即更新状态，防止重复触发
+    if (!_isPlayerExpanded) return;
+
+    ref.read(musicPlayerExpandedProvider.notifier).state = false;
     _playerAnimationController.reverse().then((_) {
-      setState(() {
-        _isPlayerExpanded = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isPlayerExpanded = false;
+        });
+      }
     });
   }
 
@@ -125,10 +132,21 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     final currentNav = ref.watch(currentMusicNavProvider);
     final miniPlayerHeight = 72.0;
 
+    // 监听折叠播放页面的请求
+    ref.listen<int>(collapsePlayerTriggerProvider, (previous, next) {
+      if (_isPlayerExpanded && previous != next) {
+        _collapsePlayer();
+      }
+    });
+
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor:
           isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF8F8F8),
+      onDrawerChanged: (isOpened) {
+        // 更新抽屉状态
+        ref.read(musicDrawerOpenProvider.notifier).state = isOpened;
+      },
       drawer: MusicDrawer(
         onExit: () {
           Navigator.of(context).pop();
