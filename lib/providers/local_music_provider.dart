@@ -47,6 +47,7 @@ class LocalSong {
     this.album,
     this.albumArt,
     this.lyrics,
+    this.bitrate,
     this.duration,
     this.path,
   });
@@ -57,6 +58,7 @@ class LocalSong {
   final String? album;
   final String? albumArt;
   final String? lyrics; // 歌词
+  final int? bitrate; // 比特率 (kbps)
   final Duration? duration;
   final String? path;
 }

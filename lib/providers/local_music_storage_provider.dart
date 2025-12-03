@@ -386,6 +386,7 @@ Map<String, dynamic> _localSongToJson(LocalSong song) {
     'album': song.album,
     'albumArt': song.albumArt,
     'lyrics': song.lyrics,
+    'bitrate': song.bitrate,
     'duration': song.duration?.inMilliseconds,
     'path': song.path,
   };
@@ -399,6 +400,7 @@ LocalSong _localSongFromJson(Map<String, dynamic> json) {
     album: json['album'] as String?,
     albumArt: json['albumArt'] as String?,
     lyrics: json['lyrics'] as String?,
+    bitrate: json['bitrate'] as int?,
     duration: json['duration'] != null
         ? Duration(milliseconds: json['duration'] as int)
         : null,

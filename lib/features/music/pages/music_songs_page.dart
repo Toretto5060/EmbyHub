@@ -407,16 +407,49 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                song.album != null && song.album!.isNotEmpty
-                                    ? '${song.artist} · ${song.album}'
-                                    : song.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: isDark ? Colors.white54 : Colors.black45,
-                                ),
+                              Row(
+                                children: [
+                                  // 音质标签
+                                  if (song.bitrate != null && song.bitrate! > 96) ...[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                        vertical: 1,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: song.bitrate! > 256
+                                            ? CupertinoColors.activeBlue.withOpacity(0.15)
+                                            : CupertinoColors.activeGreen.withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(3),
+                                      ),
+                                      child: Text(
+                                        song.bitrate! > 256 ? 'SQ' : 'HQ',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                          color: song.bitrate! > 256
+                                              ? CupertinoColors.activeBlue
+                                              : CupertinoColors.activeGreen,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ],
+                                  // 艺术家和专辑
+                                  Expanded(
+                                    child: Text(
+                                      song.album != null && song.album!.isNotEmpty
+                                          ? '${song.artist} · ${song.album}'
+                                          : song.artist,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: isDark ? Colors.white54 : Colors.black45,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),

@@ -819,6 +819,7 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
             String? albumArtPath;
             String? lyrics;
             int durationSeconds = estimatedDurationSeconds.toInt();
+            int? bitrate;
 
             if (nameWithoutExt.contains(' - ')) {
               final parts = nameWithoutExt.split(' - ');
@@ -844,6 +845,9 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
                 // audiotags 返回的 duration 单位是秒
                 if (tag.duration != null && tag.duration! > 0) {
                   durationSeconds = tag.duration!;
+                  // 根据文件大小和时长计算比特率 (kbps)
+                  // bitrate = (fileSize * 8) / (duration * 1000)
+                  bitrate = ((stat.size * 8) / (durationSeconds * 1000)).round();
                 }
                 
                 // 读取专辑封面
@@ -858,6 +862,11 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
               // 读取元数据失败，使用默认值
             }
             
+            // 如果没有从元数据获取到比特率，根据文件大小估算
+            if (bitrate == null && durationSeconds > 0) {
+              bitrate = ((stat.size * 8) / (durationSeconds * 1000)).round();
+            }
+            
             // 尝试读取同目录下的 .lrc 歌词文件
             lyrics = await _loadLyricsFile(entity.path);
 
@@ -868,6 +877,7 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
               album: album,
               albumArt: albumArtPath,
               lyrics: lyrics,
+              bitrate: bitrate,
               path: entity.path,
               duration: Duration(seconds: durationSeconds),
             );
