@@ -49,6 +49,9 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   static const double _blurStart = 10.0;
   static const double _blurEnd = 200.0;
 
+  // 是否已经检查过初始展开状态
+  bool _hasCheckedInitialExpand = false;
+
   @override
   void initState() {
     super.initState();
@@ -103,26 +106,14 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   void _expandPlayer() {
     // 只有当有歌曲时才展开播放器
     final currentSong = ref.read(localMusicPlayerProvider).currentSong;
-    if (currentSong == null) {
-      // 如果当前没有歌曲，延迟一帧后重试（等待状态同步）
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final song = ref.read(localMusicPlayerProvider).currentSong;
-        if (song != null && mounted) {
-          _doExpandPlayer();
-        }
-      });
-      return;
-    }
+    if (currentSong == null) return;
 
-    _doExpandPlayer();
-  }
-
-  void _doExpandPlayer() {
     setState(() {
       _isPlayerExpanded = true;
+      _hasCheckedInitialExpand = true;
     });
     ref.read(musicPlayerExpandedProvider.notifier).state = true;
-    // 确保从头开始播放动画
+    // 正常播放展开动画
     _playerAnimationController.forward(from: 0);
   }
 
@@ -210,6 +201,10 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   Widget build(BuildContext context) {
     final isDark = isDarkModeFromContext(context, ref);
     final currentNav = ref.watch(currentMusicNavProvider);
+    final currentSong = ref.watch(localMusicPlayerProvider).currentSong;
+
+    // ✅ 检查静态标记（在第一帧就可以访问，不依赖 Provider）
+    final shouldInitialExpand = InitialExpandMarker.shouldExpand;
 
     // 监听折叠播放页面的请求
     ref.listen<int>(collapsePlayerTriggerProvider, (previous, next) {
@@ -218,12 +213,49 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
       }
     });
 
-    // 监听展开播放页面的请求
+    // 监听展开播放页面的请求（仅当不是初始展开时）
     ref.listen<int>(expandPlayerTriggerProvider, (previous, next) {
-      if (!_isPlayerExpanded && previous != next) {
+      if (!_isPlayerExpanded && previous != next && _hasCheckedInitialExpand) {
         _expandPlayer();
       }
     });
+
+    // ✅ 初始展开逻辑：如果需要初始展开，直接显示全屏播放器
+    if (shouldInitialExpand && !_isPlayerExpanded) {
+      if (currentSong != null) {
+        // 歌曲已加载，更新状态并显示播放器
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_isPlayerExpanded) {
+            // 清除静态标记
+            InitialExpandMarker.clear();
+            setState(() {
+              _isPlayerExpanded = true;
+              _hasCheckedInitialExpand = true;
+            });
+            ref.read(musicPlayerExpandedProvider.notifier).state = true;
+            _playerAnimationController.value = 1.0;
+          }
+        });
+
+        // 直接渲染全屏播放页面
+        return Scaffold(
+          key: _scaffoldKey,
+          backgroundColor:
+              isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF8F8F8),
+          body: MusicPlayerPage(
+            onCollapseWithOffset: _collapsePlayerWithOffset,
+          ),
+        );
+      } else {
+        // 歌曲还没加载，显示空白页面等待（避免显示歌曲列表）
+        return Scaffold(
+          key: _scaffoldKey,
+          backgroundColor:
+              isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF8F8F8),
+          body: const SizedBox.shrink(),
+        );
+      }
+    }
 
     return Scaffold(
       key: _scaffoldKey,

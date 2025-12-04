@@ -222,17 +222,56 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       // 加载播放列表索引
       final playlistIndex = prefs.getInt(_lastPlaylistIndexKey) ?? 0;
 
+      // 确保播放列表不为空
+      final finalPlaylist = playlist.isNotEmpty ? playlist : [song];
+      final finalIndex = playlistIndex.clamp(0, finalPlaylist.length - 1);
+
       // 更新状态（不自动播放，只恢复状态）
       state = state.copyWith(
         currentSong: song,
         position: position,
-        playlist: playlist.isNotEmpty ? playlist : [song],
-        currentIndex: playlistIndex,
+        playlist: finalPlaylist,
+        currentIndex: finalIndex,
         isPlaying: false, // 不自动播放
       );
+
+      // ✅ 将播放列表预加载到原生播放器（不自动播放）
+      await _preloadPlaylistToPlayer(finalPlaylist, finalIndex, position);
     } catch (e) {
       // 加载失败时忽略错误
       print('Failed to load last playing state: $e');
+    }
+  }
+
+  /// 预加载播放列表到原生播放器（不自动播放）
+  Future<void> _preloadPlaylistToPlayer(
+    List<LocalSong> playlist,
+    int startIndex,
+    Duration startPosition,
+  ) async {
+    if (_player == null || playlist.isEmpty) return;
+
+    final items = playlist
+        .where((s) => s.path != null)
+        .map((s) => MusicItem(
+              url: s.path!,
+              title: s.title,
+              artist: s.artist,
+              album: s.album ?? '',
+              coverUrl: s.albumArt,
+            ))
+        .toList();
+
+    if (items.isNotEmpty) {
+      await _player!.setPlaylist(
+        items: items,
+        startIndex: startIndex,
+        autoPlay: false, // 不自动播放
+      );
+      // 恢复播放位置
+      if (startPosition.inMilliseconds > 0) {
+        await _player!.seek(startPosition);
+      }
     }
   }
 
@@ -250,11 +289,10 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         await prefs.setInt(
             _lastPlayingPositionKey, state.position.inMilliseconds);
 
-        // 保存播放列表（最多保存100首）
+        // 保存播放列表（保存全部）
         if (state.playlist.isNotEmpty) {
-          final playlistToSave = state.playlist.take(100).toList();
           final playlistJson = jsonEncode(
-            playlistToSave.map((s) => s.toJson()).toList(),
+            state.playlist.map((s) => s.toJson()).toList(),
           );
           await prefs.setString(_lastPlaylistKey, playlistJson);
           await prefs.setInt(_lastPlaylistIndexKey, state.currentIndex);
@@ -266,37 +304,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     }
   }
 
-  /// 播放单首歌曲
+  /// 播放单首歌曲（将该歌曲作为播放列表的唯一曲目）
+  /// 注意：通常应该使用 setPlaylist 来设置播放列表
   Future<void> playSong(LocalSong song) async {
-    print('LocalMusicPlayerNotifier: playSong called');
-    print('  - path: ${song.path}');
-    print('  - title: ${song.title}');
-    print('  - coverUrl: ${song.albumArt}');
-
-    // 更新 UI 状态
-    state = state.copyWith(
-      currentSong: song,
-      isPlaying: true,
-      position: Duration.zero,
-    );
-
-    // 调用原生播放器
-    if (_player != null && song.path != null) {
-      print('LocalMusicPlayerNotifier: calling _player.open()');
-      await _player!.open(
-        url: song.path!,
-        title: song.title,
-        artist: song.artist,
-        album: song.album ?? '',
-        coverUrl: song.albumArt,
-        autoPlay: true,
-      );
-      print('LocalMusicPlayerNotifier: _player.open() completed');
-    } else {
-      print('LocalMusicPlayerNotifier: player is null or path is null');
-    }
-
-    _savePlayingState();
+    // 将单首歌曲作为播放列表
+    await setPlaylist([song], startIndex: 0);
   }
 
   /// 切换播放/暂停
@@ -343,10 +355,20 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     }
   }
 
-  /// 打开当前歌曲
+  /// 打开当前歌曲（如果有播放列表，则加载整个播放列表）
   Future<void> _openCurrentSong() async {
     final song = state.currentSong;
-    if (_player != null && song != null && song.path != null) {
+    if (_player == null || song == null) return;
+
+    // 如果有播放列表，加载整个播放列表
+    if (state.playlist.isNotEmpty) {
+      await _preloadPlaylistToPlayer(
+        state.playlist,
+        state.currentIndex,
+        state.position,
+      );
+    } else if (song.path != null) {
+      // 否则只打开单首歌曲
       await _player!.open(
         url: song.path!,
         title: song.title,
@@ -562,6 +584,32 @@ final collapsePlayerTriggerProvider = StateProvider<int>((ref) => 0);
 
 /// 请求展开播放页面的触发器（每次增加表示请求展开）
 final expandPlayerTriggerProvider = StateProvider<int>((ref) => 0);
+
+/// 展开播放页面时是否跳过动画（用于初始化直接进入全屏播放器）
+final skipExpandAnimationProvider = StateProvider<bool>((ref) => false);
+
+/// ✅ 静态标记：是否需要初始展开播放器（在路由创建时设置，在第一帧就可以访问）
+/// 这个变量用于解决 Provider 在 widget 构建期间无法修改的问题
+class InitialExpandMarker {
+  static bool shouldExpand = false;
+
+  /// 设置需要初始展开
+  static void set() {
+    shouldExpand = true;
+  }
+
+  /// 清除标记
+  static void clear() {
+    shouldExpand = false;
+  }
+
+  /// 消费标记（获取后自动清除）
+  static bool consume() {
+    final value = shouldExpand;
+    shouldExpand = false;
+    return value;
+  }
+}
 
 /// 当前选中的音乐导航项
 enum MusicNavItem {

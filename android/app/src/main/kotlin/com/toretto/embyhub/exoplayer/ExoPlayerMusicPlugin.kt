@@ -85,8 +85,14 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     // ✅ 音频淡入淡出相关
     private var fadeAnimator: android.animation.ValueAnimator? = null
+    private var crossfadeAnimator: android.animation.ValueAnimator? = null
     private var targetVolume: Float = 1.0f  // 目标音量
     private var isFadingOut: Boolean = false  // 是否正在淡出
+    
+    // ✅ Crossfade 交叉淡化：使用第二个播放器实现真正的交叉淡化
+    private var crossfadePlayer: ExoPlayer? = null
+    private var fadingOutPlayerRef: ExoPlayer? = null  // 保存淡出播放器的引用
+    private var isCrossfading: Boolean = false
     
     companion object {
         const val ACTION_PLAY = "com.toretto.embyhub.music.PLAY"
@@ -95,8 +101,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         const val ACTION_PREVIOUS = "com.toretto.embyhub.music.PREVIOUS"
         const val ACTION_STOP = "com.toretto.embyhub.music.STOP"
         
-        // 淡入淡出时长（毫秒）
-        const val FADE_DURATION_MS = 150L
+        // 淡入淡出时长（毫秒）- 播放/暂停使用较短时间
+        const val FADE_DURATION_MS = 300L
+        
+        // Crossfade 交叉淡化时长（毫秒）- 切换歌曲使用
+        const val CROSSFADE_DURATION_MS = 1500L
     }
     
     private val progressRunnable = object : Runnable {
@@ -115,16 +124,16 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 Player.STATE_ENDED -> "ENDED"
                 else -> "UNKNOWN($playbackState)"
             }
-            android.util.Log.d("ExoPlayerMusicPlugin", "Playback state changed: $stateStr")
+            android.util.Log.d("ExoPlayerMusicPlugin", "Playback state changed: $stateStr, isCrossfading=$isCrossfading")
             
             sendStateUpdate()
             updateNotification()
             updateMediaSessionState()
             
-            // 播放结束时自动播放下一首
-            if (playbackState == Player.STATE_ENDED) {
+            // 播放结束时自动播放下一首（但 crossfade 过程中不处理，避免冲突）
+            if (playbackState == Player.STATE_ENDED && !isCrossfading) {
                 if (currentIndex < playlist.size - 1) {
-                    playNext()
+                    playNextWithFade()
                 } else {
                     // 播放列表结束
                     eventSink?.success(hashMapOf(
@@ -150,9 +159,15 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            android.util.Log.d("ExoPlayerMusicPlugin", "Media item transition: ${mediaItem?.mediaId}, reason=$reason")
-            // 切换到新的媒体项时更新元数据
-            if (mediaItem != null) {
+            android.util.Log.d("ExoPlayerMusicPlugin", "Media item transition: ${mediaItem?.mediaId}, reason=$reason, isCrossfading=$isCrossfading")
+            // 在 crossfade 过程中，元数据已经在 startRealCrossfade 中更新了，不需要再次更新
+            // 避免重复更新导致的问题
+            if (mediaItem != null && !isCrossfading) {
+                // 同步 currentIndex 与播放器的实际索引
+                val p = player
+                if (p != null) {
+                    currentIndex = p.currentMediaItemIndex
+                }
                 updateCurrentMetadata()
                 updateMediaSessionMetadata()
                 updateNotification()
@@ -270,7 +285,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             
             "seekTo" -> {
                 val position = call.argument<Number>("positionMs")?.toLong() ?: 0L
-                player?.seekTo(position)
+                // 在 crossfade 过程中，seek 操作应该作用于新播放器
+                val targetPlayer = if (isCrossfading) crossfadePlayer else player
+                targetPlayer?.seekTo(position)
                 result.success(null)
             }
             
@@ -605,6 +622,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      * 带淡入效果的播放
      */
     private fun playWithFadeIn() {
+        // 如果正在 crossfade，立即完成
+        if (isCrossfading) {
+            finishCrossfadeImmediately()
+        }
+        
         val p = player ?: return
         
         // 取消之前的淡入淡出动画
@@ -632,6 +654,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      * 带淡出效果的暂停
      */
     private fun pauseWithFadeOut() {
+        // 如果正在 crossfade，立即完成并暂停新播放器
+        if (isCrossfading) {
+            finishCrossfadeImmediately()
+        }
+        
         val p = player ?: return
         
         // 取消之前的淡入淡出动画
@@ -665,6 +692,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      * 带淡出效果的停止
      */
     private fun stopWithFadeOut() {
+        // 如果正在 crossfade，立即完成
+        if (isCrossfading) {
+            finishCrossfadeImmediately()
+        }
+        
         val p = player ?: return
         
         // 取消之前的淡入淡出动画
@@ -692,32 +724,87 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     /**
-     * 带淡出淡入效果的下一首
+     * ✅ Crossfade 交叉淡化切换下一首
+     * 当前歌曲淡出的同时，下一首歌曲淡入，实现无缝切换
      */
     private fun playNextWithFade() {
-        val p = player ?: return
-        if (!p.hasNextMediaItem()) return
+        if (player == null) return
         
-        // 取消之前的淡入淡出动画
+        // 如果正在 crossfade，立即完成之前的
+        if (isCrossfading) {
+            finishCrossfadeImmediately()
+        }
         cancelFadeAnimation()
         
+        // 计算下一首的索引
+        val nextIndex = currentIndex + 1
+        if (nextIndex >= playlist.size) {
+            android.util.Log.d("ExoPlayerMusicPlugin", "playNextWithFade: No next track, at end of playlist")
+            return
+        }
+        
+        android.util.Log.d("ExoPlayerMusicPlugin", "playNextWithFade: currentIndex=$currentIndex, nextIndex=$nextIndex")
+        
+        // 开始真正的 Crossfade
+        startRealCrossfade(nextIndex)
+    }
+    
+    /**
+     * ✅ Crossfade 交叉淡化切换上一首
+     */
+    private fun playPreviousWithFade() {
+        if (player == null) return
+        
+        // 如果正在 crossfade，立即完成之前的
+        if (isCrossfading) {
+            finishCrossfadeImmediately()
+        }
+        cancelFadeAnimation()
+        
+        // 重新获取 player 引用（因为 finishCrossfadeImmediately 可能已经切换了播放器）
+        val p = player ?: return
+        
+        // 如果当前播放超过 3 秒，则重新播放当前曲目（带淡入淡出）
+        if (p.currentPosition > 3000) {
+            android.util.Log.d("ExoPlayerMusicPlugin", "playPreviousWithFade: Restarting current track (position > 3s)")
+            restartCurrentTrackWithFade()
+            return
+        }
+        
+        // 如果已经是第一首，只是重新播放
+        if (currentIndex == 0) {
+            android.util.Log.d("ExoPlayerMusicPlugin", "playPreviousWithFade: Already at first track, restarting")
+            restartCurrentTrackWithFade()
+            return
+        }
+        
+        // 计算上一首的索引
+        val prevIndex = currentIndex - 1
+        android.util.Log.d("ExoPlayerMusicPlugin", "playPreviousWithFade: currentIndex=$currentIndex, prevIndex=$prevIndex")
+        
+        // 开始真正的 Crossfade
+        startRealCrossfade(prevIndex)
+    }
+    
+    /**
+     * ✅ 重新播放当前曲目（带淡入淡出）
+     */
+    private fun restartCurrentTrackWithFade() {
+        val p = player ?: return
         val currentVolume = p.volume
         
-        // 淡出，切换，淡入
         fadeAnimator = android.animation.ValueAnimator.ofFloat(currentVolume, 0f).apply {
-            duration = FADE_DURATION_MS / 2
+            duration = FADE_DURATION_MS
             interpolator = android.view.animation.AccelerateInterpolator()
             addUpdateListener { animator ->
                 player?.volume = animator.animatedValue as Float
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                    // 切换到下一首
-                    playNext()
-                    
+                    player?.seekTo(0)
                     // 淡入
                     fadeAnimator = android.animation.ValueAnimator.ofFloat(0f, targetVolume).apply {
-                        duration = FADE_DURATION_MS / 2
+                        duration = FADE_DURATION_MS
                         interpolator = android.view.animation.DecelerateInterpolator()
                         addUpdateListener { animator ->
                             player?.volume = animator.animatedValue as Float
@@ -731,41 +818,206 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     /**
-     * 带淡出淡入效果的上一首
+     * ✅ 开始真正的 Crossfade 交叉淡化
+     * 使用双播放器方案：当前歌曲淡出的同时，下一首歌曲淡入
+     * @param targetIndex 目标歌曲索引
      */
-    private fun playPreviousWithFade() {
-        val p = player ?: return
+    private fun startRealCrossfade(targetIndex: Int) {
+        val ctx = context ?: return
+        val fadingOutPlayer = player ?: return
         
-        // 取消之前的淡入淡出动画
-        cancelFadeAnimation()
+        if (targetIndex < 0 || targetIndex >= playlist.size) {
+            android.util.Log.e("ExoPlayerMusicPlugin", "startRealCrossfade: Invalid targetIndex=$targetIndex, playlist.size=${playlist.size}")
+            return
+        }
         
-        val currentVolume = p.volume
+        android.util.Log.d("ExoPlayerMusicPlugin", "startRealCrossfade: Starting crossfade from $currentIndex to $targetIndex")
         
-        // 淡出，切换，淡入
-        fadeAnimator = android.animation.ValueAnimator.ofFloat(currentVolume, 0f).apply {
-            duration = FADE_DURATION_MS / 2
-            interpolator = android.view.animation.AccelerateInterpolator()
+        isCrossfading = true
+        
+        // 保存淡出播放器的引用（用于动画中安全操作）
+        fadingOutPlayerRef = fadingOutPlayer
+        
+        // 立即更新 UI 状态（歌曲信息、封面等）
+        currentIndex = targetIndex
+        updateCurrentMetadata()
+        updateMediaSessionMetadata()
+        updateNotification()
+        sendStateUpdate()
+        
+        // 创建第二个播放器用于播放下一首
+        val newPlayer = ExoPlayer.Builder(ctx).build().apply {
+            setAudioAttributes(
+                com.google.android.exoplayer2.audio.AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build(),
+                false  // 不自动处理音频焦点
+            )
+            setHandleAudioBecomingNoisy(true)
+            volume = 0f  // 初始音量为0，准备淡入
+        }
+        
+        // 获取目标媒体项的元数据以获取 headers
+        val targetMetadata = playlistMetadata.getOrNull(targetIndex)
+        @Suppress("UNCHECKED_CAST")
+        val headers = targetMetadata?.get("headers") as? Map<String, String> ?: emptyMap()
+        
+        // 创建数据源
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(30000)
+            .setReadTimeoutMs(60000)
+            .apply {
+                if (headers.isNotEmpty()) {
+                    setDefaultRequestProperties(headers)
+                }
+            }
+        val dataSourceFactory = DefaultDataSource.Factory(ctx, httpDataSourceFactory)
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+        
+        // 设置完整播放列表到新播放器
+        val mediaSources = playlist.map { mediaSourceFactory.createMediaSource(it) }
+        newPlayer.setMediaSources(mediaSources, targetIndex, 0)
+        newPlayer.prepare()
+        newPlayer.playWhenReady = true
+        
+        crossfadePlayer = newPlayer
+        
+        // 当前播放器的起始音量
+        val startVolume = fadingOutPlayer.volume
+        
+        // 开始交叉淡化动画：当前歌曲淡出，下一首歌曲淡入，同时进行
+        crossfadeAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = CROSSFADE_DURATION_MS
+            interpolator = android.view.animation.LinearInterpolator()
             addUpdateListener { animator ->
-                player?.volume = animator.animatedValue as Float
+                val progress = animator.animatedValue as Float
+                
+                // 当前歌曲淡出：从 startVolume 到 0（使用保存的引用）
+                fadingOutPlayerRef?.volume = startVolume * (1f - progress)
+                
+                // 下一首歌曲淡入：从 0 到 targetVolume
+                crossfadePlayer?.volume = targetVolume * progress
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                    // 切换到上一首
-                    playPrevious()
-                    
-                    // 淡入
-                    fadeAnimator = android.animation.ValueAnimator.ofFloat(0f, targetVolume).apply {
-                        duration = FADE_DURATION_MS / 2
-                        interpolator = android.view.animation.DecelerateInterpolator()
-                        addUpdateListener { animator ->
-                            player?.volume = animator.animatedValue as Float
-                        }
-                        start()
-                    }
+                    // Crossfade 完成，切换播放器
+                    finishCrossfade()
+                }
+                
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    // 注意：cancel 后不做任何处理，由调用者决定如何处理
+                    android.util.Log.d("ExoPlayerMusicPlugin", "Crossfade animation cancelled")
                 }
             })
             start()
         }
+    }
+    
+    /**
+     * ✅ 完成 Crossfade，切换播放器
+     */
+    private fun finishCrossfade() {
+        val newPlayer = crossfadePlayer ?: return
+        val oldPlayer = fadingOutPlayerRef  // 使用保存的淡出播放器引用
+        
+        android.util.Log.d("ExoPlayerMusicPlugin", "finishCrossfade: Switching players, currentIndex=$currentIndex")
+        
+        // 停止并释放旧播放器
+        oldPlayer?.let {
+            it.removeListener(playerListener)
+            it.stop()
+            it.release()
+        }
+        
+        // 清理 crossfade 状态（在添加 listener 之前，避免触发不必要的回调）
+        crossfadePlayer = null
+        fadingOutPlayerRef = null
+        crossfadeAnimator = null
+        isCrossfading = false
+        
+        // 新播放器成为主播放器
+        player = newPlayer
+        newPlayer.volume = targetVolume
+        newPlayer.addListener(playerListener)
+        
+        // 发送最终状态更新
+        sendStateUpdate()
+        
+        android.util.Log.d("ExoPlayerMusicPlugin", "finishCrossfade: Complete")
+    }
+    
+    /**
+     * ✅ 立即完成 Crossfade（用于快速连续切歌）
+     */
+    private fun finishCrossfadeImmediately() {
+        // 先保存引用，再取消动画（因为 cancel 不会触发任何回调处理）
+        val newPlayer = crossfadePlayer
+        val oldPlayer = fadingOutPlayerRef
+        
+        crossfadeAnimator?.cancel()
+        crossfadeAnimator = null
+        
+        if (newPlayer != null) {
+            // 立即切换到新播放器
+            oldPlayer?.let {
+                it.removeListener(playerListener)
+                it.stop()
+                it.release()
+            }
+            
+            // 清理 crossfade 状态（在添加 listener 之前）
+            crossfadePlayer = null
+            fadingOutPlayerRef = null
+            isCrossfading = false
+            
+            // 新播放器成为主播放器
+            player = newPlayer
+            newPlayer.volume = targetVolume
+            newPlayer.addListener(playerListener)
+        } else {
+            // 没有新播放器，只清理状态
+            crossfadePlayer = null
+            fadingOutPlayerRef = null
+            isCrossfading = false
+        }
+    }
+    
+    /**
+     * ✅ 取消 Crossfade 并清理资源（恢复到原来的状态）
+     */
+    private fun cancelCrossfade() {
+        crossfadeAnimator?.cancel()
+        crossfadeAnimator = null
+        
+        // 释放新播放器（crossfadePlayer）
+        crossfadePlayer?.let {
+            it.stop()
+            it.release()
+        }
+        crossfadePlayer = null
+        
+        // 清理淡出播放器引用（但不释放，因为它仍然是主播放器）
+        fadingOutPlayerRef = null
+        
+        // 恢复主播放器音量
+        player?.volume = targetVolume
+        
+        isCrossfading = false
+    }
+    
+    /**
+     * ✅ 清理 Crossfade 资源（不切换播放器）
+     */
+    private fun cleanupCrossfade() {
+        crossfadePlayer?.let {
+            it.stop()
+            it.release()
+        }
+        crossfadePlayer = null
+        fadingOutPlayerRef = null
+        isCrossfading = false
     }
     
     /**
@@ -774,6 +1026,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun cancelFadeAnimation() {
         fadeAnimator?.cancel()
         fadeAnimator = null
+        isFadingOut = false
     }
     
     private fun loadCoverAsync(url: String) {
@@ -876,7 +1129,10 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     private fun updateMediaSessionState() {
         val session = mediaSession ?: return
-        val p = player ?: return
+        
+        // 在 crossfade 过程中，使用新播放器的状态
+        val p = if (isCrossfading) crossfadePlayer ?: player else player
+        if (p == null) return
         
         val state = when {
             p.isPlaying -> PlaybackStateCompat.STATE_PLAYING
@@ -906,7 +1162,10 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     private fun updateMediaSessionMetadata() {
         val session = mediaSession ?: return
-        val p = player ?: return
+        
+        // 在 crossfade 过程中，使用新播放器的时长
+        val p = if (isCrossfading) crossfadePlayer ?: player else player
+        if (p == null) return
         
         val duration = if (p.duration == C.TIME_UNSET) 0L else p.duration
         
@@ -1036,8 +1295,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     private fun updateNotification() {
         val ctx = context ?: return
-        val p = player ?: return
         val session = mediaSession ?: return
+        
+        // 在 crossfade 过程中，使用新播放器的状态
+        val p = if (isCrossfading) crossfadePlayer ?: player else player
+        if (p == null) return
         
         if (p.playbackState == Player.STATE_IDLE) {
             hideNotification()
@@ -1194,7 +1456,10 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     private fun sendStateUpdate() {
         val sink = eventSink ?: return
-        val p = player
+        
+        // 在 crossfade 过程中，使用新播放器（crossfadePlayer）的状态
+        // 这样 UI 显示的是新歌曲的进度
+        val p = if (isCrossfading) crossfadePlayer ?: player else player
         
         if (p == null) {
             sink.success(hashMapOf(
@@ -1234,7 +1499,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "isBuffering" to (p.playbackState == Player.STATE_BUFFERING),
             "isPlaying" to isPlaying,
             "isReady" to (p.playbackState == Player.STATE_READY),
-            "currentIndex" to p.currentMediaItemIndex,
+            "currentIndex" to currentIndex,  // 使用我们维护的 currentIndex，而不是播放器的
             "playlistLength" to playlist.size,
             "repeatMode" to repeatMode,
             "shuffleMode" to p.shuffleModeEnabled
@@ -1243,8 +1508,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     private fun disposePlayer() {
-        // 取消淡入淡出动画
+        // 取消淡入淡出动画和 Crossfade
         cancelFadeAnimation()
+        cancelCrossfade()
         
         val toRelease = player ?: return
         player = null

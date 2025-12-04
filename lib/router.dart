@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'features/connect/modern_connect_page.dart';
 import 'features/home/home_page.dart';
 import 'features/home/bottom_nav_wrapper.dart';
+import 'providers/local_music_provider.dart';
 import 'features/item/item_detail_page.dart';
 import 'features/library/library_items_page.dart';
 import 'features/library/genre_items_page.dart';
@@ -65,6 +66,10 @@ GoRouter createRouter() {
         pageBuilder: (context, state, child) {
           // 检查是否需要直接进入音乐模式
           final enterMusic = state.uri.queryParameters['music'] == 'true';
+          // ✅ 在创建 BottomNavWrapper 之前设置初始展开标记
+          if (enterMusic) {
+            InitialExpandMarker.set();
+          }
           return NoTransitionPage(
             child: BottomNavWrapper(
               child: child,

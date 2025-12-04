@@ -83,15 +83,16 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
       curve: Curves.easeInOut,
     ));
 
-    // 如果需要直接进入音乐模式，设置动画控制器到隐藏状态，并在下一帧展开播放器
+    // 如果需要直接进入音乐模式，设置动画控制器到隐藏状态
     if (widget.enterMusicMode) {
       _navAnimationController.value = 1.0; // 底部导航栏隐藏状态
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref.read(musicPageVisibleProvider.notifier).state = true;
-        // 设置音乐tab标记
-        MusicTabMarker.setActive();
-        // 展开播放器
-        ref.read(expandPlayerTriggerProvider.notifier).state++;
+      // 设置音乐tab标记
+      MusicTabMarker.setActive();
+      // ✅ 使用 Future.microtask 在构建完成后设置 musicPageVisibleProvider
+      Future.microtask(() {
+        if (mounted) {
+          ref.read(musicPageVisibleProvider.notifier).state = true;
+        }
       });
     }
   }
@@ -354,6 +355,11 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
 
   // ✅ 直接进入音乐页面（用于启动时直接进入音乐模式）
   void enterMusicPageDirectly({bool expandPlayer = false}) {
+    // 如果需要展开播放器，先设置静态标记
+    if (expandPlayer) {
+      InitialExpandMarker.set();
+    }
+
     setState(() {
       _index = 1;
       _showBottomNav = false;
@@ -362,13 +368,5 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
     ref.read(musicPageVisibleProvider.notifier).state = true;
     // 设置音乐tab标记
     MusicTabMarker.setActive();
-
-    // 如果需要展开播放器
-    if (expandPlayer) {
-      // 延迟一帧后触发展开播放器
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref.read(expandPlayerTriggerProvider.notifier).state++;
-      });
-    }
   }
 }
