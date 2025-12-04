@@ -64,6 +64,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     // 通知相关
     private val NOTIFICATION_ID = 2001  // 与视频播放器使用不同的 ID
     private val CHANNEL_ID = "music_playback_channel"
+    private var isNotificationActive: Boolean = false  // 通知是否激活（播放过才激活）
     
     // 当前播放信息
     private var currentTitle: String = ""
@@ -491,9 +492,13 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         p.prepare()
         p.playWhenReady = autoPlay
         
-        // 更新 MediaSession 和通知
+        // 更新 MediaSession 元数据
         updateMediaSessionMetadata()
-        updateNotification()
+        
+        // 只在自动播放时激活通知
+        if (autoPlay) {
+            showNotification()
+        }
         
         android.util.Log.d("ExoPlayerMusicPlugin", "Media opened successfully")
         sendStateUpdate()
@@ -548,7 +553,12 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         p.playWhenReady = autoPlay
         
         updateMediaSessionMetadata()
-        updateNotification()
+        
+        // 只在自动播放时激活通知
+        if (autoPlay) {
+            showNotification()
+        }
+        
         sendStateUpdate()
     }
     
@@ -635,6 +645,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // 先设置音量为0，然后开始播放
         p.volume = 0f
         p.play()
+        
+        // 播放时激活通知
+        showNotification()
         
         // 立即发送状态更新，让 UI 响应更快
         sendStateUpdate()
@@ -1301,6 +1314,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val p = if (isCrossfading) crossfadePlayer ?: player else player
         if (p == null) return
         
+        // 如果通知还没激活（还没开始播放过），不显示通知
+        if (!isNotificationActive) {
+            return
+        }
+        
         if (p.playbackState == Player.STATE_IDLE) {
             hideNotification()
             return
@@ -1395,6 +1413,15 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val ctx = context ?: return
         val notificationManager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(NOTIFICATION_ID)
+        isNotificationActive = false  // 重置通知状态
+    }
+    
+    /**
+     * 显示通知（首次播放时调用）
+     */
+    private fun showNotification() {
+        isNotificationActive = true
+        updateNotification()
     }
     
     // ==================== 广播接收器 ====================
