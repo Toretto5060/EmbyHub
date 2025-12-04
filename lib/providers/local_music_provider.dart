@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../features/music/exoplayer_music_controller.dart';
@@ -10,6 +11,19 @@ const String _lastPlayingSongKey = 'last_playing_song';
 const String _lastPlayingPositionKey = 'last_playing_position';
 const String _lastPlaylistKey = 'last_playlist';
 const String _lastPlaylistIndexKey = 'last_playlist_index';
+const String _playModeKey = 'play_mode';
+
+/// 播放模式枚举
+enum PlayMode {
+  /// 列表循环：播放完最后一首后从第一首开始
+  listLoop,
+
+  /// 单曲循环：一直播放当前曲目
+  singleLoop,
+
+  /// 随机播放：在当前播放列表中随机播放
+  shuffle,
+}
 
 /// 本地音乐播放状态
 class LocalMusicPlayerState {
@@ -21,8 +35,8 @@ class LocalMusicPlayerState {
     this.currentIndex = 0,
     this.position = Duration.zero,
     this.duration = Duration.zero,
-    this.repeatMode = 'off',
-    this.shuffleMode = false,
+    this.playMode = PlayMode.listLoop, // 默认列表循环
+    this.isNextDirection = true, // 切换方向：true=下一首，false=上一首
   });
 
   final LocalSong? currentSong;
@@ -32,8 +46,8 @@ class LocalMusicPlayerState {
   final int currentIndex;
   final Duration position;
   final Duration duration;
-  final String repeatMode; // 'off' | 'one' | 'all'
-  final bool shuffleMode;
+  final PlayMode playMode;
+  final bool isNextDirection; // 切换方向：true=下一首（从右滑入），false=上一首（从左滑入）
 
   LocalMusicPlayerState copyWith({
     LocalSong? currentSong,
@@ -43,8 +57,8 @@ class LocalMusicPlayerState {
     int? currentIndex,
     Duration? position,
     Duration? duration,
-    String? repeatMode,
-    bool? shuffleMode,
+    PlayMode? playMode,
+    bool? isNextDirection,
   }) {
     return LocalMusicPlayerState(
       currentSong: currentSong ?? this.currentSong,
@@ -54,8 +68,8 @@ class LocalMusicPlayerState {
       currentIndex: currentIndex ?? this.currentIndex,
       position: position ?? this.position,
       duration: duration ?? this.duration,
-      repeatMode: repeatMode ?? this.repeatMode,
-      shuffleMode: shuffleMode ?? this.shuffleMode,
+      playMode: playMode ?? this.playMode,
+      isNextDirection: isNextDirection ?? this.isNextDirection,
     );
   }
 }
@@ -133,6 +147,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   StreamSubscription<void>? _playlistEndedSubscription;
   StreamSubscription<String>? _errorSubscription;
 
+  /// 是否正在切换歌曲（用于在 trackChanged 事件中判断是手动还是自动切换）
+  bool _isSwitchingTrack = false;
+
   /// 初始化播放器
   Future<void> _initializePlayer() async {
     // 仅在 Android 平台使用 ExoPlayer
@@ -152,29 +169,33 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     if (player == null) return;
 
     // 监听播放状态变化
+    // 注意：isPlaying 状态由用户操作控制，不从原生播放器同步
+    // 只同步 position、duration、isBuffering
     _stateSubscription = player.stateStream.listen((playerState) {
       state = state.copyWith(
         position: playerState.position,
         duration: playerState.duration,
-        isPlaying: playerState.isPlaying,
         isBuffering: playerState.isBuffering,
-        repeatMode: playerState.repeatMode,
-        shuffleMode: playerState.shuffleMode,
       );
 
       // 每10秒保存一次位置
-      if (playerState.position.inSeconds % 10 == 0 && playerState.isPlaying) {
+      if (playerState.position.inSeconds % 10 == 0 && state.isPlaying) {
         _savePlayingState();
       }
     });
 
-    // 监听曲目切换
+    // 监听曲目切换（自动播放下一首时触发）
     _trackChangedSubscription = player.trackChangedStream.listen((event) {
       if (event.index >= 0 && event.index < state.playlist.length) {
+        // 如果不是手动切换（_isSwitchingTrack=false），则是自动播放下一首
+        // 自动播放下一首按"下一首"方向处理
+        final isNext = _isSwitchingTrack ? state.isNextDirection : true;
+
         state = state.copyWith(
           currentIndex: event.index,
           currentSong: state.playlist[event.index],
           position: Duration.zero,
+          isNextDirection: isNext,
         );
         _savePlayingState();
       }
@@ -187,9 +208,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       _savePlayingState();
     });
 
-    // 监听错误
+    // 监听错误 - 播放失败时将状态改为暂停
     _errorSubscription = player.errorStream.listen((error) {
       print('Music player error: $error');
+      // 播放失败，将状态改为暂停
+      state = state.copyWith(isPlaying: false);
     });
   }
 
@@ -197,6 +220,12 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   Future<void> _loadLastPlayingState() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+
+      // 加载播放模式
+      final playModeIndex = prefs.getInt(_playModeKey) ?? 0;
+      final playMode =
+          PlayMode.values[playModeIndex.clamp(0, PlayMode.values.length - 1)];
+      state = state.copyWith(playMode: playMode);
 
       // 加载上次播放的歌曲
       final songJson = prefs.getString(_lastPlayingSongKey);
@@ -423,17 +452,53 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   Future<void> playNext() async {
     if (state.playlist.isEmpty) return;
 
-    // 立即更新 UI 状态
-    final nextIndex = (state.currentIndex + 1) % state.playlist.length;
+    // 标记正在手动切换歌曲（用于 trackChanged 事件判断方向）
+    _isSwitchingTrack = true;
+
+    int nextIndex;
+    switch (state.playMode) {
+      case PlayMode.singleLoop:
+        // 单曲循环：保持当前索引，重新播放
+        nextIndex = state.currentIndex;
+        break;
+      case PlayMode.shuffle:
+        // 随机播放：随机选择一首（排除当前歌曲）
+        if (state.playlist.length == 1) {
+          nextIndex = 0;
+        } else {
+          final random = Random();
+          do {
+            nextIndex = random.nextInt(state.playlist.length);
+          } while (nextIndex == state.currentIndex);
+        }
+        break;
+      case PlayMode.listLoop:
+        // 列表循环：顺序播放
+        nextIndex = (state.currentIndex + 1) % state.playlist.length;
+        break;
+    }
+
+    // 更新 UI 状态（方向为下一首，切换后自动播放）
     state = state.copyWith(
       currentIndex: nextIndex,
       currentSong: state.playlist[nextIndex],
-      isPlaying: true,
       position: Duration.zero,
+      isPlaying: true, // 切换后自动播放
+      isNextDirection: true, // 下一首方向
     );
 
-    // 异步调用原生播放器（不等待）
-    _player?.next();
+    // 调用原生播放器切换并播放
+    if (state.playMode == PlayMode.singleLoop) {
+      // 单曲循环：重新播放当前歌曲
+      await _player?.seek(Duration.zero);
+      _player?.play();
+    } else {
+      // 切换到指定索引并播放
+      await _player?.skipToIndex(nextIndex);
+      _player?.play();
+    }
+
+    _isSwitchingTrack = false;
     _savePlayingState();
   }
 
@@ -441,18 +506,54 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   Future<void> playPrevious() async {
     if (state.playlist.isEmpty) return;
 
-    // 立即更新 UI 状态
-    final prevIndex = (state.currentIndex - 1 + state.playlist.length) %
-        state.playlist.length;
+    // 标记正在手动切换歌曲（用于 trackChanged 事件判断方向）
+    _isSwitchingTrack = true;
+
+    int prevIndex;
+    switch (state.playMode) {
+      case PlayMode.singleLoop:
+        // 单曲循环：保持当前索引，重新播放
+        prevIndex = state.currentIndex;
+        break;
+      case PlayMode.shuffle:
+        // 随机播放：随机选择一首（排除当前歌曲）
+        if (state.playlist.length == 1) {
+          prevIndex = 0;
+        } else {
+          final random = Random();
+          do {
+            prevIndex = random.nextInt(state.playlist.length);
+          } while (prevIndex == state.currentIndex);
+        }
+        break;
+      case PlayMode.listLoop:
+        // 列表循环：顺序播放
+        prevIndex = (state.currentIndex - 1 + state.playlist.length) %
+            state.playlist.length;
+        break;
+    }
+
+    // 更新 UI 状态（方向为上一首，切换后自动播放）
     state = state.copyWith(
       currentIndex: prevIndex,
       currentSong: state.playlist[prevIndex],
-      isPlaying: true,
       position: Duration.zero,
+      isPlaying: true, // 切换后自动播放
+      isNextDirection: false, // 上一首方向
     );
 
-    // 异步调用原生播放器（不等待）
-    _player?.previous();
+    // 调用原生播放器切换并播放
+    if (state.playMode == PlayMode.singleLoop) {
+      // 单曲循环：重新播放当前歌曲
+      await _player?.seek(Duration.zero);
+      _player?.play();
+    } else {
+      // 切换到指定索引并播放
+      await _player?.skipToIndex(prevIndex);
+      _player?.play();
+    }
+
+    _isSwitchingTrack = false;
     _savePlayingState();
   }
 
@@ -481,20 +582,23 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     _savePlayingState();
   }
 
-  /// 设置循环模式
-  Future<void> setRepeatMode(String mode) async {
-    if (_player != null) {
-      await _player!.setRepeatMode(mode);
-    }
-    state = state.copyWith(repeatMode: mode);
+  /// 设置播放模式
+  Future<void> setPlayMode(PlayMode mode) async {
+    state = state.copyWith(playMode: mode);
+    // 持久化存储
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_playModeKey, mode.index);
   }
 
-  /// 设置随机播放
-  Future<void> setShuffleMode(bool enabled) async {
-    if (_player != null) {
-      await _player!.setShuffleMode(enabled);
-    }
-    state = state.copyWith(shuffleMode: enabled);
+  /// 切换播放模式（循环切换：列表循环 -> 单曲循环 -> 随机播放）
+  Future<void> togglePlayMode() async {
+    final currentMode = state.playMode;
+    final nextMode = switch (currentMode) {
+      PlayMode.listLoop => PlayMode.singleLoop,
+      PlayMode.singleLoop => PlayMode.shuffle,
+      PlayMode.shuffle => PlayMode.listLoop,
+    };
+    await setPlayMode(nextMode);
   }
 
   /// 设置播放速度
