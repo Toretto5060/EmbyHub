@@ -32,6 +32,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import com.toretto.embyhub.exoplayer.ExoPlayerTexturePlugin
+import com.toretto.embyhub.exoplayer.ExoPlayerMusicPlugin
 import io.flutter.plugins.GeneratedPluginRegistrant
 
 class MainActivity: FlutterActivity() {
@@ -57,6 +58,7 @@ class MainActivity: FlutterActivity() {
     // ✅ 音效实例（用于手动启用特定音效）
     private var activeAudioEffects = mutableListOf<AudioEffect>()
     private val exoPlayerPlugin = ExoPlayerTexturePlugin()
+    private val exoPlayerMusicPlugin = ExoPlayerMusicPlugin()  // ✅ 音乐播放器插件
     
     companion object {
         const val ACTION_PLAY_PAUSE = "com.toretto.embyhub.PLAY_PAUSE"
@@ -97,6 +99,7 @@ class MainActivity: FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         flutterEngine.plugins.add(exoPlayerPlugin)
+        flutterEngine.plugins.add(exoPlayerMusicPlugin)  // ✅ 注册音乐播放器插件
         
         // ✅ 设置音量控制为媒体音量流（使用系统音效）
         // 这样按音量键时调节的是媒体音量，而非铃声音量

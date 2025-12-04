@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../features/music/exoplayer_music_controller.dart';
 
 /// 持久化存储的键
 const String _lastPlayingSongKey = 'last_playing_song';
@@ -13,34 +16,46 @@ class LocalMusicPlayerState {
   const LocalMusicPlayerState({
     this.currentSong,
     this.isPlaying = false,
+    this.isBuffering = false,
     this.playlist = const [],
     this.currentIndex = 0,
     this.position = Duration.zero,
     this.duration = Duration.zero,
+    this.repeatMode = 'off',
+    this.shuffleMode = false,
   });
 
   final LocalSong? currentSong;
   final bool isPlaying;
+  final bool isBuffering;
   final List<LocalSong> playlist;
   final int currentIndex;
   final Duration position;
   final Duration duration;
+  final String repeatMode; // 'off' | 'one' | 'all'
+  final bool shuffleMode;
 
   LocalMusicPlayerState copyWith({
     LocalSong? currentSong,
     bool? isPlaying,
+    bool? isBuffering,
     List<LocalSong>? playlist,
     int? currentIndex,
     Duration? position,
     Duration? duration,
+    String? repeatMode,
+    bool? shuffleMode,
   }) {
     return LocalMusicPlayerState(
       currentSong: currentSong ?? this.currentSong,
       isPlaying: isPlaying ?? this.isPlaying,
+      isBuffering: isBuffering ?? this.isBuffering,
       playlist: playlist ?? this.playlist,
       currentIndex: currentIndex ?? this.currentIndex,
       position: position ?? this.position,
       duration: duration ?? this.duration,
+      repeatMode: repeatMode ?? this.repeatMode,
+      shuffleMode: shuffleMode ?? this.shuffleMode,
     );
   }
 }
@@ -103,10 +118,79 @@ class LocalSong {
 }
 
 /// 本地音乐播放器状态管理
+/// 集成 ExoPlayerMusicController 实现真正的音乐播放和系统媒体通知
 class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   LocalMusicPlayerNotifier() : super(const LocalMusicPlayerState()) {
-    // 初始化时加载上次播放状态
-    _loadLastPlayingState();
+    _initializePlayer();
+  }
+
+  /// ExoPlayer 音乐控制器（仅 Android）
+  ExoPlayerMusicController? _player;
+
+  /// 事件订阅
+  StreamSubscription<MusicPlayerState>? _stateSubscription;
+  StreamSubscription<TrackChangedEvent>? _trackChangedSubscription;
+  StreamSubscription<void>? _playlistEndedSubscription;
+  StreamSubscription<String>? _errorSubscription;
+
+  /// 初始化播放器
+  Future<void> _initializePlayer() async {
+    // 仅在 Android 平台使用 ExoPlayer
+    if (Platform.isAndroid) {
+      _player = ExoPlayerMusicController.instance;
+      await _player!.initialize();
+      _setupPlayerListeners();
+    }
+
+    // 加载上次播放状态
+    await _loadLastPlayingState();
+  }
+
+  /// 设置播放器事件监听
+  void _setupPlayerListeners() {
+    final player = _player;
+    if (player == null) return;
+
+    // 监听播放状态变化
+    _stateSubscription = player.stateStream.listen((playerState) {
+      state = state.copyWith(
+        position: playerState.position,
+        duration: playerState.duration,
+        isPlaying: playerState.isPlaying,
+        isBuffering: playerState.isBuffering,
+        repeatMode: playerState.repeatMode,
+        shuffleMode: playerState.shuffleMode,
+      );
+
+      // 每10秒保存一次位置
+      if (playerState.position.inSeconds % 10 == 0 && playerState.isPlaying) {
+        _savePlayingState();
+      }
+    });
+
+    // 监听曲目切换
+    _trackChangedSubscription = player.trackChangedStream.listen((event) {
+      if (event.index >= 0 && event.index < state.playlist.length) {
+        state = state.copyWith(
+          currentIndex: event.index,
+          currentSong: state.playlist[event.index],
+          position: Duration.zero,
+        );
+        _savePlayingState();
+      }
+    });
+
+    // 监听播放列表结束
+    _playlistEndedSubscription = player.playlistEndedStream.listen((_) {
+      // 播放列表播放完毕
+      state = state.copyWith(isPlaying: false);
+      _savePlayingState();
+    });
+
+    // 监听错误
+    _errorSubscription = player.errorStream.listen((error) {
+      print('Music player error: $error');
+    });
   }
 
   /// 加载上次播放状态
@@ -182,61 +266,222 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     }
   }
 
-  void playSong(LocalSong song) {
+  /// 播放单首歌曲
+  Future<void> playSong(LocalSong song) async {
+    print('LocalMusicPlayerNotifier: playSong called');
+    print('  - path: ${song.path}');
+    print('  - title: ${song.title}');
+    print('  - coverUrl: ${song.albumArt}');
+
+    // 更新 UI 状态
     state = state.copyWith(
       currentSong: song,
       isPlaying: true,
+      position: Duration.zero,
     );
+
+    // 调用原生播放器
+    if (_player != null && song.path != null) {
+      print('LocalMusicPlayerNotifier: calling _player.open()');
+      await _player!.open(
+        url: song.path!,
+        title: song.title,
+        artist: song.artist,
+        album: song.album ?? '',
+        coverUrl: song.albumArt,
+        autoPlay: true,
+      );
+      print('LocalMusicPlayerNotifier: _player.open() completed');
+    } else {
+      print('LocalMusicPlayerNotifier: player is null or path is null');
+    }
+
     _savePlayingState();
   }
 
-  void togglePlayPause() {
+  /// 切换播放/暂停
+  Future<void> togglePlayPause() async {
+    if (_player != null) {
+      if (state.isPlaying) {
+        await _player!.pause();
+      } else {
+        // 如果没有当前歌曲但有播放列表，先加载
+        if (state.currentSong != null && !_player!.isInitialized) {
+          await _openCurrentSong();
+        }
+        await _player!.play();
+      }
+    }
+    // 状态由 stream 监听更新，这里只做备用
     state = state.copyWith(isPlaying: !state.isPlaying);
   }
 
-  void pause() {
+  /// 暂停
+  Future<void> pause() async {
+    if (_player != null) {
+      await _player!.pause();
+    }
     state = state.copyWith(isPlaying: false);
-    _savePlayingState(); // 暂停时保存位置
+    _savePlayingState();
   }
 
-  void play() {
+  /// 播放
+  Future<void> play() async {
+    if (_player != null) {
+      if (state.currentSong != null && !_player!.isReady) {
+        await _openCurrentSong();
+      }
+      await _player!.play();
+    }
     state = state.copyWith(isPlaying: true);
   }
 
-  void setPlaylist(List<LocalSong> songs, {int startIndex = 0}) {
+  /// 打开当前歌曲
+  Future<void> _openCurrentSong() async {
+    final song = state.currentSong;
+    if (_player != null && song != null && song.path != null) {
+      await _player!.open(
+        url: song.path!,
+        title: song.title,
+        artist: song.artist,
+        album: song.album ?? '',
+        coverUrl: song.albumArt,
+        startPosition: state.position,
+        autoPlay: false,
+      );
+    }
+  }
+
+  /// 设置播放列表
+  Future<void> setPlaylist(List<LocalSong> songs, {int startIndex = 0}) async {
     if (songs.isEmpty) return;
+
+    // 更新 UI 状态
     state = state.copyWith(
       playlist: songs,
       currentIndex: startIndex,
       currentSong: songs[startIndex],
       isPlaying: true,
+      position: Duration.zero,
     );
+
+    // 调用原生播放器设置播放列表
+    if (_player != null) {
+      final items = songs
+          .where((s) => s.path != null)
+          .map((s) => MusicItem(
+                url: s.path!,
+                title: s.title,
+                artist: s.artist,
+                album: s.album ?? '',
+                coverUrl: s.albumArt,
+              ))
+          .toList();
+
+      if (items.isNotEmpty) {
+        await _player!.setPlaylist(
+          items: items,
+          startIndex: startIndex,
+          autoPlay: true,
+        );
+      }
+    }
+
     _savePlayingState();
   }
 
-  void playNext() {
+  /// 下一首
+  Future<void> playNext() async {
     if (state.playlist.isEmpty) return;
-    final nextIndex = (state.currentIndex + 1) % state.playlist.length;
-    state = state.copyWith(
-      currentIndex: nextIndex,
-      currentSong: state.playlist[nextIndex],
-      isPlaying: true,
-      position: Duration.zero, // 重置播放位置
-    );
+
+    if (_player != null) {
+      await _player!.next();
+    } else {
+      // 非 Android 平台的备用逻辑
+      final nextIndex = (state.currentIndex + 1) % state.playlist.length;
+      state = state.copyWith(
+        currentIndex: nextIndex,
+        currentSong: state.playlist[nextIndex],
+        isPlaying: true,
+        position: Duration.zero,
+      );
+      _savePlayingState();
+    }
+  }
+
+  /// 上一首
+  Future<void> playPrevious() async {
+    if (state.playlist.isEmpty) return;
+
+    if (_player != null) {
+      await _player!.previous();
+    } else {
+      // 非 Android 平台的备用逻辑
+      final prevIndex = (state.currentIndex - 1 + state.playlist.length) %
+          state.playlist.length;
+      state = state.copyWith(
+        currentIndex: prevIndex,
+        currentSong: state.playlist[prevIndex],
+        isPlaying: true,
+        position: Duration.zero,
+      );
+      _savePlayingState();
+    }
+  }
+
+  /// 跳转到指定位置
+  Future<void> seekTo(Duration position) async {
+    if (_player != null) {
+      await _player!.seek(position);
+    }
+    state = state.copyWith(position: position);
+  }
+
+  /// 跳转到播放列表中的指定索引
+  Future<void> skipToIndex(int index) async {
+    if (index < 0 || index >= state.playlist.length) return;
+
+    if (_player != null) {
+      await _player!.skipToIndex(index);
+    } else {
+      state = state.copyWith(
+        currentIndex: index,
+        currentSong: state.playlist[index],
+        isPlaying: true,
+        position: Duration.zero,
+      );
+    }
     _savePlayingState();
   }
 
-  void playPrevious() {
-    if (state.playlist.isEmpty) return;
-    final prevIndex = (state.currentIndex - 1 + state.playlist.length) %
-        state.playlist.length;
-    state = state.copyWith(
-      currentIndex: prevIndex,
-      currentSong: state.playlist[prevIndex],
-      isPlaying: true,
-      position: Duration.zero, // 重置播放位置
-    );
-    _savePlayingState();
+  /// 设置循环模式
+  Future<void> setRepeatMode(String mode) async {
+    if (_player != null) {
+      await _player!.setRepeatMode(mode);
+    }
+    state = state.copyWith(repeatMode: mode);
+  }
+
+  /// 设置随机播放
+  Future<void> setShuffleMode(bool enabled) async {
+    if (_player != null) {
+      await _player!.setShuffleMode(enabled);
+    }
+    state = state.copyWith(shuffleMode: enabled);
+  }
+
+  /// 设置播放速度
+  Future<void> setRate(double rate) async {
+    if (_player != null) {
+      await _player!.setRate(rate);
+    }
+  }
+
+  /// 设置音量 (0.0 - 1.0)
+  Future<void> setVolume(double volume) async {
+    if (_player != null) {
+      await _player!.setVolume(volume);
+    }
   }
 
   void updatePosition(Duration position) {
@@ -251,9 +496,22 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     state = state.copyWith(duration: duration);
   }
 
-  void clear() {
+  /// 停止播放并清除状态
+  Future<void> stop() async {
+    if (_player != null) {
+      await _player!.stop();
+    }
+    state = state.copyWith(isPlaying: false);
+    _savePlayingState();
+  }
+
+  /// 清除播放状态
+  Future<void> clear() async {
+    if (_player != null) {
+      await _player!.stop();
+    }
     state = const LocalMusicPlayerState();
-    _clearSavedState();
+    await _clearSavedState();
   }
 
   /// 清除保存的播放状态
@@ -267,6 +525,16 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     } catch (e) {
       print('Failed to clear saved state: $e');
     }
+  }
+
+  @override
+  void dispose() {
+    _stateSubscription?.cancel();
+    _trackChangedSubscription?.cancel();
+    _playlistEndedSubscription?.cancel();
+    _errorSubscription?.cancel();
+    // 注意：不要 dispose 单例的 _player
+    super.dispose();
   }
 }
 
