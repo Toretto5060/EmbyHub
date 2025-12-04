@@ -1351,6 +1351,10 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     );
   }
 
+  // 进度条拖动状态
+  bool _isDraggingProgress = false;
+  double _dragProgress = 0.0;
+
   Widget _buildProgressBar(
       BuildContext context, bool isDark, LocalMusicPlayerState playerState) {
     final position = playerState.position;
@@ -1361,26 +1365,102 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
         ? position.inMilliseconds / duration.inMilliseconds
         : 0.0;
 
+    // 显示的进度：拖动时显示拖动进度，否则显示实际进度
+    final displayProgress = _isDraggingProgress ? _dragProgress : progress;
+    // 显示的时间：拖动时显示拖动位置的时间
+    final displayPosition = _isDraggingProgress
+        ? Duration(
+            milliseconds: (duration.inMilliseconds * _dragProgress).round())
+        : position;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 40),
       child: Column(
         children: [
-          // 进度条
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 4,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-              activeTrackColor: CupertinoColors.activeBlue,
-              inactiveTrackColor: isDark ? Colors.white12 : Colors.black12,
-              thumbColor: CupertinoColors.activeBlue,
-              overlayColor: CupertinoColors.activeBlue.withOpacity(0.2),
-            ),
-            child: Slider(
-              value: progress.clamp(0.0, 1.0),
-              onChanged: (value) {
-                // TODO: 跳转到指定位置
-              },
+          // 自定义进度条
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragStart: (details) {
+              setState(() {
+                _isDraggingProgress = true;
+                _dragProgress = progress.clamp(0.0, 1.0);
+              });
+            },
+            onHorizontalDragUpdate: (details) {
+              final RenderBox box = context.findRenderObject() as RenderBox;
+              final width = box.size.width - 80; // 减去左右 padding
+              final newProgress =
+                  (_dragProgress + details.delta.dx / width).clamp(0.0, 1.0);
+              setState(() {
+                _dragProgress = newProgress;
+              });
+            },
+            onHorizontalDragEnd: (details) {
+              // 拖动结束，seek 到指定位置
+              final seekPosition = Duration(
+                milliseconds: (duration.inMilliseconds * _dragProgress).round(),
+              );
+              ref.read(localMusicPlayerProvider.notifier).seekTo(seekPosition);
+              setState(() {
+                _isDraggingProgress = false;
+              });
+            },
+            onTapDown: (details) {
+              // 点击进度条直接跳转
+              final RenderBox box = context.findRenderObject() as RenderBox;
+              final localPosition = box.globalToLocal(details.globalPosition);
+              final width = box.size.width - 80; // 减去左右 padding
+              final tapProgress =
+                  ((localPosition.dx - 40) / width).clamp(0.0, 1.0);
+              setState(() {
+                _isDraggingProgress = true;
+                _dragProgress = tapProgress;
+              });
+            },
+            onTapUp: (details) {
+              // 点击结束，seek 到指定位置
+              final seekPosition = Duration(
+                milliseconds: (duration.inMilliseconds * _dragProgress).round(),
+              );
+              ref.read(localMusicPlayerProvider.notifier).seekTo(seekPosition);
+              setState(() {
+                _isDraggingProgress = false;
+              });
+            },
+            child: Container(
+              height: 30, // 增加触摸区域
+              alignment: Alignment.center,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 100),
+                height: _isDraggingProgress ? 6 : 4, // 拖动时变粗
+                decoration: BoxDecoration(
+                  borderRadius:
+                      BorderRadius.circular(_isDraggingProgress ? 3 : 2),
+                ),
+                child: Stack(
+                  children: [
+                    // 背景轨道
+                    Container(
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white12 : Colors.black12,
+                        borderRadius:
+                            BorderRadius.circular(_isDraggingProgress ? 3 : 2),
+                      ),
+                    ),
+                    // 已播放部分
+                    FractionallySizedBox(
+                      widthFactor: displayProgress.clamp(0.0, 1.0),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: CupertinoColors.activeBlue,
+                          borderRadius: BorderRadius.circular(
+                              _isDraggingProgress ? 3 : 2),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
           // 时间显示
@@ -1390,7 +1470,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  _formatDuration(position),
+                  _formatDuration(displayPosition),
                   style: TextStyle(
                     fontSize: 12,
                     color: isDark ? Colors.white54 : Colors.black45,
@@ -1474,74 +1554,158 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
   Widget _buildBottomActions(BuildContext context, bool isDark) {
     final playMode = ref.watch(localMusicPlayerProvider).playMode;
+    final sleepTimerState = ref.watch(sleepTimerProvider);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 40),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          // 播放模式
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            minSize: 36,
-            onPressed: () {
-              ref.read(localMusicPlayerProvider.notifier).togglePlayMode();
-            },
-            child: Icon(
-              _getPlayModeIcon(playMode),
-              size: 22,
-              color: isDark ? Colors.white54 : Colors.black45,
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 40),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              // 播放模式
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minSize: 36,
+                onPressed: () {
+                  ref.read(localMusicPlayerProvider.notifier).togglePlayMode();
+                },
+                child: Icon(
+                  _getPlayModeIcon(playMode),
+                  size: 22,
+                  color: isDark ? Colors.white54 : Colors.black45,
+                ),
+              ),
+              // 睡眠定时器
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minSize: 36,
+                onPressed: () {
+                  if (sleepTimerState.isActive) {
+                    // 显示倒计时弹窗
+                    _showSleepTimerCountdown(context, isDark);
+                  } else {
+                    // 显示设置弹窗
+                    _showSleepTimerSheet(context, isDark);
+                  }
+                },
+                child: Icon(
+                  sleepTimerState.isActive
+                      ? CupertinoIcons.timer_fill
+                      : CupertinoIcons.timer,
+                  size: 22,
+                  color: sleepTimerState.isActive
+                      ? CupertinoColors.activeBlue
+                      : (isDark ? Colors.white54 : Colors.black45),
+                ),
+              ),
+              // 喜欢
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minSize: 36,
+                onPressed: () {
+                  // TODO: 添加到喜欢
+                },
+                child: Icon(
+                  CupertinoIcons.heart,
+                  size: 22,
+                  color: isDark ? Colors.white54 : Colors.black45,
+                ),
+              ),
+              // 播放队列
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minSize: 36,
+                onPressed: () {
+                  // 滚动到播放列表页面
+                  scrollToPlaylist();
+                },
+                child: Icon(
+                  CupertinoIcons.list_bullet,
+                  size: 22,
+                  color: isDark ? Colors.white54 : Colors.black45,
+                ),
+              ),
+              // 音效
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minSize: 36,
+                onPressed: () {
+                  // TODO: 显示音效设置
+                },
+                child: Icon(
+                  CupertinoIcons.waveform,
+                  size: 22,
+                  color: isDark ? Colors.white54 : Colors.black45,
+                ),
+              ),
+              // 更多
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minSize: 36,
+                onPressed: () {
+                  // TODO: 显示更多选项
+                },
+                child: Icon(
+                  CupertinoIcons.ellipsis,
+                  size: 22,
+                  color: isDark ? Colors.white54 : Colors.black45,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 睡眠定时器倒计时显示
+        if (sleepTimerState.isActive)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _formatTimerDuration(sleepTimerState.remainingSeconds),
+              style: TextStyle(
+                fontSize: 12,
+                color: CupertinoColors.activeBlue,
+              ),
             ),
           ),
-          // 喜欢
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            minSize: 36,
-            onPressed: () {
-              // TODO: 添加到喜欢
-            },
-            child: Icon(
-              CupertinoIcons.heart,
-              size: 22,
-              color: isDark ? Colors.white54 : Colors.black45,
-            ),
-          ),
-          // 播放队列
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            minSize: 36,
-            onPressed: () {
-              // 滚动到播放列表页面
-              scrollToPlaylist();
-            },
-            child: Icon(
-              CupertinoIcons.list_bullet,
-              size: 22,
-              color: isDark ? Colors.white54 : Colors.black45,
-            ),
-          ),
-          // 音效
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            minSize: 36,
-            onPressed: () {
-              // TODO: 显示音效设置
-            },
-            child: Icon(
-              CupertinoIcons.waveform,
-              size: 22,
-              color: isDark ? Colors.white54 : Colors.black45,
-            ),
-          ),
-        ],
+      ],
+    );
+  }
+
+  /// 格式化定时器时间
+  String _formatTimerDuration(int totalSeconds) {
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  /// 显示睡眠定时器设置弹窗
+  void _showSleepTimerSheet(BuildContext context, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
+      builder: (context) => _SleepTimerSheet(isDark: isDark),
+    );
+  }
+
+  /// 显示睡眠定时器倒计时弹窗
+  void _showSleepTimerCountdown(BuildContext context, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => _SleepTimerCountdownSheet(isDark: isDark),
     );
   }
 
   String _formatDuration(Duration duration) {
     final minutes = duration.inMinutes;
     final seconds = duration.inSeconds % 60;
-    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 }
 
@@ -1646,6 +1810,234 @@ class _FastPageScrollPhysics extends PageScrollPhysics {
       mass: mass,
       stiffness: stiffness,
       damping: criticalDamping,
+    );
+  }
+}
+
+/// 睡眠定时器设置弹窗
+class _SleepTimerSheet extends ConsumerStatefulWidget {
+  final bool isDark;
+
+  const _SleepTimerSheet({required this.isDark});
+
+  @override
+  ConsumerState<_SleepTimerSheet> createState() => _SleepTimerSheetState();
+}
+
+class _SleepTimerSheetState extends ConsumerState<_SleepTimerSheet> {
+  double _minutes = 30; // 默认 30 分钟
+  bool _extendToSongEnd = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 标题
+            Center(
+              child: Text(
+                '睡眠定时',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // 时长显示
+            Center(
+              child: Text(
+                '${_minutes.round()} 分钟',
+                style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.w300,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            // 进度条
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 20,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 12),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
+                activeTrackColor: CupertinoColors.activeBlue,
+                inactiveTrackColor:
+                    widget.isDark ? Colors.white12 : Colors.black12,
+                thumbColor: CupertinoColors.activeBlue,
+                overlayColor: CupertinoColors.activeBlue.withOpacity(0.2),
+              ),
+              child: Slider(
+                value: _minutes,
+                min: 1,
+                max: 120,
+                onChanged: (value) {
+                  setState(() {
+                    _minutes = value;
+                  });
+                },
+              ),
+            ),
+            const SizedBox(height: 24),
+            // 开始按钮
+            SizedBox(
+              width: double.infinity,
+              child: CupertinoButton(
+                color: CupertinoColors.activeBlue,
+                borderRadius: BorderRadius.circular(12),
+                onPressed: () {
+                  ref.read(sleepTimerProvider.notifier).startTimer(
+                        _minutes.round(),
+                        _extendToSongEnd,
+                      );
+                  Navigator.of(context).pop();
+                },
+                child: const Text(
+                  '开始',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // 分隔线
+            Divider(
+              color: widget.isDark ? Colors.white12 : Colors.black12,
+            ),
+            const SizedBox(height: 16),
+            // 自动延长选项
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '自动延长到整首歌播完',
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: widget.isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '开启将在睡眠定时结束后，将当前歌曲播放完成后停止',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color:
+                              widget.isDark ? Colors.white38 : Colors.black38,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                CupertinoSwitch(
+                  value: _extendToSongEnd,
+                  activeColor: CupertinoColors.activeBlue,
+                  onChanged: (value) {
+                    setState(() {
+                      _extendToSongEnd = value;
+                    });
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 睡眠定时器倒计时弹窗
+class _SleepTimerCountdownSheet extends ConsumerWidget {
+  final bool isDark;
+
+  const _SleepTimerCountdownSheet({required this.isDark});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sleepTimerState = ref.watch(sleepTimerProvider);
+    final minutes = sleepTimerState.remainingSeconds ~/ 60;
+    final seconds = sleepTimerState.remainingSeconds % 60;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 标题
+            Text(
+              '睡眠定时',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 24),
+            // 倒计时显示
+            Text(
+              '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',
+              style: TextStyle(
+                fontSize: 56,
+                fontWeight: FontWeight.bold,
+                color: CupertinoColors.activeBlue,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '剩余时间',
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white38 : Colors.black38,
+              ),
+            ),
+            if (sleepTimerState.extendToSongEnd) ...[
+              const SizedBox(height: 8),
+              Text(
+                '将在当前歌曲播放完成后停止',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.white38 : Colors.black38,
+                ),
+              ),
+            ],
+            const SizedBox(height: 32),
+            // 停止按钮
+            SizedBox(
+              width: double.infinity,
+              child: CupertinoButton(
+                color: CupertinoColors.destructiveRed,
+                borderRadius: BorderRadius.circular(12),
+                onPressed: () {
+                  ref.read(sleepTimerProvider.notifier).stopTimer();
+                  Navigator.of(context).pop();
+                },
+                child: const Text(
+                  '停止定时',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
     );
   }
 }

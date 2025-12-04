@@ -600,6 +600,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       await _player!.seek(position);
     }
     state = state.copyWith(position: position);
+    // 立即保存播放位置
+    _savePlayingState();
   }
 
   /// 跳转到播放列表中的指定索引
@@ -860,5 +862,136 @@ class StartupPageManager {
       return await MusicTabMarker.isActive();
     }
     return false;
+  }
+}
+
+/// 睡眠定时器状态
+class SleepTimerState {
+  const SleepTimerState({
+    this.isActive = false,
+    this.remainingSeconds = 0,
+    this.totalSeconds = 0,
+    this.extendToSongEnd = false,
+  });
+
+  final bool isActive;
+  final int remainingSeconds; // 剩余秒数
+  final int totalSeconds; // 总秒数
+  final bool extendToSongEnd; // 是否延长到整首歌播完
+
+  SleepTimerState copyWith({
+    bool? isActive,
+    int? remainingSeconds,
+    int? totalSeconds,
+    bool? extendToSongEnd,
+  }) {
+    return SleepTimerState(
+      isActive: isActive ?? this.isActive,
+      remainingSeconds: remainingSeconds ?? this.remainingSeconds,
+      totalSeconds: totalSeconds ?? this.totalSeconds,
+      extendToSongEnd: extendToSongEnd ?? this.extendToSongEnd,
+    );
+  }
+}
+
+/// 睡眠定时器 Provider
+final sleepTimerProvider =
+    StateNotifierProvider<SleepTimerNotifier, SleepTimerState>((ref) {
+  return SleepTimerNotifier(ref);
+});
+
+class SleepTimerNotifier extends StateNotifier<SleepTimerState> {
+  SleepTimerNotifier(this.ref) : super(const SleepTimerState());
+
+  final Ref ref;
+  Timer? _timer;
+  bool _waitingForSongEnd = false;
+
+  /// 开始定时器
+  void startTimer(int minutes, bool extendToSongEnd) {
+    // 取消之前的定时器
+    _timer?.cancel();
+    _waitingForSongEnd = false;
+
+    final totalSeconds = minutes * 60;
+    state = SleepTimerState(
+      isActive: true,
+      remainingSeconds: totalSeconds,
+      totalSeconds: totalSeconds,
+      extendToSongEnd: extendToSongEnd,
+    );
+
+    // 每秒更新剩余时间
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (state.remainingSeconds > 0) {
+        state = state.copyWith(remainingSeconds: state.remainingSeconds - 1);
+      } else {
+        // 时间到
+        _onTimerEnd();
+      }
+    });
+  }
+
+  /// 停止定时器
+  void stopTimer() {
+    _timer?.cancel();
+    _timer = null;
+    _waitingForSongEnd = false;
+    state = const SleepTimerState();
+  }
+
+  /// 定时器结束处理
+  void _onTimerEnd() {
+    _timer?.cancel();
+    _timer = null;
+
+    if (state.extendToSongEnd) {
+      // 等待当前歌曲播放完毕
+      _waitingForSongEnd = true;
+      // 监听歌曲切换事件
+      _listenForSongEnd();
+    } else {
+      // 直接停止播放并退出
+      _stopAndExit();
+    }
+  }
+
+  /// 监听歌曲结束
+  void _listenForSongEnd() {
+    // 订阅播放状态变化
+    final playerState = ref.read(localMusicPlayerProvider);
+    final currentSongId = playerState.currentSong?.id;
+
+    // 使用定时器检查歌曲是否切换
+    Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (!_waitingForSongEnd) {
+        timer.cancel();
+        return;
+      }
+
+      final newState = ref.read(localMusicPlayerProvider);
+      // 如果歌曲切换了或者停止播放了
+      if (newState.currentSong?.id != currentSongId || !newState.isPlaying) {
+        timer.cancel();
+        _waitingForSongEnd = false;
+        _stopAndExit();
+      }
+    });
+  }
+
+  /// 停止播放并退出 app
+  void _stopAndExit() {
+    // 停止播放
+    ref.read(localMusicPlayerProvider.notifier).stop();
+    // 重置状态
+    state = const SleepTimerState();
+    // 退出 app
+    exit(0);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 }
