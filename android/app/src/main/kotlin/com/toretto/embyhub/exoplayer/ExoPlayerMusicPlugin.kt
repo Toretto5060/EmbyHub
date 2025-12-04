@@ -83,12 +83,20 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     // 广播接收器（用于通知栏按钮）
     private var mediaReceiver: BroadcastReceiver? = null
     
+    // ✅ 音频淡入淡出相关
+    private var fadeAnimator: android.animation.ValueAnimator? = null
+    private var targetVolume: Float = 1.0f  // 目标音量
+    private var isFadingOut: Boolean = false  // 是否正在淡出
+    
     companion object {
         const val ACTION_PLAY = "com.toretto.embyhub.music.PLAY"
         const val ACTION_PAUSE = "com.toretto.embyhub.music.PAUSE"
         const val ACTION_NEXT = "com.toretto.embyhub.music.NEXT"
         const val ACTION_PREVIOUS = "com.toretto.embyhub.music.PREVIOUS"
         const val ACTION_STOP = "com.toretto.embyhub.music.STOP"
+        
+        // 淡入淡出时长（毫秒）
+        const val FADE_DURATION_MS = 150L
     }
     
     private val progressRunnable = object : Runnable {
@@ -242,21 +250,21 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             "play" -> {
-                // 先请求音频焦点，再播放
+                // 先请求音频焦点，再播放（带淡入效果）
                 requestAudioFocus()
-                player?.play()
+                playWithFadeIn()
                 result.success(null)
             }
             
             "pause" -> {
-                player?.pause()
+                // 带淡出效果的暂停
+                pauseWithFadeOut()
                 result.success(null)
             }
             
             "stop" -> {
-                player?.stop()
-                abandonAudioFocus()
-                hideNotification()
+                // 带淡出效果的停止
+                stopWithFadeOut()
                 result.success(null)
             }
             
@@ -267,12 +275,14 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             "next" -> {
-                playNext()
+                // 带淡出淡入效果的下一首
+                playNextWithFade()
                 result.success(null)
             }
             
             "previous" -> {
-                playPrevious()
+                // 带淡出淡入效果的上一首
+                playPreviousWithFade()
                 result.success(null)
             }
             
@@ -290,8 +300,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             
             "setVolume" -> {
-                val volume = (call.argument<Double>("volume") ?: 1.0).toFloat()
-                player?.volume = volume.coerceIn(0f, 1f)
+                val volume = (call.argument<Double>("volume") ?: 1.0).toFloat().coerceIn(0f, 1f)
+                targetVolume = volume  // 保存目标音量
+                player?.volume = volume
                 result.success(null)
             }
             
@@ -588,6 +599,183 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
     
+    // ==================== 淡入淡出控制 ====================
+    
+    /**
+     * 带淡入效果的播放
+     */
+    private fun playWithFadeIn() {
+        val p = player ?: return
+        
+        // 取消之前的淡入淡出动画
+        cancelFadeAnimation()
+        
+        // 先设置音量为0，然后开始播放
+        p.volume = 0f
+        p.play()
+        
+        // 立即发送状态更新，让 UI 响应更快
+        sendStateUpdate()
+        
+        // 淡入到目标音量
+        fadeAnimator = android.animation.ValueAnimator.ofFloat(0f, targetVolume).apply {
+            duration = FADE_DURATION_MS
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener { animator ->
+                player?.volume = animator.animatedValue as Float
+            }
+            start()
+        }
+    }
+    
+    /**
+     * 带淡出效果的暂停
+     */
+    private fun pauseWithFadeOut() {
+        val p = player ?: return
+        
+        // 取消之前的淡入淡出动画
+        cancelFadeAnimation()
+        
+        // 立即发送状态更新，让 UI 响应更快
+        isFadingOut = true
+        sendStateUpdate()
+        
+        val currentVolume = p.volume
+        
+        // 淡出到0，然后暂停
+        fadeAnimator = android.animation.ValueAnimator.ofFloat(currentVolume, 0f).apply {
+            duration = FADE_DURATION_MS
+            interpolator = android.view.animation.AccelerateInterpolator()
+            addUpdateListener { animator ->
+                player?.volume = animator.animatedValue as Float
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    player?.pause()
+                    player?.volume = targetVolume  // 恢复音量设置
+                    isFadingOut = false
+                }
+            })
+            start()
+        }
+    }
+    
+    /**
+     * 带淡出效果的停止
+     */
+    private fun stopWithFadeOut() {
+        val p = player ?: return
+        
+        // 取消之前的淡入淡出动画
+        cancelFadeAnimation()
+        
+        val currentVolume = p.volume
+        
+        // 淡出到0，然后停止
+        fadeAnimator = android.animation.ValueAnimator.ofFloat(currentVolume, 0f).apply {
+            duration = FADE_DURATION_MS
+            interpolator = android.view.animation.AccelerateInterpolator()
+            addUpdateListener { animator ->
+                player?.volume = animator.animatedValue as Float
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    player?.stop()
+                    player?.volume = targetVolume
+                    abandonAudioFocus()
+                    hideNotification()
+                }
+            })
+            start()
+        }
+    }
+    
+    /**
+     * 带淡出淡入效果的下一首
+     */
+    private fun playNextWithFade() {
+        val p = player ?: return
+        if (!p.hasNextMediaItem()) return
+        
+        // 取消之前的淡入淡出动画
+        cancelFadeAnimation()
+        
+        val currentVolume = p.volume
+        
+        // 淡出，切换，淡入
+        fadeAnimator = android.animation.ValueAnimator.ofFloat(currentVolume, 0f).apply {
+            duration = FADE_DURATION_MS / 2
+            interpolator = android.view.animation.AccelerateInterpolator()
+            addUpdateListener { animator ->
+                player?.volume = animator.animatedValue as Float
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    // 切换到下一首
+                    playNext()
+                    
+                    // 淡入
+                    fadeAnimator = android.animation.ValueAnimator.ofFloat(0f, targetVolume).apply {
+                        duration = FADE_DURATION_MS / 2
+                        interpolator = android.view.animation.DecelerateInterpolator()
+                        addUpdateListener { animator ->
+                            player?.volume = animator.animatedValue as Float
+                        }
+                        start()
+                    }
+                }
+            })
+            start()
+        }
+    }
+    
+    /**
+     * 带淡出淡入效果的上一首
+     */
+    private fun playPreviousWithFade() {
+        val p = player ?: return
+        
+        // 取消之前的淡入淡出动画
+        cancelFadeAnimation()
+        
+        val currentVolume = p.volume
+        
+        // 淡出，切换，淡入
+        fadeAnimator = android.animation.ValueAnimator.ofFloat(currentVolume, 0f).apply {
+            duration = FADE_DURATION_MS / 2
+            interpolator = android.view.animation.AccelerateInterpolator()
+            addUpdateListener { animator ->
+                player?.volume = animator.animatedValue as Float
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    // 切换到上一首
+                    playPrevious()
+                    
+                    // 淡入
+                    fadeAnimator = android.animation.ValueAnimator.ofFloat(0f, targetVolume).apply {
+                        duration = FADE_DURATION_MS / 2
+                        interpolator = android.view.animation.DecelerateInterpolator()
+                        addUpdateListener { animator ->
+                            player?.volume = animator.animatedValue as Float
+                        }
+                        start()
+                    }
+                }
+            })
+            start()
+        }
+    }
+    
+    /**
+     * 取消淡入淡出动画
+     */
+    private fun cancelFadeAnimation() {
+        fadeAnimator?.cancel()
+        fadeAnimator = null
+    }
+    
     private fun loadCoverAsync(url: String) {
         coverExecutor.execute {
             try {
@@ -639,26 +827,24 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
-                    player?.play()
                     requestAudioFocus()
+                    playWithFadeIn()
                 }
                 
                 override fun onPause() {
-                    player?.pause()
+                    pauseWithFadeOut()
                 }
                 
                 override fun onStop() {
-                    player?.stop()
-                    abandonAudioFocus()
-                    hideNotification()
+                    stopWithFadeOut()
                 }
                 
                 override fun onSkipToNext() {
-                    playNext()
+                    playNextWithFade()
                 }
                 
                 override fun onSkipToPrevious() {
-                    playPrevious()
+                    playPreviousWithFade()
                 }
                 
                 override fun onSeekTo(pos: Long) {
@@ -958,22 +1144,20 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
                     ACTION_PLAY -> {
-                        player?.play()
                         requestAudioFocus()
+                        playWithFadeIn()
                     }
                     ACTION_PAUSE -> {
-                        player?.pause()
+                        pauseWithFadeOut()
                     }
                     ACTION_NEXT -> {
-                        playNext()
+                        playNextWithFade()
                     }
                     ACTION_PREVIOUS -> {
-                        playPrevious()
+                        playPreviousWithFade()
                     }
                     ACTION_STOP -> {
-                        player?.stop()
-                        abandonAudioFocus()
-                        hideNotification()
+                        stopWithFadeOut()
                     }
                 }
             }
@@ -1039,13 +1223,16 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             else -> "off"
         }
         
+        // 如果正在淡出，立即报告为暂停状态，让 UI 响应更快
+        val isPlaying = if (isFadingOut) false else p.isPlaying
+        
         val state = hashMapOf(
             "event" to "state",
             "position_ms" to position,
             "duration_ms" to duration,
             "buffered_ms" to buffered,
             "isBuffering" to (p.playbackState == Player.STATE_BUFFERING),
-            "isPlaying" to p.isPlaying,
+            "isPlaying" to isPlaying,
             "isReady" to (p.playbackState == Player.STATE_READY),
             "currentIndex" to p.currentMediaItemIndex,
             "playlistLength" to playlist.size,
@@ -1056,6 +1243,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     private fun disposePlayer() {
+        // 取消淡入淡出动画
+        cancelFadeAnimation()
+        
         val toRelease = player ?: return
         player = null
         handler.post {

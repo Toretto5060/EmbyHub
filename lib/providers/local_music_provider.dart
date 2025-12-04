@@ -301,39 +301,46 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
   /// 切换播放/暂停
   Future<void> togglePlayPause() async {
+    // 立即更新 UI 状态，让响应更快
+    final wasPlaying = state.isPlaying;
+    state = state.copyWith(isPlaying: !wasPlaying);
+
+    // 异步调用原生播放器（不等待）
     if (_player != null) {
-      if (state.isPlaying) {
-        await _player!.pause();
+      if (wasPlaying) {
+        _player!.pause(); // 不使用 await
       } else {
         // 如果没有当前歌曲但有播放列表，先加载
         if (state.currentSong != null && !_player!.isInitialized) {
           await _openCurrentSong();
         }
-        await _player!.play();
+        _player!.play(); // 不使用 await
       }
     }
-    // 状态由 stream 监听更新，这里只做备用
-    state = state.copyWith(isPlaying: !state.isPlaying);
   }
 
   /// 暂停
   Future<void> pause() async {
-    if (_player != null) {
-      await _player!.pause();
-    }
+    // 立即更新 UI 状态
     state = state.copyWith(isPlaying: false);
+
+    // 异步调用原生播放器（不等待）
+    _player?.pause();
     _savePlayingState();
   }
 
   /// 播放
   Future<void> play() async {
+    // 立即更新 UI 状态
+    state = state.copyWith(isPlaying: true);
+
+    // 异步调用原生播放器
     if (_player != null) {
       if (state.currentSong != null && !_player!.isReady) {
         await _openCurrentSong();
       }
-      await _player!.play();
+      _player!.play(); // 不使用 await
     }
-    state = state.copyWith(isPlaying: true);
   }
 
   /// 打开当前歌曲
@@ -394,39 +401,37 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   Future<void> playNext() async {
     if (state.playlist.isEmpty) return;
 
-    if (_player != null) {
-      await _player!.next();
-    } else {
-      // 非 Android 平台的备用逻辑
-      final nextIndex = (state.currentIndex + 1) % state.playlist.length;
-      state = state.copyWith(
-        currentIndex: nextIndex,
-        currentSong: state.playlist[nextIndex],
-        isPlaying: true,
-        position: Duration.zero,
-      );
-      _savePlayingState();
-    }
+    // 立即更新 UI 状态
+    final nextIndex = (state.currentIndex + 1) % state.playlist.length;
+    state = state.copyWith(
+      currentIndex: nextIndex,
+      currentSong: state.playlist[nextIndex],
+      isPlaying: true,
+      position: Duration.zero,
+    );
+
+    // 异步调用原生播放器（不等待）
+    _player?.next();
+    _savePlayingState();
   }
 
   /// 上一首
   Future<void> playPrevious() async {
     if (state.playlist.isEmpty) return;
 
-    if (_player != null) {
-      await _player!.previous();
-    } else {
-      // 非 Android 平台的备用逻辑
-      final prevIndex = (state.currentIndex - 1 + state.playlist.length) %
-          state.playlist.length;
-      state = state.copyWith(
-        currentIndex: prevIndex,
-        currentSong: state.playlist[prevIndex],
-        isPlaying: true,
-        position: Duration.zero,
-      );
-      _savePlayingState();
-    }
+    // 立即更新 UI 状态
+    final prevIndex = (state.currentIndex - 1 + state.playlist.length) %
+        state.playlist.length;
+    state = state.copyWith(
+      currentIndex: prevIndex,
+      currentSong: state.playlist[prevIndex],
+      isPlaying: true,
+      position: Duration.zero,
+    );
+
+    // 异步调用原生播放器（不等待）
+    _player?.previous();
+    _savePlayingState();
   }
 
   /// 跳转到指定位置
