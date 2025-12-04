@@ -283,7 +283,14 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   }
 
   void _triggerCoverAnimation(int newIndex) {
-    if (_isAnimatingCover) return;
+    // 如果正在进行封面动画，先停止
+    if (_isAnimatingCover) {
+      _returnToOriginController?.stop();
+      _returnToOriginController?.dispose();
+      _returnToOriginController = null;
+      _isAnimatingCover = false;
+    }
+
     _isAnimatingCover = true;
 
     // 判断切换方向：新索引 > 旧索引 = 下一首，新索引 < 旧索引 = 上一首
@@ -295,8 +302,6 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
     // 切换歌曲时，停止旋转
     _rotationAnimationController.stop();
-    _returnToOriginController?.dispose();
-    _returnToOriginController = null;
 
     // 同时播放：旋转回原点 + 封面图片缩放动画
     _animateRotationAndScale();
@@ -469,6 +474,7 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
         _returnToOriginController?.stop();
         _returnToOriginController?.dispose();
         _returnToOriginController = null;
+        _isAnimatingCover = false; // 重置封面动画状态
         _currentRotation = 0;
         _rotationAnimationController.forward(from: 0);
         _rotationAnimationController.repeat();
