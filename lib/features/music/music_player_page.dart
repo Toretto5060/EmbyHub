@@ -8,6 +8,37 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/local_music_provider.dart';
 import '../../utils/theme_utils.dart';
 
+/// 音质信息
+class _QualityInfo {
+  final String label;
+  final Color bgColor;
+  final Color textColor;
+
+  const _QualityInfo(this.label, this.bgColor, [this.textColor = Colors.white]);
+}
+
+/// 根据码率获取音质等级信息
+_QualityInfo? _getQualityInfo(int? bitrate) {
+  if (bitrate == null || bitrate < 128) return null;
+
+  if (bitrate > 2000) {
+    // Hi-Res 高解析无损 (> 2Mbps) - 黑底金字
+    return const _QualityInfo('Hi-Res', Colors.black, Color(0xFFFFD700));
+  } else if (bitrate >= 900) {
+    // HD/Lossless 无损音质 (900-2000 kbps) - 橙色
+    return const _QualityInfo('HD', Color(0xFFFFA500));
+  } else if (bitrate >= 320) {
+    // HQ+ 超高品质 (320 kbps) - 蓝紫色
+    return const _QualityInfo('HQ+', Color(0xFF7B68EE));
+  } else if (bitrate >= 192) {
+    // HQ 高品质 (192-256 kbps) - 绿色
+    return const _QualityInfo('HQ', CupertinoColors.activeGreen);
+  } else {
+    // SQ 标准音质 (128 kbps) - 灰色
+    return const _QualityInfo('SQ', CupertinoColors.systemGrey);
+  }
+}
+
 /// 滚动文字组件 - 当文字超出宽度时自动滚动
 class _MarqueeText extends StatefulWidget {
   const _MarqueeText({
@@ -174,10 +205,14 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   late AnimationController _resetAnimationController;
   late Animation<double> _resetAnimation;
 
-  // 封面切换动画
+  // 封面切换动画（缩放 + 淡入淡出）
   late AnimationController _coverAnimationController;
-  late Animation<double> _coverScaleAnimation;
+  late Animation<double> _coverFadeAnimation; // 淡入淡出
+  late Animation<double> _oldCoverScaleAnimation; // 旧封面放大
+  late Animation<double> _newCoverScaleAnimation; // 新封面缩小
   String? _previousSongId;
+  String? _previousAlbumArt; // 当前封面路径（用于下次切换时作为旧封面）
+  String? _fadingOutAlbumArt; // 正在淡出的旧封面路径（动画期间使用）
   bool _isAnimatingCover = false;
 
   // 封面旋转动画
@@ -200,13 +235,28 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   // 播放列表滚动控制器
   final ScrollController _playlistScrollController = ScrollController();
 
+  // 海报/歌词水平滑动控制器（0: 海报, 1: 歌词）
+  late PageController _coverLyricsPageController;
+  int _currentCoverLyricsPage = 0;
+
   @override
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: widget.initialPage);
+    _coverLyricsPageController = PageController(initialPage: 0);
 
     // 监听页面切换，当离开第二屏时滚动到当前歌曲
     _pageController.addListener(_onPageChanged);
+
+    // 监听海报/歌词页面切换
+    _coverLyricsPageController.addListener(() {
+      final page = _coverLyricsPageController.page?.round() ?? 0;
+      if (page != _currentCoverLyricsPage) {
+        setState(() {
+          _currentCoverLyricsPage = page;
+        });
+      }
+    });
 
     _resetAnimationController = AnimationController(
       vsync: this,
@@ -222,23 +272,38 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
       });
     });
 
-    // 初始化封面切换动画控制器（从大缩小到正常）
+    // 初始化封面切换动画控制器（缩放 + 淡入淡出）
     _coverAnimationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 400),
+      duration: const Duration(milliseconds: 300),
     );
-    _coverScaleAnimation = Tween<double>(begin: 1.5, end: 1.0).animate(
+    // 旧封面：1.0 -> 1.15 放大 + 淡出
+    _oldCoverScaleAnimation = Tween<double>(begin: 1.0, end: 1.15).animate(
       CurvedAnimation(
         parent: _coverAnimationController,
-        curve: Curves.easeOutCubic,
+        curve: Curves.easeOut,
       ),
     );
-    _coverAnimationController.value = 1.0; // 初始状态为完成
+    // 新封面：1.15 -> 1.0 缩小 + 淡入
+    _newCoverScaleAnimation = Tween<double>(begin: 1.15, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _coverAnimationController,
+        curve: Curves.easeOut,
+      ),
+    );
+    // 淡入淡出动画：0->1 表示从旧封面淡出到新封面淡入
+    _coverFadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _coverAnimationController,
+        curve: Curves.easeInOut,
+      ),
+    );
+    _coverAnimationController.value = 1.0; // 初始状态为完成（显示新封面）
 
     // 初始化封面旋转动画控制器（30秒转一圈）
     _rotationAnimationController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 30),
+      duration: const Duration(seconds: 26),
     );
     _rotationAnimationController.addListener(() {
       setState(() {
@@ -276,6 +341,23 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 预加载当前歌曲封面，避免初始化时显示灰色背景
+    _precacheCurrentCover();
+  }
+
+  // 预加载当前歌曲封面
+  void _precacheCurrentCover() {
+    final currentSong = ref.read(localMusicPlayerProvider).currentSong;
+    if (currentSong?.albumArt != null &&
+        currentSong!.albumArt!.isNotEmpty &&
+        File(currentSong.albumArt!).existsSync()) {
+      precacheImage(FileImage(File(currentSong.albumArt!)), context);
+    }
+  }
+
+  @override
   void dispose() {
     _pageController.removeListener(_onPageChanged);
     _resetAnimationController.dispose();
@@ -286,6 +368,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     _containerScaleController.dispose();
     _pageController.dispose();
     _playlistScrollController.dispose();
+    _coverLyricsPageController.dispose();
     super.dispose();
   }
 
@@ -324,16 +407,20 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     _resetAnimationController.forward(from: 0);
   }
 
-  void _triggerCoverAnimation(int newIndex) {
+  void _triggerCoverAnimation(int newIndex, {String? oldAlbumArt}) {
     // 如果正在进行封面动画，先停止
     if (_isAnimatingCover) {
       _returnToOriginController?.stop();
       _returnToOriginController?.dispose();
       _returnToOriginController = null;
+      _coverAnimationController.stop();
       _isAnimatingCover = false;
     }
 
     _isAnimatingCover = true;
+
+    // 保存要淡出的旧封面路径
+    _fadingOutAlbumArt = oldAlbumArt;
 
     // 从 provider 获取切换方向
     _isNextSong = ref.read(localMusicPlayerProvider).isNextDirection;
@@ -344,60 +431,49 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     // 切换歌曲时，停止旋转
     _rotationAnimationController.stop();
 
-    // 同时播放：旋转回原点 + 封面图片缩放动画
+    // 先执行旋转回原点动画，完成后再执行封面替换动画
     _animateRotationAndScale();
   }
 
-  // 切换歌曲时：旋转回原点和缩放动画同时进行
+  // 切换歌曲时：先旋转回原点，再执行封面替换动画
   void _animateRotationAndScale() {
     const twoPi = 2 * 3.14159265359;
     final normalizedRotation = _currentRotation % twoPi;
-    final isPlaying = ref.read(localMusicPlayerProvider).isPlaying;
+
+    // 如果已经接近原点，直接执行封面替换动画
+    if (normalizedRotation < 0.05) {
+      _currentRotation = 0;
+      _startCoverReplaceAnimation();
+      return;
+    }
 
     // 计算旋转回原点的参数
     double targetRotation = 0;
     double rotationDistance = normalizedRotation;
 
-    if (normalizedRotation > 0.05) {
-      if (normalizedRotation > twoPi / 2) {
-        targetRotation = twoPi;
-        rotationDistance = twoPi - normalizedRotation;
-      }
+    if (normalizedRotation > twoPi / 2) {
+      targetRotation = twoPi;
+      rotationDistance = twoPi - normalizedRotation;
     }
 
-    // 计算动画时长
-    final rotationDurationMs = normalizedRotation < 0.05
-        ? 0
-        : (rotationDistance / twoPi * 600).toInt().clamp(100, 600);
-    // 播放状态下不需要缩放动画，直接用旋转动画时长
-    final scaleDurationMs = isPlaying ? 0 : 300;
-    final totalDurationMs = rotationDurationMs > scaleDurationMs
-        ? rotationDurationMs
-        : scaleDurationMs;
+    // 计算旋转动画时长
+    final rotationDurationMs =
+        (rotationDistance / twoPi * 600).toInt().clamp(100, 600);
 
     final startRotation = normalizedRotation;
 
-    // 创建统一的动画控制器
+    // 创建旋转回原点的动画控制器
     _returnToOriginController = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: totalDurationMs),
+      duration: Duration(milliseconds: rotationDurationMs),
     );
 
     _returnToOriginController!.addListener(() {
       if (!mounted) return;
       setState(() {
-        // 旋转动画（如果需要）
-        if (normalizedRotation >= 0.05) {
-          final rotationProgress = rotationDurationMs > 0
-              ? (_returnToOriginController!.value *
-                      totalDurationMs /
-                      rotationDurationMs)
-                  .clamp(0.0, 1.0)
-              : 1.0;
-          _currentRotation = startRotation +
-              (targetRotation - startRotation) *
-                  Curves.easeOutCubic.transform(rotationProgress);
-        }
+        _currentRotation = startRotation +
+            (targetRotation - startRotation) *
+                Curves.easeOutCubic.transform(_returnToOriginController!.value);
       });
     });
 
@@ -406,27 +482,32 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
         _currentRotation = 0;
         _returnToOriginController?.dispose();
         _returnToOriginController = null;
-        _isAnimatingCover = false;
+
         if (mounted) {
           setState(() {});
-          // 如果正在播放，重新开始旋转
-          final isPlaying = ref.read(localMusicPlayerProvider).isPlaying;
-          if (isPlaying) {
-            _rotationAnimationController.forward(from: 0);
-            _rotationAnimationController.repeat();
-          }
+          // 旋转回原点完成后，执行封面替换动画
+          _startCoverReplaceAnimation();
         }
       }
     });
 
-    // 播放状态下不执行封面缩放动画，保持容器大小不变
-    if (!isPlaying) {
-      // 只有暂停状态下才启动封面图片缩放动画
-      _coverAnimationController.forward(from: 0);
-    }
-
     // 启动旋转回原点动画
     _returnToOriginController!.forward();
+  }
+
+  // 执行封面替换动画（淡入淡出+缩放）
+  void _startCoverReplaceAnimation() {
+    _coverAnimationController.forward(from: 0).then((_) {
+      // 封面动画完成后，清除旧封面引用并标记动画结束
+      _fadingOutAlbumArt = null;
+      _isAnimatingCover = false;
+      // 如果正在播放，重新开始旋转
+      final isPlaying = ref.read(localMusicPlayerProvider).isPlaying;
+      if (isPlaying && mounted) {
+        _rotationAnimationController.forward(from: 0);
+        _rotationAnimationController.repeat();
+      }
+    });
   }
 
   // 回到原点动画控制器
@@ -445,11 +526,21 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
     // 检测歌曲切换，触发封面动画
     if (_previousSongId != null && _previousSongId != currentSong.id) {
-      _triggerCoverAnimation(playerState.currentIndex);
+      // 传入上一张封面路径用于淡出效果（注意：此时 _previousAlbumArt 是上一首歌的封面）
+      final oldAlbumArt = _previousAlbumArt;
+      // 先更新为当前封面，再触发动画
+      _previousAlbumArt = currentSong.albumArt;
+      _triggerCoverAnimation(
+        playerState.currentIndex,
+        oldAlbumArt: oldAlbumArt,
+      );
       // 歌曲切换时，立即跳转到当前歌曲位置（无动画）
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _jumpToCurrentSong(playerState.currentIndex);
       });
+    } else {
+      // 没有切换歌曲时，更新当前封面路径
+      _previousAlbumArt = currentSong.albumArt;
     }
     _previousSongId = currentSong.id;
 
@@ -571,9 +662,10 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
             children: [
               // 顶部区域
               _buildTopSection(context, isDark, currentSong),
-              // 专辑封面
+              // 专辑封面 + 音轨信息（可左滑显示歌词）
               Expanded(
-                child: _buildAlbumArt(context, isDark, currentSong),
+                child: _buildCoverAndLyricsSection(
+                    context, isDark, currentSong, playerState),
               ),
               // 进度条
               _buildProgressBar(context, isDark, playerState),
@@ -936,6 +1028,214 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     );
   }
 
+  /// 构建封面+音轨信息/歌词区域（可左右滑动）
+  Widget _buildCoverAndLyricsSection(
+    BuildContext context,
+    bool isDark,
+    LocalSong currentSong,
+    LocalMusicPlayerState playerState,
+  ) {
+    return PageView(
+      controller: _coverLyricsPageController,
+      physics: const ClampingScrollPhysics(),
+      children: [
+        // 第一页：封面 + 音轨信息
+        _buildCoverWithTrackInfo(context, isDark, currentSong),
+        // 第二页：歌词
+        _buildLyricsPage(context, isDark, currentSong, playerState),
+      ],
+    );
+  }
+
+  /// 构建封面 + 音轨信息页面
+  Widget _buildCoverWithTrackInfo(
+      BuildContext context, bool isDark, LocalSong song) {
+    return Column(
+      children: [
+        // 专辑封面
+        Expanded(
+          child: _buildAlbumArt(context, isDark, song),
+        ),
+        // 音轨信息（带切换动画）
+        _buildTrackInfo(context, isDark, song),
+      ],
+    );
+  }
+
+  /// 构建音轨信息（格式、位深、采样率等）
+  Widget _buildTrackInfo(BuildContext context, bool isDark, LocalSong song) {
+    // 从文件路径获取格式
+    final format = _getAudioFormat(song.path);
+    // 构建音轨信息文本
+    final trackInfo = _buildTrackInfoText(
+      format,
+      song.bitDepth,
+      song.sampleRate,
+    );
+
+    // 获取音质等级信息
+    final qualityInfo = _getQualityInfo(song.bitrate);
+
+    if (trackInfo.isEmpty && qualityInfo == null) {
+      return const SizedBox(height: 20);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // 音质标签
+          if (qualityInfo != null) ...[
+            Container(
+              padding: const EdgeInsets.only(
+                left: 4,
+                right: 4,
+                top: 2.8,
+                bottom: 2.4,
+              ),
+              decoration: BoxDecoration(
+                color: qualityInfo.bgColor,
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Text(
+                qualityInfo.label,
+                style: TextStyle(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w900,
+                  color: qualityInfo.textColor,
+                  height: 1.0,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12), // 三个空格的间距
+          ],
+          // AudioTrack 信息
+          if (trackInfo.isNotEmpty)
+            Text(
+              'AudioTrack   $trackInfo',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white38 : Colors.black38,
+                letterSpacing: 1.0,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 从文件路径获取音频格式
+  String _getAudioFormat(String? path) {
+    if (path == null || path.isEmpty) return '';
+    final ext = path.split('.').last.toUpperCase();
+    switch (ext) {
+      case 'FLAC':
+        return 'FLAC';
+      case 'MP3':
+        return 'MP3';
+      case 'WAV':
+        return 'WAV';
+      case 'AAC':
+      case 'M4A':
+        return 'AAC';
+      case 'OGG':
+        return 'OGG';
+      case 'WMA':
+        return 'WMA';
+      case 'APE':
+        return 'APE';
+      case 'ALAC':
+        return 'ALAC';
+      default:
+        return ext;
+    }
+  }
+
+  /// 构建音轨信息文本
+  String _buildTrackInfoText(String format, int? bitDepth, int? sampleRate) {
+    final result = StringBuffer();
+
+    // 格式和位深
+    if (format.isNotEmpty) {
+      result.write(format);
+    }
+    if (bitDepth != null && bitDepth > 0) {
+      if (result.isNotEmpty) {
+        result.write(' ');
+      }
+      result.write('$bitDepth bits');
+    }
+
+    // 采样率与前面用三个空格分隔
+    if (sampleRate != null && sampleRate > 0) {
+      if (result.isNotEmpty) {
+        result.write('   '); // 三个空格
+      }
+      // 转换为 kHz 格式
+      final kHz = sampleRate / 1000.0;
+      if (kHz == kHz.roundToDouble()) {
+        result.write('${kHz.toInt()}kHz');
+      } else {
+        result.write('${kHz.toStringAsFixed(1)}kHz');
+      }
+    }
+
+    return result.toString();
+  }
+
+  /// 构建歌词页面
+  Widget _buildLyricsPage(
+    BuildContext context,
+    bool isDark,
+    LocalSong song,
+    LocalMusicPlayerState playerState,
+  ) {
+    final lyrics = song.lyrics;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 60, 24, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 歌词标题
+          Text(
+            '歌词',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white70 : Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // 歌词内容
+          Expanded(
+            child: lyrics != null && lyrics.isNotEmpty
+                ? SingleChildScrollView(
+                    child: Text(
+                      lyrics,
+                      style: TextStyle(
+                        fontSize: 16,
+                        height: 2.0,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  )
+                : Center(
+                    child: Text(
+                      '暂无歌词',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: isDark ? Colors.white38 : Colors.black38,
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAlbumArt(BuildContext context, bool isDark, LocalSong song) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(35, 60, 35, 0),
@@ -956,8 +1256,6 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
               angle: _currentRotation,
               child: Container(
                 decoration: BoxDecoration(
-                  color:
-                      isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
                   shape: BoxShape.circle,
                   boxShadow: [
                     // 轻微阴影
@@ -970,44 +1268,84 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                   ],
                 ),
                 child: ClipOval(
-                  // 切换歌曲时图片有缩放动画
-                  child: AnimatedBuilder(
-                    animation: _coverScaleAnimation,
-                    builder: (context, child) {
-                      return Transform.scale(
-                        scale: _coverScaleAnimation.value,
-                        child: child,
-                      );
-                    },
-                    child: song.albumArt != null &&
-                            File(song.albumArt!).existsSync()
-                        ? Image.file(
-                            File(song.albumArt!),
-                            fit: BoxFit.cover,
-                            gaplessPlayback: true,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Center(
-                                child: Icon(
-                                  CupertinoIcons.double_music_note,
-                                  size: 80,
-                                  color:
-                                      isDark ? Colors.white24 : Colors.black12,
-                                ),
-                              );
-                            },
-                          )
-                        : Center(
-                            child: Icon(
-                              CupertinoIcons.double_music_note,
-                              size: 80,
-                              color: isDark ? Colors.white24 : Colors.black12,
+                  // 切换歌曲时封面：放大+淡出 / 缩小+淡入
+                  child: Container(
+                    // 添加背景色，避免图片加载时透出页面背景
+                    color: isDark
+                        ? Colors.white10
+                        : Colors.black.withOpacity(0.05),
+                    child: AnimatedBuilder(
+                      animation: _coverAnimationController,
+                      builder: (context, child) {
+                        // 是否正在进行淡入淡出动画
+                        final isAnimating = _coverFadeAnimation.value < 1.0 &&
+                            _fadingOutAlbumArt != null;
+
+                        if (!isAnimating) {
+                          // 没有动画时，直接显示当前封面
+                          return _buildCoverImage(song.albumArt, isDark);
+                        }
+
+                        return Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            // 旧封面（放大 + 淡出）
+                            Opacity(
+                              opacity: 1.0 - _coverFadeAnimation.value,
+                              child: Transform.scale(
+                                scale: _oldCoverScaleAnimation.value,
+                                child: _buildCoverImage(
+                                    _fadingOutAlbumArt, isDark),
+                              ),
                             ),
-                          ),
+                            // 新封面（缩小 + 淡入）
+                            Opacity(
+                              opacity: _coverFadeAnimation.value,
+                              child: Transform.scale(
+                                scale: _newCoverScaleAnimation.value,
+                                child: _buildCoverImage(song.albumArt, isDark),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  // 构建封面图片
+  Widget _buildCoverImage(String? albumArt, bool isDark) {
+    if (albumArt != null &&
+        albumArt.isNotEmpty &&
+        File(albumArt).existsSync()) {
+      return Image.file(
+        File(albumArt),
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (context, error, stackTrace) {
+          return _buildPlaceholder(isDark);
+        },
+      );
+    }
+    return _buildPlaceholder(isDark);
+  }
+
+  // 构建占位符（带灰色背景）
+  Widget _buildPlaceholder(bool isDark) {
+    return Container(
+      color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+      child: Center(
+        child: Icon(
+          CupertinoIcons.double_music_note,
+          size: 80,
+          color: isDark ? Colors.white24 : Colors.black12,
         ),
       ),
     );
@@ -1145,53 +1483,53 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
           // 播放模式
           CupertinoButton(
             padding: EdgeInsets.zero,
-            minSize: 44,
+            minSize: 36,
             onPressed: () {
               ref.read(localMusicPlayerProvider.notifier).togglePlayMode();
             },
             child: Icon(
               _getPlayModeIcon(playMode),
-              size: 26,
+              size: 22,
               color: isDark ? Colors.white54 : Colors.black45,
             ),
           ),
           // 喜欢
           CupertinoButton(
             padding: EdgeInsets.zero,
-            minSize: 44,
+            minSize: 36,
             onPressed: () {
               // TODO: 添加到喜欢
             },
             child: Icon(
               CupertinoIcons.heart,
-              size: 26,
+              size: 22,
               color: isDark ? Colors.white54 : Colors.black45,
             ),
           ),
           // 播放队列
           CupertinoButton(
             padding: EdgeInsets.zero,
-            minSize: 44,
+            minSize: 36,
             onPressed: () {
               // 滚动到播放列表页面
               scrollToPlaylist();
             },
             child: Icon(
               CupertinoIcons.list_bullet,
-              size: 26,
+              size: 22,
               color: isDark ? Colors.white54 : Colors.black45,
             ),
           ),
           // 音效
           CupertinoButton(
             padding: EdgeInsets.zero,
-            minSize: 44,
+            minSize: 36,
             onPressed: () {
               // TODO: 显示音效设置
             },
             child: Icon(
               CupertinoIcons.waveform,
-              size: 26,
+              size: 22,
               color: isDark ? Colors.white54 : Colors.black45,
             ),
           ),

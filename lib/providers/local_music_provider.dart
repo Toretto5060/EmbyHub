@@ -84,6 +84,8 @@ class LocalSong {
     this.albumArt,
     this.lyrics,
     this.bitrate,
+    this.bitDepth,
+    this.sampleRate,
     this.duration,
     this.path,
   });
@@ -95,6 +97,8 @@ class LocalSong {
   final String? albumArt;
   final String? lyrics; // 歌词
   final int? bitrate; // 比特率 (kbps)
+  final int? bitDepth; // 位深 (bits)
+  final int? sampleRate; // 采样率 (Hz)
   final Duration? duration;
   final String? path;
 
@@ -108,6 +112,8 @@ class LocalSong {
       albumArt: json['albumArt'] as String?,
       lyrics: json['lyrics'] as String?,
       bitrate: json['bitrate'] as int?,
+      bitDepth: json['bitDepth'] as int?,
+      sampleRate: json['sampleRate'] as int?,
       duration: json['duration'] != null
           ? Duration(milliseconds: json['duration'] as int)
           : null,
@@ -125,9 +131,40 @@ class LocalSong {
       'albumArt': albumArt,
       'lyrics': lyrics,
       'bitrate': bitrate,
+      'bitDepth': bitDepth,
+      'sampleRate': sampleRate,
       'duration': duration?.inMilliseconds,
       'path': path,
     };
+  }
+
+  /// 复制并修改
+  LocalSong copyWith({
+    String? id,
+    String? title,
+    String? artist,
+    String? album,
+    String? albumArt,
+    String? lyrics,
+    int? bitrate,
+    int? bitDepth,
+    int? sampleRate,
+    Duration? duration,
+    String? path,
+  }) {
+    return LocalSong(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      artist: artist ?? this.artist,
+      album: album ?? this.album,
+      albumArt: albumArt ?? this.albumArt,
+      lyrics: lyrics ?? this.lyrics,
+      bitrate: bitrate ?? this.bitrate,
+      bitDepth: bitDepth ?? this.bitDepth,
+      sampleRate: sampleRate ?? this.sampleRate,
+      duration: duration ?? this.duration,
+      path: path ?? this.path,
+    );
   }
 }
 

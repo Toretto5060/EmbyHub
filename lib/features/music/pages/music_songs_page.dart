@@ -10,6 +10,42 @@ import '../../../utils/theme_utils.dart';
 /// 封面图片缓存
 final Map<String, ImageProvider> _albumArtCache = {};
 
+/// 音质信息
+class _QualityInfo {
+  final String label;
+  final Color bgColor;
+  final Color textColor;
+
+  const _QualityInfo(this.label, this.bgColor, [this.textColor = Colors.white]);
+}
+
+/// 根据码率获取音质等级信息
+/// 等级对照表：
+/// - Hi-Res: > 2000 kbps (高解析无损) - 黑底金字
+/// - HD/Lossless: 900-2000 kbps (无损音质) - 橙色底白字
+/// - HQ+: 320 kbps (超高品质) - 蓝紫色底白字
+/// - HQ: 192-256 kbps (高品质) - 绿色底白字
+/// - SQ: 128 kbps (标准音质) - 灰色底白字
+/// - < 128 kbps: 不显示
+_QualityInfo _getQualityInfo(int bitrate) {
+  if (bitrate > 2000) {
+    // Hi-Res 高解析无损 (> 2Mbps) - 黑底金字
+    return const _QualityInfo('Hi-Res', Colors.black, Color(0xFFFFD700));
+  } else if (bitrate >= 900) {
+    // HD/Lossless 无损音质 (900-2000 kbps) - 橙色
+    return const _QualityInfo('HD', Color(0xFFFFA500));
+  } else if (bitrate >= 320) {
+    // HQ+ 超高品质 (320 kbps) - 蓝紫色
+    return const _QualityInfo('HQ+', Color(0xFF7B68EE));
+  } else if (bitrate >= 192) {
+    // HQ 高品质 (192-256 kbps) - 绿色
+    return const _QualityInfo('HQ', CupertinoColors.activeGreen);
+  } else {
+    // SQ 标准音质 (128 kbps) - 灰色
+    return const _QualityInfo('SQ', CupertinoColors.systemGrey);
+  }
+}
+
 /// 滚动文字组件 - 当文字超出宽度时自动滚动
 class _MarqueeText extends StatefulWidget {
   const _MarqueeText({
@@ -592,32 +628,36 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                             const SizedBox(height: 4),
                             Row(
                               children: [
-                                // 音质标签
+                                // 音质标签 (SQ以下不显示)
                                 if (song.bitrate != null &&
-                                    song.bitrate! > 96) ...[
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                      vertical: 1,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: song.bitrate! > 256
-                                          ? CupertinoColors.activeBlue
-                                              .withOpacity(0.15)
-                                          : CupertinoColors.activeGreen
-                                              .withOpacity(0.15),
-                                      borderRadius: BorderRadius.circular(3),
-                                    ),
-                                    child: Text(
-                                      song.bitrate! > 256 ? 'SQ' : 'HQ',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                        color: song.bitrate! > 256
-                                            ? CupertinoColors.activeBlue
-                                            : CupertinoColors.activeGreen,
-                                      ),
-                                    ),
+                                    song.bitrate! >= 128) ...[
+                                  Builder(
+                                    builder: (context) {
+                                      final qualityInfo =
+                                          _getQualityInfo(song.bitrate!);
+                                      return Container(
+                                        padding: const EdgeInsets.only(
+                                          left: 4,
+                                          right: 4,
+                                          top: 2.8,
+                                          bottom: 2.4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: qualityInfo.bgColor,
+                                          borderRadius:
+                                              BorderRadius.circular(3),
+                                        ),
+                                        child: Text(
+                                          qualityInfo.label,
+                                          style: TextStyle(
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.w900,
+                                            color: qualityInfo.textColor,
+                                            height: 1.0,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
                                   const SizedBox(width: 6),
                                 ],

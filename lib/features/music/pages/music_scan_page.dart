@@ -840,6 +840,8 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
             String? lyrics;
             int durationSeconds = estimatedDurationSeconds.toInt();
             int? bitrate;
+            int? bitDepth;
+            int? sampleRate;
 
             if (nameWithoutExt.contains(' - ')) {
               final parts = nameWithoutExt.split(' - ');
@@ -884,6 +886,11 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
               // 读取元数据失败，使用默认值
             }
 
+            // 解析文件头获取位深和采样率
+            final audioInfo = await _parseAudioFileHeader(entity.path);
+            bitDepth = audioInfo['bitDepth'];
+            sampleRate = audioInfo['sampleRate'];
+
             // 如果没有从元数据获取到比特率，根据文件大小估算
             if (bitrate == null && durationSeconds > 0) {
               bitrate = ((stat.size * 8) / (durationSeconds * 1000)).round();
@@ -900,6 +907,8 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
               albumArt: albumArtPath,
               lyrics: lyrics,
               bitrate: bitrate,
+              bitDepth: bitDepth,
+              sampleRate: sampleRate,
               path: entity.path,
               duration: Duration(seconds: durationSeconds),
             );
@@ -973,5 +982,154 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
       debugPrint('保存封面失败: $e');
       return null;
     }
+  }
+
+  /// 解析音频文件头获取位深和采样率
+  Future<Map<String, int?>> _parseAudioFileHeader(String filePath) async {
+    int? bitDepth;
+    int? sampleRate;
+
+    try {
+      final file = File(filePath);
+      final raf = await file.open(mode: FileMode.read);
+
+      try {
+        final ext = filePath.toLowerCase();
+
+        if (ext.endsWith('.flac')) {
+          // 解析 FLAC 文件头
+          // FLAC 文件以 "fLaC" 开头
+          final header = await raf.read(4);
+          if (header.length == 4 &&
+              header[0] == 0x66 && // 'f'
+              header[1] == 0x4C && // 'L'
+              header[2] == 0x61 && // 'a'
+              header[3] == 0x43) {
+            // 'C'
+            // 读取 METADATA_BLOCK_HEADER
+            final metaHeader = await raf.read(4);
+            if (metaHeader.length == 4) {
+              // 获取 block 类型和长度
+              final blockType = metaHeader[0] & 0x7F;
+              final blockLength =
+                  (metaHeader[1] << 16) | (metaHeader[2] << 8) | metaHeader[3];
+
+              if (blockType == 0 && blockLength >= 18) {
+                // STREAMINFO block
+                final streamInfo = await raf.read(18);
+                if (streamInfo.length >= 18) {
+                  // 采样率: bits 80-99 (20 bits)
+                  // 位于 byte 10-12
+                  sampleRate = (streamInfo[10] << 12) |
+                      (streamInfo[11] << 4) |
+                      ((streamInfo[12] & 0xF0) >> 4);
+
+                  // 位深: bits 103-107 (5 bits) + 1
+                  // 位于 byte 12 的低 1 位和 byte 13 的高 4 位
+                  bitDepth = (((streamInfo[12] & 0x01) << 4) |
+                          ((streamInfo[13] & 0xF0) >> 4)) +
+                      1;
+                }
+              }
+            }
+          }
+        } else if (ext.endsWith('.wav')) {
+          // 解析 WAV 文件头
+          // WAV 文件以 "RIFF" 开头
+          final riff = await raf.read(12);
+          if (riff.length == 12 &&
+              riff[0] == 0x52 && // 'R'
+              riff[1] == 0x49 && // 'I'
+              riff[2] == 0x46 && // 'F'
+              riff[3] == 0x46 && // 'F'
+              riff[8] == 0x57 && // 'W'
+              riff[9] == 0x41 && // 'A'
+              riff[10] == 0x56 && // 'V'
+              riff[11] == 0x45) {
+            // 'E'
+            // 查找 "fmt " chunk
+            while (await raf.position() < await raf.length() - 8) {
+              final chunkHeader = await raf.read(8);
+              if (chunkHeader.length < 8) break;
+
+              final chunkId = String.fromCharCodes(chunkHeader.sublist(0, 4));
+              final chunkSize = chunkHeader[4] |
+                  (chunkHeader[5] << 8) |
+                  (chunkHeader[6] << 16) |
+                  (chunkHeader[7] << 24);
+
+              if (chunkId == 'fmt ') {
+                final fmtData = await raf.read(chunkSize);
+                if (fmtData.length >= 16) {
+                  // 采样率: bytes 4-7 (little endian)
+                  sampleRate = fmtData[4] |
+                      (fmtData[5] << 8) |
+                      (fmtData[6] << 16) |
+                      (fmtData[7] << 24);
+                  // 位深: bytes 14-15 (little endian)
+                  bitDepth = fmtData[14] | (fmtData[15] << 8);
+                }
+                break;
+              } else {
+                // 跳过这个 chunk
+                await raf.setPosition(await raf.position() + chunkSize);
+              }
+            }
+          }
+        } else if (ext.endsWith('.aiff') || ext.endsWith('.aif')) {
+          // 解析 AIFF 文件头
+          final form = await raf.read(12);
+          if (form.length == 12 &&
+              form[0] == 0x46 && // 'F'
+              form[1] == 0x4F && // 'O'
+              form[2] == 0x52 && // 'R'
+              form[3] == 0x4D) {
+            // 'M'
+            // 查找 "COMM" chunk
+            while (await raf.position() < await raf.length() - 8) {
+              final chunkHeader = await raf.read(8);
+              if (chunkHeader.length < 8) break;
+
+              final chunkId = String.fromCharCodes(chunkHeader.sublist(0, 4));
+              final chunkSize = (chunkHeader[4] << 24) |
+                  (chunkHeader[5] << 16) |
+                  (chunkHeader[6] << 8) |
+                  chunkHeader[7];
+
+              if (chunkId == 'COMM') {
+                final commData = await raf.read(chunkSize);
+                if (commData.length >= 18) {
+                  // 位深: bytes 6-7 (big endian)
+                  bitDepth = (commData[6] << 8) | commData[7];
+                  // 采样率: bytes 8-17 (80-bit extended precision)
+                  // 简化处理：只读取整数部分
+                  final exp = ((commData[8] & 0x7F) << 8) | commData[9];
+                  final mantissa = (commData[10] << 24) |
+                      (commData[11] << 16) |
+                      (commData[12] << 8) |
+                      commData[13];
+                  if (exp > 0) {
+                    sampleRate = (mantissa >> (16414 - exp)).toInt();
+                  }
+                }
+                break;
+              } else {
+                // 跳过这个 chunk
+                final skipSize = chunkSize + (chunkSize % 2); // AIFF 需要对齐
+                await raf.setPosition(await raf.position() + skipSize);
+              }
+            }
+          }
+        }
+        // MP3, AAC, OGG 等压缩格式通常不存储原始位深
+        // 它们使用可变比特率，位深概念不同
+      } finally {
+        await raf.close();
+      }
+    } catch (e) {
+      // 解析失败，返回空值
+    }
+
+    return {'bitDepth': bitDepth, 'sampleRate': sampleRate};
   }
 }
