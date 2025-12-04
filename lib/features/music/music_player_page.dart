@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -153,17 +154,21 @@ class _MarqueeTextState extends State<_MarqueeText> {
 class MusicPlayerPage extends ConsumerStatefulWidget {
   const MusicPlayerPage({
     required this.onCollapseWithOffset,
+    this.initialPage = 0,
     super.key,
   });
 
   /// 折叠回调，参数为当前拖拽偏移量
   final void Function(double dragOffset) onCollapseWithOffset;
 
+  /// 初始页面：0=播放页面，1=播放列表
+  final int initialPage;
+
   @override
-  ConsumerState<MusicPlayerPage> createState() => _MusicPlayerPageState();
+  ConsumerState<MusicPlayerPage> createState() => MusicPlayerPageState();
 }
 
-class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
+class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     with TickerProviderStateMixin {
   double _dragOffset = 0;
   late AnimationController _resetAnimationController;
@@ -190,9 +195,17 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   late AnimationController _containerScaleController;
   late Animation<double> _containerScaleAnimation;
 
+  // 页面控制器（用于播放页面和播放列表之间切换）
+  late PageController _pageController;
+
+  // 播放列表滚动控制器
+  final ScrollController _playlistScrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: widget.initialPage);
+
     _resetAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
@@ -267,7 +280,27 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     _returnToOriginController?.dispose();
     _songInfoSlideController.dispose();
     _containerScaleController.dispose();
+    _pageController.dispose();
+    _playlistScrollController.dispose();
     super.dispose();
+  }
+
+  /// 滚动到播放列表页面
+  void scrollToPlaylist() {
+    _pageController.animateToPage(
+      1,
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  /// 滚动到播放页面
+  void scrollToPlayer() {
+    _pageController.animateToPage(
+      0,
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _animateToTop() {
@@ -487,26 +520,88 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
       }
     }
 
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: isDark
+              ? [
+                  const Color(0xFF1A1A2E),
+                  const Color(0xFF0A0A0A),
+                ]
+              : [
+                  const Color(0xFFE8E8F0),
+                  const Color(0xFFF8F8F8),
+                ],
+        ),
+      ),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          // 监听 PageView 的过度滚动（在第一页向下拉）
+          if (notification is OverscrollNotification) {
+            if (notification.overscroll < 0 &&
+                (_pageController.page ?? 0) < 0.1) {
+              // 在第一页向下过度滚动，开始下拉折叠
+              setState(() {
+                _dragOffset -= notification.overscroll;
+                _isDraggingDown = true;
+              });
+              return true;
+            }
+          } else if (notification is ScrollUpdateNotification) {
+            // 如果正在下拉且有偏移，继续处理
+            if (_isDraggingDown && _dragOffset > 0) {
+              if (notification.scrollDelta != null &&
+                  notification.scrollDelta! < 0) {
+                setState(() {
+                  _dragOffset -= notification.scrollDelta!;
+                });
+                return true;
+              }
+            }
+          } else if (notification is ScrollEndNotification) {
+            // 滚动结束时处理折叠逻辑
+            if (_isDraggingDown && _dragOffset > 0) {
+              _isDraggingDown = false;
+              if (_dragOffset > 100) {
+                widget.onCollapseWithOffset(_dragOffset);
+              } else {
+                _animateToTop();
+              }
+              return true;
+            }
+            _isDraggingDown = false;
+          }
+          return false;
+        },
+        child: PageView(
+          controller: _pageController,
+          scrollDirection: Axis.vertical,
+          physics: const _FastPageScrollPhysics(),
+          children: [
+            // 第一屏：播放页面
+            _buildPlayerPage(context, isDark, playerState, currentSong),
+            // 第二屏：播放列表
+            _buildPlaylistPage(context, isDark, playerState),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 是否正在处理下拉手势
+  bool _isDraggingDown = false;
+
+  /// 构建播放页面（第一屏）
+  Widget _buildPlayerPage(
+    BuildContext context,
+    bool isDark,
+    LocalMusicPlayerState playerState,
+    LocalSong currentSong,
+  ) {
     return GestureDetector(
-      onVerticalDragUpdate: (details) {
-        setState(() {
-          _dragOffset += details.delta.dy;
-          if (_dragOffset < 0) _dragOffset = 0;
-        });
-      },
-      onVerticalDragEnd: (details) {
-        // 如果下拉超过 150 或速度足够快，则折叠
-        if (_dragOffset > 150 ||
-            (details.primaryVelocity != null &&
-                details.primaryVelocity! > 500)) {
-          // 传递当前拖拽偏移量，让动画从当前位置开始
-          widget.onCollapseWithOffset(_dragOffset);
-          // 不重置 _dragOffset，让父组件控制
-        } else {
-          // 未触发折叠，动画恢复到顶部
-          _animateToTop();
-        }
-      },
+      behavior: HitTestBehavior.translucent,
       onHorizontalDragEnd: (details) {
         // 侧滑返回
         if (details.primaryVelocity != null &&
@@ -516,41 +611,222 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
       },
       child: Transform.translate(
         offset: Offset(0, _dragOffset),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: isDark
-                  ? [
-                      const Color(0xFF1A1A2E),
-                      const Color(0xFF0A0A0A),
-                    ]
-                  : [
-                      const Color(0xFFE8E8F0),
-                      const Color(0xFFF8F8F8),
-                    ],
-            ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // 顶部区域
+              _buildTopSection(context, isDark, currentSong),
+              // 专辑封面
+              Expanded(
+                child: _buildAlbumArt(context, isDark, currentSong),
+              ),
+              // 进度条
+              _buildProgressBar(context, isDark, playerState),
+              // 控制按钮
+              _buildControls(context, isDark, playerState),
+              // 底部额外操作
+              _buildBottomActions(context, isDark),
+              const SizedBox(height: 24),
+            ],
           ),
-          child: SafeArea(
-            child: Column(
-              children: [
-                // 顶部：歌曲信息 + 更多按钮
-                _buildTopSection(context, isDark, currentSong),
-                // 专辑封面
-                Expanded(
-                  child: _buildAlbumArt(context, isDark, currentSong),
-                ),
-                // 进度条
-                _buildProgressBar(context, isDark, playerState),
-                // 控制按钮
-                _buildControls(context, isDark, playerState),
-                // 底部额外操作
-                _buildBottomActions(context, isDark),
-                const SizedBox(height: 24),
-              ],
+        ),
+      ),
+    );
+  }
+
+  // 是否允许列表滚动（当在顶部下拉时禁用，让 PageView 接管）
+  bool _allowListScroll = true;
+
+  /// 构建播放列表页面（第二屏）
+  Widget _buildPlaylistPage(
+    BuildContext context,
+    bool isDark,
+    LocalMusicPlayerState playerState,
+  ) {
+    return GestureDetector(
+      onVerticalDragStart: (details) {
+        // 检查是否在列表顶部
+        if (_playlistScrollController.hasClients &&
+            _playlistScrollController.offset <= 0) {
+          // 在顶部，准备让 PageView 接管
+          _allowListScroll = false;
+        } else {
+          _allowListScroll = true;
+        }
+      },
+      onVerticalDragUpdate: (details) {
+        if (!_allowListScroll && details.delta.dy > 0) {
+          // 在顶部下拉，手动滚动 PageView
+          _pageController.position.moveTo(
+            _pageController.position.pixels - details.delta.dy,
+          );
+        }
+      },
+      onVerticalDragEnd: (details) {
+        if (!_allowListScroll) {
+          // 根据速度和位置决定是否切换页面
+          final velocity = details.primaryVelocity ?? 0;
+          final page = _pageController.page ?? 1;
+
+          if (velocity > 300 || page < 0.5) {
+            // 快速下拉或已经过半，切换到第一屏
+            scrollToPlayer();
+          } else {
+            // 恢复到第二屏
+            scrollToPlaylist();
+          }
+          _allowListScroll = true;
+        }
+      },
+      child: SafeArea(
+        child: Column(
+          children: [
+            // 标题栏
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              child: Row(
+                children: [
+                  Text(
+                    '播放队列',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${playerState.playlist.length} 首歌曲',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? Colors.white54 : Colors.black45,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+            // 播放列表
+            Expanded(
+              child: ListView.builder(
+                controller: _playlistScrollController,
+                physics: _allowListScroll
+                    ? const AlwaysScrollableScrollPhysics()
+                    : const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                itemCount: playerState.playlist.length,
+                itemBuilder: (context, index) {
+                  final song = playerState.playlist[index];
+                  final isCurrentSong = playerState.currentIndex == index;
+
+                  return CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: () {
+                      ref.read(localMusicPlayerProvider.notifier).setPlaylist(
+                            playerState.playlist,
+                            startIndex: index,
+                          );
+                      // 切换歌曲后滚动回播放页面
+                      scrollToPlayer();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                      color: isCurrentSong
+                          ? CupertinoColors.activeBlue.withOpacity(0.1)
+                          : Colors.transparent,
+                      child: Row(
+                        children: [
+                          // 封面
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white10
+                                  : Colors.black.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: song.albumArt != null &&
+                                    File(song.albumArt!).existsSync()
+                                ? Image.file(
+                                    File(song.albumArt!),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Icon(
+                                        CupertinoIcons.double_music_note,
+                                        size: 20,
+                                        color: isDark
+                                            ? Colors.white38
+                                            : Colors.black26,
+                                      );
+                                    },
+                                  )
+                                : Icon(
+                                    CupertinoIcons.double_music_note,
+                                    size: 20,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black26,
+                                  ),
+                          ),
+                          const SizedBox(width: 12),
+                          // 歌曲信息
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  song.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: isCurrentSong
+                                        ? FontWeight.w600
+                                        : FontWeight.normal,
+                                    color: isCurrentSong
+                                        ? CupertinoColors.activeBlue
+                                        : (isDark
+                                            ? Colors.white
+                                            : Colors.black87),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  song.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: isDark
+                                        ? Colors.white54
+                                        : Colors.black45,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // 播放指示器
+                          if (isCurrentSong)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: Icon(
+                                playerState.isPlaying
+                                    ? CupertinoIcons.waveform
+                                    : CupertinoIcons.pause_fill,
+                                size: 18,
+                                color: CupertinoColors.activeBlue,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -886,7 +1162,8 @@ class _MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
             padding: EdgeInsets.zero,
             minSize: 44,
             onPressed: () {
-              // TODO: 显示播放队列
+              // 滚动到播放列表页面
+              scrollToPlaylist();
             },
             child: Icon(
               CupertinoIcons.list_bullet,
@@ -1036,6 +1313,29 @@ class _PlayPauseButtonState extends State<_PlayPauseButton>
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 自定义快速 PageView 滚动物理效果
+class _FastPageScrollPhysics extends PageScrollPhysics {
+  const _FastPageScrollPhysics({super.parent});
+
+  @override
+  _FastPageScrollPhysics applyTo(ScrollPhysics? ancestor) {
+    return _FastPageScrollPhysics(parent: buildParent(ancestor));
+  }
+
+  @override
+  SpringDescription get spring {
+    // 使用临界阻尼公式：damping = 2 * sqrt(mass * stiffness)
+    const mass = 1.0;
+    const stiffness = 500.0;
+    final criticalDamping = 2 * sqrt(mass * stiffness);
+    return SpringDescription(
+      mass: mass,
+      stiffness: stiffness,
+      damping: criticalDamping,
     );
   }
 }

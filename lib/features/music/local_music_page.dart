@@ -52,12 +52,18 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   // 是否已经检查过初始展开状态
   bool _hasCheckedInitialExpand = false;
 
+  // 播放器页面的 GlobalKey，用于控制滚动到播放列表
+  final GlobalKey<MusicPlayerPageState> _playerPageKey = GlobalKey();
+
+  // 展开播放器时是否直接显示播放列表
+  int _initialPlayerPage = 0;
+
   @override
   void initState() {
     super.initState();
     _playerAnimationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 350),
+      duration: const Duration(milliseconds: 150),
     );
     _playerAnimation = CurvedAnimation(
       parent: _playerAnimationController,
@@ -103,7 +109,7 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     _scaffoldKey.currentState?.openDrawer();
   }
 
-  void _expandPlayer() {
+  void _expandPlayer({bool showPlaylist = false}) {
     // 只有当有歌曲时才展开播放器
     final currentSong = ref.read(localMusicPlayerProvider).currentSong;
     if (currentSong == null) return;
@@ -111,6 +117,7 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     setState(() {
       _isPlayerExpanded = true;
       _hasCheckedInitialExpand = true;
+      _initialPlayerPage = showPlaylist ? 1 : 0;
     });
     ref.read(musicPlayerExpandedProvider.notifier).state = true;
     // 正常播放展开动画
@@ -131,13 +138,6 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     final screenHeight = MediaQuery.of(context).size.height;
     final startValue = 1.0 - (dragOffset / screenHeight);
 
-    // 根据剩余距离计算动画时长，让动画更跟手
-    // 剩余距离越小，动画时长越短
-    final remainingDistance = screenHeight - dragOffset;
-    final duration =
-        (remainingDistance / screenHeight * 250).clamp(100, 250).toInt();
-    _playerAnimationController.duration = Duration(milliseconds: duration);
-
     // 从当前位置开始动画
     _playerAnimationController.value = startValue.clamp(0.0, 1.0);
     _playerAnimationController.reverse().then((_) {
@@ -145,8 +145,6 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
         setState(() {
           _isPlayerExpanded = false;
         });
-        // 恢复默认动画时长
-        _playerAnimationController.duration = const Duration(milliseconds: 350);
       }
     });
   }
@@ -217,6 +215,16 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     ref.listen<int>(expandPlayerTriggerProvider, (previous, next) {
       if (!_isPlayerExpanded && previous != next && _hasCheckedInitialExpand) {
         _expandPlayer();
+      }
+    });
+
+    // 监听展开播放页面并显示播放列表的请求
+    ref.listen<int>(expandToPlaylistTriggerProvider, (previous, next) {
+      if (!_isPlayerExpanded && previous != next) {
+        _expandPlayer(showPlaylist: true);
+      } else if (_isPlayerExpanded && previous != next) {
+        // 如果已经展开，直接滚动到播放列表
+        _playerPageKey.currentState?.scrollToPlaylist();
       }
     });
 
@@ -308,7 +316,9 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
                           (1 - _playerAnimation.value),
                     ),
                     child: MusicPlayerPage(
+                      key: _playerPageKey,
                       onCollapseWithOffset: _collapsePlayerWithOffset,
+                      initialPage: _initialPlayerPage,
                     ),
                   ),
                 );

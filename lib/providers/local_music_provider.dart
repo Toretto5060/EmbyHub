@@ -588,6 +588,9 @@ final expandPlayerTriggerProvider = StateProvider<int>((ref) => 0);
 /// 展开播放页面时是否跳过动画（用于初始化直接进入全屏播放器）
 final skipExpandAnimationProvider = StateProvider<bool>((ref) => false);
 
+/// 请求展开播放页面并直接显示播放列表的触发器
+final expandToPlaylistTriggerProvider = StateProvider<int>((ref) => 0);
+
 /// ✅ 静态标记：是否需要初始展开播放器（在路由创建时设置，在第一帧就可以访问）
 /// 这个变量用于解决 Provider 在 widget 构建期间无法修改的问题
 class InitialExpandMarker {

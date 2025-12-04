@@ -154,13 +154,17 @@ class MusicMiniPlayer extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    // 播放队列按钮
+                    // 播放队列按钮 - 展开播放器并显示播放列表
                     CupertinoButton(
                       padding: EdgeInsets.zero,
                       minSize: 44,
                       onPressed: hasCurrentSong
                           ? () {
-                              _showPlayQueue(context, ref, isDark);
+                              // 触发展开播放器并显示播放列表
+                              ref
+                                  .read(
+                                      expandToPlaylistTriggerProvider.notifier)
+                                  .state++;
                             }
                           : null,
                       child: Icon(
@@ -176,147 +180,6 @@ class MusicMiniPlayer extends ConsumerWidget {
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  void _showPlayQueue(BuildContext context, WidgetRef ref, bool isDark) {
-    final playerState = ref.read(localMusicPlayerProvider);
-
-    showCupertinoModalPopup(
-      context: context,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.6,
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        child: Column(
-          children: [
-            // 标题栏
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: isDark ? Colors.white10 : Colors.black12,
-                    width: 0.5,
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Text(
-                    '播放队列',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '${playerState.playlist.length} 首歌曲',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isDark ? Colors.white54 : Colors.black45,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // 播放列表
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: playerState.playlist.length,
-                itemBuilder: (context, index) {
-                  final song = playerState.playlist[index];
-                  final isCurrentSong = playerState.currentIndex == index;
-
-                  return CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: () {
-                      ref.read(localMusicPlayerProvider.notifier).setPlaylist(
-                            playerState.playlist,
-                            startIndex: index,
-                          );
-                      Navigator.of(context).pop();
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      color: isCurrentSong
-                          ? CupertinoColors.activeBlue.withOpacity(0.1)
-                          : Colors.transparent,
-                      child: Row(
-                        children: [
-                          // 播放指示器
-                          SizedBox(
-                            width: 24,
-                            child: isCurrentSong
-                                ? Icon(
-                                    playerState.isPlaying
-                                        ? CupertinoIcons.waveform
-                                        : CupertinoIcons.pause_fill,
-                                    size: 16,
-                                    color: CupertinoColors.activeBlue,
-                                  )
-                                : Text(
-                                    '${index + 1}',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: isDark
-                                          ? Colors.white38
-                                          : Colors.black38,
-                                    ),
-                                  ),
-                          ),
-                          const SizedBox(width: 12),
-                          // 歌曲信息
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  song.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: isCurrentSong
-                                        ? FontWeight.w600
-                                        : FontWeight.normal,
-                                    color: isCurrentSong
-                                        ? CupertinoColors.activeBlue
-                                        : (isDark
-                                            ? Colors.white
-                                            : Colors.black87),
-                                  ),
-                                ),
-                                Text(
-                                  song.artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: isDark
-                                        ? Colors.white54
-                                        : Colors.black45,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
         ),
       ),
     );
