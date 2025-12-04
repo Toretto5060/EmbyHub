@@ -206,6 +206,9 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     super.initState();
     _pageController = PageController(initialPage: widget.initialPage);
 
+    // 监听页面切换，当离开第二屏时滚动到当前歌曲
+    _pageController.addListener(_onPageChanged);
+
     _resetAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
@@ -274,6 +277,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
   @override
   void dispose() {
+    _pageController.removeListener(_onPageChanged);
     _resetAnimationController.dispose();
     _coverAnimationController.dispose();
     _rotationAnimationController.dispose();
@@ -283,6 +287,11 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     _pageController.dispose();
     _playlistScrollController.dispose();
     super.dispose();
+  }
+
+  /// 页面切换监听（保留用于将来扩展）
+  void _onPageChanged() {
+    // 当前不需要额外处理，歌曲切换时已经跳转到正确位置
   }
 
   /// 滚动到播放列表页面
@@ -496,6 +505,10 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     // 检测歌曲切换，触发封面动画
     if (_previousSongId != null && _previousSongId != currentSong.id) {
       _triggerCoverAnimation(playerState.currentIndex);
+      // 歌曲切换时，立即跳转到当前歌曲位置（无动画）
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _jumpToCurrentSong(playerState.currentIndex);
+      });
     }
     _previousSongId = currentSong.id;
 
@@ -579,6 +592,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
           controller: _pageController,
           scrollDirection: Axis.vertical,
           physics: const _FastPageScrollPhysics(),
+          allowImplicitScrolling: true, // 预渲染相邻页面，让 ScrollController 有 clients
           children: [
             // 第一屏：播放页面
             _buildPlayerPage(context, isDark, playerState, currentSong),
@@ -637,6 +651,52 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   // 是否允许列表滚动（当在顶部下拉时禁用，让 PageView 接管）
   bool _allowListScroll = true;
 
+  /// 显示清除队列确认对话框
+  void _showClearQueueDialog(BuildContext context, bool isDark) {
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('清除播放队列'),
+        content: const Text('确认清除将停止播放当前曲目并清空当前队列。是否清除？'),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('取消'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            child: const Text('清除'),
+            onPressed: () {
+              Navigator.of(context).pop();
+              // 停止播放并清空队列
+              ref.read(localMusicPlayerProvider.notifier).stop();
+              // 返回到第一屏
+              scrollToPlayer();
+              // 折叠播放器
+              widget.onCollapseWithOffset(0);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 直接跳转到当前播放的歌曲（无动画）
+  void _jumpToCurrentSong(int currentIndex) {
+    if (!_playlistScrollController.hasClients) return;
+
+    // 每个列表项的高度约为 72 (48 封面高度 + 24 padding)
+    const itemHeight = 72.0;
+    final targetOffset = currentIndex * itemHeight;
+
+    // 确保不超出滚动范围
+    final maxOffset = _playlistScrollController.position.maxScrollExtent;
+    final clampedOffset = targetOffset.clamp(0.0, maxOffset);
+
+    // 直接跳转，无动画
+    _playlistScrollController.jumpTo(clampedOffset);
+  }
+
   /// 构建播放列表页面（第二屏）
   Widget _buildPlaylistPage(
     BuildContext context,
@@ -683,23 +743,49 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
           children: [
             // 标题栏
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
-                  Text(
-                    '播放队列',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
+                  // 左侧：当前歌曲位置
+                  SizedBox(
+                    width: 70,
+                    child: Text(
+                      '${playerState.currentIndex + 1}/${playerState.playlist.length}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDark ? Colors.white54 : Colors.black45,
+                      ),
                     ),
                   ),
-                  const Spacer(),
-                  Text(
-                    '${playerState.playlist.length} 首歌曲',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isDark ? Colors.white54 : Colors.black45,
+                  // 中间：标题
+                  Expanded(
+                    child: Text(
+                      '播放队列',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  ),
+                  // 右侧：清除按钮
+                  SizedBox(
+                    width: 70,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        minSize: 32,
+                        onPressed: () => _showClearQueueDialog(context, isDark),
+                        child: Text(
+                          '清除',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: CupertinoColors.destructiveRed,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ],
