@@ -13,6 +13,69 @@ const String _lastPlaylistKey = 'last_playlist';
 const String _lastPlaylistIndexKey = 'last_playlist_index';
 const String _playModeKey = 'play_mode';
 
+/// LRC 歌词行数据（用于车载蓝牙歌词显示）
+class _LyricLine {
+  final Duration time;
+  final String text;
+
+  const _LyricLine(this.time, this.text);
+}
+
+/// 解析 LRC 歌词
+List<_LyricLine> _parseLrc(String lrc) {
+  final lines = <_LyricLine>[];
+  final regex = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)');
+
+  for (final line in lrc.split('\n')) {
+    final match = regex.firstMatch(line.trim());
+    if (match != null) {
+      final minutes = int.parse(match.group(1)!);
+      final seconds = int.parse(match.group(2)!);
+      final msStr = match.group(3)!;
+      // 处理两位或三位毫秒
+      final milliseconds =
+          msStr.length == 2 ? int.parse(msStr) * 10 : int.parse(msStr);
+      final text = match.group(4)?.trim() ?? '';
+
+      // 跳过空歌词行
+      if (text.isNotEmpty) {
+        // 清理双语歌词中的分隔符，只保留第一行（主歌词）
+        final cleanText = _cleanLyricForBluetooth(text);
+        if (cleanText.isNotEmpty) {
+          lines.add(_LyricLine(
+            Duration(
+              minutes: minutes,
+              seconds: seconds,
+              milliseconds: milliseconds,
+            ),
+            cleanText,
+          ));
+        }
+      }
+    }
+  }
+
+  // 按时间排序
+  lines.sort((a, b) => a.time.compareTo(b.time));
+  return lines;
+}
+
+/// 清理歌词用于蓝牙显示（只保留主歌词，去除翻译）
+String _cleanLyricForBluetooth(String text) {
+  // 如果包含换行符，只取第一行
+  if (text.contains('\n')) {
+    return text.split('\n').first.trim();
+  }
+  // 如果包含分隔符，只取第一部分
+  if (text.contains(' / ')) {
+    return text.split(' / ').first.trim();
+  }
+  if (text.contains('|')) {
+    return text.split('|').first.trim();
+  }
+  return text;
+}
+
 /// 播放模式枚举
 enum PlayMode {
   /// 列表循环：播放完最后一首后从第一首开始
@@ -200,6 +263,12 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   /// 已播放过的歌曲索引集合（用于优先播放未播放的歌曲）
   final Set<int> _playedIndices = {};
 
+  /// 当前歌曲的解析后歌词（用于车载蓝牙显示）
+  List<_LyricLine>? _parsedLyrics;
+
+  /// 上一次发送的歌词索引（避免重复发送）
+  int _lastSentLyricIndex = -1;
+
   /// 初始化播放器
   Future<void> _initializePlayer() async {
     // 仅在 Android 平台使用 ExoPlayer
@@ -235,6 +304,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       if (newPositionSec != oldPositionSec && state.isPlaying) {
         _savePlayingState();
       }
+
+      // 更新车载蓝牙歌词（每次位置更新时检查）
+      _updateBluetoothLyric(playerState.position);
     });
 
     // 监听曲目切换（自动播放下一首时触发）
@@ -251,6 +323,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
           isNextDirection: isNext,
         );
         _savePlayingState();
+
+        // 解析新歌曲的歌词（用于车载蓝牙显示）
+        _parseLyricsForCurrentSong();
       }
     });
 
@@ -380,6 +455,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
       // 将当前歌曲添加到随机播放历史记录（用于上一首功能）
       _addToShuffleHistory(startIndex);
+
+      // 解析当前歌曲的歌词（用于车载蓝牙显示）
+      _parseLyricsForCurrentSong();
     }
   }
 
@@ -554,6 +632,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         );
       }
     }
+
+    // 解析当前歌曲的歌词（用于车载蓝牙显示）
+    _parseLyricsForCurrentSong();
 
     _savePlayingState();
   }
@@ -878,6 +959,44 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   /// 清除播放列表的持久化缓存（公开方法）
   Future<void> clearSavedPlaylist() async {
     await _clearSavedState();
+  }
+
+  /// 解析当前歌曲的歌词（用于车载蓝牙显示）
+  void _parseLyricsForCurrentSong() {
+    final lyrics = state.currentSong?.lyrics;
+    if (lyrics != null && lyrics.isNotEmpty) {
+      _parsedLyrics = _parseLrc(lyrics);
+      _lastSentLyricIndex = -1;
+      // 立即发送第一句歌词（如果有的话）
+      _updateBluetoothLyric(state.position);
+    } else {
+      _parsedLyrics = null;
+      _lastSentLyricIndex = -1;
+      // 清空蓝牙歌词显示
+      _player?.updateLyric('');
+    }
+  }
+
+  /// 更新车载蓝牙歌词
+  void _updateBluetoothLyric(Duration position) {
+    final lyrics = _parsedLyrics;
+    if (lyrics == null || lyrics.isEmpty) return;
+
+    // 查找当前应该显示的歌词
+    int currentIndex = -1;
+    for (int i = lyrics.length - 1; i >= 0; i--) {
+      if (position >= lyrics[i].time) {
+        currentIndex = i;
+        break;
+      }
+    }
+
+    // 如果歌词索引变化了，发送新歌词
+    if (currentIndex != _lastSentLyricIndex && currentIndex >= 0) {
+      _lastSentLyricIndex = currentIndex;
+      final lyricText = lyrics[currentIndex].text;
+      _player?.updateLyric(lyricText);
+    }
   }
 
   @override

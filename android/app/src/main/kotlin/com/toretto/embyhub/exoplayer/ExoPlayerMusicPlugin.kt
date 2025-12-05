@@ -73,6 +73,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var currentCoverUrl: String? = null
     private var currentCoverBitmap: Bitmap? = null
     
+    // 当前歌词（用于车载蓝牙显示）
+    private var currentLyric: String = ""
+    
     // 播放列表
     private var playlist: MutableList<MediaItem> = mutableListOf()
     private var playlistMetadata: MutableList<Map<String, Any?>> = mutableListOf()
@@ -373,6 +376,14 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 updateMediaSessionMetadata()
                 updateNotification()
+                result.success(null)
+            }
+            
+            "updateLyric" -> {
+                // 更新当前歌词（用于车载蓝牙显示）
+                val lyric = call.argument<String>("lyric") ?: ""
+                currentLyric = lyric
+                updateMediaSessionMetadata()
                 result.success(null)
             }
             
@@ -1259,9 +1270,17 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         val duration = if (p.duration == C.TIME_UNSET) 0L else p.duration
         
+        // 如果有歌词，将歌词作为副标题显示（用于车载蓝牙）
+        // 格式：艺术家名 或 艺术家名 · 歌词
+        val displayArtist = if (currentLyric.isNotEmpty()) {
+            "$currentArtist · $currentLyric"
+        } else {
+            currentArtist
+        }
+        
         val builder = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayArtist)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
         

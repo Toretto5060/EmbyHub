@@ -218,6 +218,16 @@ class ExoPlayerMusicController {
     });
   }
 
+  /// 更新当前歌词（用于车载蓝牙显示）
+  /// 歌词会通过 MediaSession 发送到蓝牙设备
+  Future<void> updateLyric(String lyric) async {
+    _ensureNotDisposed();
+    await _ensureInitialized();
+    await _channel.invokeMethod('updateLyric', {
+      'lyric': lyric,
+    });
+  }
+
   /// 检查播放器是否准备好（有媒体源且可以播放）
   /// 用于在播放前检测播放器状态，如果通知被清除导致播放器停止，需要重新加载媒体
   Future<bool> checkPlayerReady() async {
