@@ -96,6 +96,46 @@ flutter build apk --release --split-per-abi
 flutter build apk --release
 ```
 
+### 修改包名
+
+如果需要更改 Android 应用包名（如 `com.toretto.embyhub` → `com.yourcompany.yourapp`），可以使用自动化脚本：
+
+#### 方法 1：使用 Dart 脚本（推荐）
+
+1. 打开 `scripts/change_package_name.dart`
+2. 修改第 13 行的包名：
+   ```dart
+   const String newPackageName = 'com.yourcompany.yourapp';  // ← 改这里
+   ```
+3. 运行脚本：
+   ```bash
+   dart scripts/change_package_name.dart
+   flutter clean
+   flutter pub get
+   flutter build apk --release
+   ```
+
+#### 方法 2：使用批处理脚本（Windows）
+
+1. 打开 `scripts/change_package_name.bat`
+2. 修改第 9 行的包名：
+   ```batch
+   set NEW_PACKAGE=com.yourcompany.yourapp
+   ```
+3. 双击运行 `change_package_name.bat`
+
+#### 脚本会自动修改的内容
+
+| 文件 | 修改内容 |
+|------|----------|
+| `android/app/build.gradle` | `namespace` 和 `applicationId` |
+| `MainActivity.kt` | `package` 声明和 `import` 语句 |
+| `ExoPlayerMusicPlugin.kt` | `package` 声明和 `import` 语句 |
+| `ExoPlayerTexturePlugin.kt` | `package` 声明 |
+| Kotlin 目录结构 | 自动重命名文件夹路径 |
+
+> ⚠️ **注意**: 更改 `applicationId` 后，Play Store 会将其识别为新应用，用户需要重新安装。
+
 ### 项目结构
 
 ```
