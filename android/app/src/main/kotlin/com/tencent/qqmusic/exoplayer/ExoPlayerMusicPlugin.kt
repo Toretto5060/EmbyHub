@@ -93,6 +93,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var targetVolume: Float = 1.0f  // 目标音量
     private var isFadingOut: Boolean = false  // 是否正在淡出
     
+    // ✅ 歌词显示控制：暂停时不接受歌词更新
+    private var isLyricEnabled: Boolean = true
+    
     // ✅ Crossfade 交叉淡化：使用第二个播放器实现真正的交叉淡化
     private var crossfadePlayer: ExoPlayer? = null
     private var fadingOutPlayerRef: ExoPlayer? = null  // 保存淡出播放器的引用
@@ -389,9 +392,12 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             
             "updateLyric" -> {
                 // 更新当前歌词（用于车载蓝牙显示）
-                val lyric = call.argument<String>("lyric") ?: ""
-                currentLyric = lyric
-                updateMediaSessionMetadata()
+                // 只有在歌词启用状态下才接受更新（暂停时不接受）
+                if (isLyricEnabled) {
+                    val lyric = call.argument<String>("lyric") ?: ""
+                    currentLyric = lyric
+                    updateMediaSessionMetadata()
+                }
                 result.success(null)
             }
             
@@ -682,6 +688,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // 取消之前的淡入淡出动画
         cancelFadeAnimation()
         
+        // 播放时重新启用歌词更新
+        isLyricEnabled = true
+        
         // 先设置音量为0，然后开始播放
         p.volume = 0f
         p.play()
@@ -718,6 +727,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         // 取消之前的淡入淡出动画
         cancelFadeAnimation()
+        
+        // 暂停时禁用歌词更新，并清除当前歌词
+        isLyricEnabled = false
+        currentLyric = ""
+        updateMediaSessionMetadata()
         
         // 立即发送状态更新，让 UI 响应更快
         isFadingOut = true
@@ -1278,16 +1292,32 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         val duration = if (p.duration == C.TIME_UNSET) 0L else p.duration
         
-        // 如果有歌词，将歌词作为副标题显示（用于车载蓝牙）
-        // 格式：艺术家名 或 艺术家名 · 歌词
-        val displayArtist = if (currentLyric.isNotEmpty()) {
-            "$currentArtist · $currentLyric"
+        // 车载蓝牙歌词显示：
+        // 播放中（有歌词）：标题=歌词，副标题=歌曲名 - 歌手
+        // 暂停时（无歌词）：标题=歌曲名，副标题=歌手
+        val displayTitle = if (currentLyric.isNotEmpty()) {
+            currentLyric
         } else {
+            currentTitle
+        }
+        
+        // 副标题格式：有歌词时显示「歌曲名 - 歌手」，无歌词时只显示「歌手」
+        val displayArtist = if (currentLyric.isNotEmpty()) {
+            // 播放中有歌词：歌曲名 - 歌手
+            if (currentTitle.isNotEmpty() && currentArtist.isNotEmpty()) {
+                "$currentTitle - $currentArtist"
+            } else if (currentTitle.isNotEmpty()) {
+                currentTitle
+            } else {
+                currentArtist
+            }
+        } else {
+            // 暂停时无歌词：只显示歌手
             currentArtist
         }
         
         val builder = MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, displayTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayArtist)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
