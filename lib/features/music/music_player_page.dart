@@ -1167,46 +1167,22 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   ) {
     final lyrics = song.lyrics;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 60, 24, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 歌词标题
-          Text(
-            '歌词',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white70 : Colors.black87,
-            ),
+    if (lyrics == null || lyrics.isEmpty) {
+      return Center(
+        child: Text(
+          '暂无歌词',
+          style: TextStyle(
+            fontSize: 18,
+            color: isDark ? Colors.white38 : Colors.black38,
           ),
-          const SizedBox(height: 16),
-          // 歌词内容
-          Expanded(
-            child: lyrics != null && lyrics.isNotEmpty
-                ? SingleChildScrollView(
-                    child: Text(
-                      lyrics,
-                      style: TextStyle(
-                        fontSize: 16,
-                        height: 2.0,
-                        color: isDark ? Colors.white60 : Colors.black54,
-                      ),
-                    ),
-                  )
-                : Center(
-                    child: Text(
-                      '暂无歌词',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: isDark ? Colors.white38 : Colors.black38,
-                      ),
-                    ),
-                  ),
-          ),
-        ],
-      ),
+        ),
+      );
+    }
+
+    return _LyricsView(
+      lyrics: lyrics,
+      position: playerState.position,
+      isDark: isDark,
     );
   }
 
@@ -1998,6 +1974,370 @@ class _SleepTimerCountdownSheet extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// LRC 歌词行数据
+class _LyricLine {
+  final Duration time;
+  final String text;
+
+  const _LyricLine(this.time, this.text);
+}
+
+/// 查找字符串中第一个中文字符的索引
+int _findFirstChineseIndex(String text) {
+  for (int i = 0; i < text.length; i++) {
+    final code = text.codeUnitAt(i);
+    // 中文字符 Unicode 范围：\u4e00-\u9fff (CJK统一汉字)
+    // 以及 \u3400-\u4dbf (CJK统一汉字扩展A)
+    if ((code >= 0x4e00 && code <= 0x9fff) ||
+        (code >= 0x3400 && code <= 0x4dbf)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/// 格式化双语歌词：在英文和中文之间自动换行
+String _formatBilingualLyrics(String text) {
+  // 已经包含换行符的直接返回
+  if (text.contains('\n')) return text;
+
+  // 常见的双语分隔符
+  // 1. 使用 / 或 | 分隔
+  if (text.contains(' / ')) {
+    return text.replaceAll(' / ', '\n');
+  }
+  if (text.contains('/') && !text.contains('://')) {
+    // 避免误处理 URL
+    final parts = text.split('/');
+    if (parts.length == 2 &&
+        parts[0].trim().isNotEmpty &&
+        parts[1].trim().isNotEmpty) {
+      return '${parts[0].trim()}\n${parts[1].trim()}';
+    }
+  }
+  if (text.contains('|')) {
+    return text
+        .split('|')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .join('\n');
+  }
+
+  // 2. 检测英文后紧跟中文的情况（无分隔符）
+  // 查找第一个中文字符的位置
+  final chineseIndex = _findFirstChineseIndex(text);
+  if (chineseIndex > 0) {
+    final englishPart = text.substring(0, chineseIndex).trim();
+    final chinesePart = text.substring(chineseIndex).trim();
+    if (englishPart.isNotEmpty && chinesePart.isNotEmpty) {
+      // 确保英文部分确实包含英文字符
+      if (RegExp(r'[a-zA-Z]').hasMatch(englishPart)) {
+        return '$englishPart\n$chinesePart';
+      }
+    }
+  }
+
+  return text;
+}
+
+/// 解析 LRC 歌词
+List<_LyricLine> _parseLrc(String lrc) {
+  final lines = <_LyricLine>[];
+  final regex = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)');
+
+  for (final line in lrc.split('\n')) {
+    final match = regex.firstMatch(line.trim());
+    if (match != null) {
+      final minutes = int.parse(match.group(1)!);
+      final seconds = int.parse(match.group(2)!);
+      final msStr = match.group(3)!;
+      // 处理两位或三位毫秒
+      final milliseconds =
+          msStr.length == 2 ? int.parse(msStr) * 10 : int.parse(msStr);
+      var text = match.group(4)?.trim() ?? '';
+
+      // 跳过空歌词行（但保留时间戳用于间奏）
+      if (text.isNotEmpty) {
+        // 处理双语歌词：自动在分隔符处换行
+        text = _formatBilingualLyrics(text);
+
+        lines.add(_LyricLine(
+          Duration(
+            minutes: minutes,
+            seconds: seconds,
+            milliseconds: milliseconds,
+          ),
+          text,
+        ));
+      }
+    }
+  }
+
+  // 按时间排序
+  lines.sort((a, b) => a.time.compareTo(b.time));
+  return lines;
+}
+
+/// 歌词显示组件（带时间轴高亮和自动滚动）
+class _LyricsView extends StatefulWidget {
+  final String lyrics;
+  final Duration position;
+  final bool isDark;
+
+  const _LyricsView({
+    required this.lyrics,
+    required this.position,
+    required this.isDark,
+  });
+
+  @override
+  State<_LyricsView> createState() => _LyricsViewState();
+}
+
+class _LyricsViewState extends State<_LyricsView> {
+  late List<_LyricLine> _lines;
+  final ScrollController _scrollController = ScrollController();
+  int _currentIndex = -1;
+  // 上次自动滚动的索引（避免重复滚动）
+  int _lastScrolledIndex = -1;
+  // 每行歌词的 GlobalKey，用于获取位置
+  late List<GlobalKey> _itemKeys;
+  // 容器高度
+  double _containerHeight = 0;
+  // 是否已经完成首次滚动定位
+  bool _hasInitialScroll = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _lines = _parseLrc(widget.lyrics);
+    _itemKeys = List.generate(_lines.length, (_) => GlobalKey());
+  }
+
+  @override
+  void didUpdateWidget(_LyricsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.lyrics != widget.lyrics) {
+      // 歌曲切换，重置所有状态
+      _lines = _parseLrc(widget.lyrics);
+      _itemKeys = List.generate(_lines.length, (_) => GlobalKey());
+      _currentIndex = -1;
+      _lastScrolledIndex = -1;
+      _hasInitialScroll = false; // 重置首次滚动标记
+
+      // 滚动回顶部（带动画）
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// 根据当前播放位置找到对应的歌词索引
+  int _findCurrentIndex(Duration position) {
+    if (_lines.isEmpty) return -1;
+
+    for (int i = _lines.length - 1; i >= 0; i--) {
+      if (position >= _lines[i].time) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /// 滚动到当前歌词（让当前歌词始终在屏幕中间）
+  void _scrollToCurrentLine(int index, {bool isInitial = false}) {
+    if (!_scrollController.hasClients || index < 0 || index >= _itemKeys.length)
+      return;
+    if (index == _lastScrolledIndex) return; // 避免重复滚动
+
+    _lastScrolledIndex = index;
+
+    // 获取当前歌词项的 RenderBox
+    final key = _itemKeys[index];
+    final itemContext = key.currentContext;
+
+    // 如果无法获取 context（ListView 懒加载导致目标项未渲染），使用估算方式滚动
+    if (itemContext == null) {
+      if (isInitial) {
+        // 首次滚动时，使用估算的行高直接跳转
+        // 估算每行高度约 50 像素（21号字体 + padding）
+        const estimatedItemHeight = 50.0;
+        final estimatedOffset = index * estimatedItemHeight;
+        final maxOffset = _scrollController.position.maxScrollExtent;
+        _scrollController.jumpTo(estimatedOffset.clamp(0.0, maxOffset));
+        // 跳转后重置标记，让下一帧可以精确滚动
+        _lastScrolledIndex = -1;
+      }
+      return;
+    }
+
+    final renderBox = itemContext.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    // 获取 ListView 的 RenderBox
+    final scrollableRenderBox =
+        _scrollController.position.context.storageContext.findRenderObject()
+            as RenderBox?;
+    if (scrollableRenderBox == null) return;
+
+    // 计算当前项相对于 ListView 的位置
+    final itemPosition =
+        renderBox.localToGlobal(Offset.zero, ancestor: scrollableRenderBox);
+    final itemHeight = renderBox.size.height;
+
+    // 计算目标滚动位置（让当前歌词在容器中间）
+    final currentOffset = _scrollController.offset;
+    final targetOffset = currentOffset +
+        itemPosition.dy -
+        (_containerHeight / 2) +
+        (itemHeight / 2);
+
+    if (isInitial) {
+      // 首次滚动直接跳转，不需要动画
+      _scrollController.jumpTo(
+        targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      );
+    } else {
+      _scrollController.animateTo(
+        targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 更新当前歌词索引
+    final newIndex = _findCurrentIndex(widget.position);
+
+    // 首次渲染或歌词切换后，需要立即滚动到当前位置
+    if (!_hasInitialScroll && newIndex >= 0) {
+      _hasInitialScroll = true;
+      _currentIndex = newIndex;
+      _lastScrolledIndex = -1; // 强制触发滚动
+      // 使用多次 postFrameCallback 确保 ListView 完全渲染
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          // 首次滚动，使用 isInitial=true 支持估算位置跳转
+          _scrollToCurrentLine(_currentIndex, isInitial: true);
+          // 跳转后再次尝试精确定位
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _lastScrolledIndex == -1) {
+              _scrollToCurrentLine(_currentIndex, isInitial: true);
+            }
+          });
+        }
+      });
+    } else if (newIndex != _currentIndex) {
+      _currentIndex = newIndex;
+      // 在下一帧滚动，确保布局完成
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToCurrentLine(_currentIndex);
+      });
+    }
+
+    if (_lines.isEmpty) {
+      return Center(
+        child: Text(
+          '暂无歌词',
+          style: TextStyle(
+            fontSize: 18,
+            color: widget.isDark ? Colors.white38 : Colors.black38,
+          ),
+        ),
+      );
+    }
+
+    // 使用 LayoutBuilder 获取实际可用高度
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 保存容器高度
+        _containerHeight = constraints.maxHeight;
+        // 上下 padding，让第一行和最后一行都能滚动到中间
+        final verticalPadding = _containerHeight / 2;
+
+        return Padding(
+          padding: const EdgeInsets.only(left: 40, right: 40),
+          // 使用 ShaderMask 让文字在上下边缘渐变透明
+          child: ShaderMask(
+            shaderCallback: (Rect bounds) {
+              return LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: const [
+                  Colors.transparent,
+                  Colors.white,
+                  Colors.white,
+                  Colors.transparent,
+                ],
+                // 顶部30%和底部30%渐变，中间40%完全显示
+                stops: const [0.0, 0.30, 0.70, 1.0],
+              ).createShader(bounds);
+            },
+            blendMode: BlendMode.dstIn,
+            child: ListView.builder(
+              controller: _scrollController,
+              // 上下 padding 保持半容器高度，让歌词能滚动到中间
+              padding: EdgeInsets.symmetric(vertical: verticalPadding),
+              itemCount: _lines.length,
+              itemBuilder: (context, index) {
+                final line = _lines[index];
+                final isCurrent = index == _currentIndex;
+                final isPast = index < _currentIndex;
+
+                return Container(
+                  key: _itemKeys[index],
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  alignment: Alignment.centerLeft,
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutCubic,
+                    style: TextStyle(
+                      fontSize: isCurrent ? 26 : 21,
+                      fontWeight:
+                          isCurrent ? FontWeight.bold : FontWeight.normal,
+                      color: isCurrent
+                          ? (widget.isDark ? Colors.white : Colors.black87)
+                          : isPast
+                              ? (widget.isDark
+                                  ? Colors.white30
+                                  : Colors.black26)
+                              : (widget.isDark
+                                  ? Colors.white54
+                                  : Colors.black45),
+                      height: 1.4,
+                    ),
+                    child: AnimatedScale(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOutCubic,
+                      scale: isCurrent ? 1.0 : 0.95,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        line.text,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }

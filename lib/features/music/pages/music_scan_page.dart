@@ -881,9 +881,15 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
                         entity.path, Uint8List.fromList(picture.bytes));
                   }
                 }
+
+                // ✅ 读取内嵌歌词（FLAC Vorbis Comment: LYRICS / UNSYNCEDLYRICS）
+                if (tag.lyrics != null && tag.lyrics!.isNotEmpty) {
+                  lyrics = tag.lyrics;
+                }
               }
             } catch (e) {
               // 读取元数据失败，使用默认值
+              debugPrint('读取元数据失败: $e');
             }
 
             // 解析文件头获取位深和采样率
@@ -896,8 +902,10 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
               bitrate = ((stat.size * 8) / (durationSeconds * 1000)).round();
             }
 
-            // 尝试读取同目录下的 .lrc 歌词文件
-            lyrics = await _loadLyricsFile(entity.path);
+            // ✅ 如果没有内嵌歌词，尝试读取同目录下的 .lrc 歌词文件
+            if (lyrics == null || lyrics.isEmpty) {
+              lyrics = await _loadLyricsFile(entity.path);
+            }
 
             final song = LocalSong(
               id: entity.path.hashCode.toString(),
