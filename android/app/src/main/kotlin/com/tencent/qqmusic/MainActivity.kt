@@ -44,7 +44,7 @@ class MainActivity: FlutterActivity() {
     private val deviceNameChannelName = "device_name_channel"
     private var pipChannel: MethodChannel? = null
     private var isPipExpanded = false // PiP 窗口是否放大
-    private var currentPlayingState = true // 当前播放状态
+    private var currentPlayingState = false // 当前播放状态（初始为未播放）
     private var shouldAutoEnterPip = false // ✅ 是否应该自动进入 PiP（在播放时为 true）
     
     // ✅ MediaSession 相关
@@ -83,56 +83,108 @@ class MainActivity: FlutterActivity() {
     
     /**
      * 动态创建快捷方式（运行时创建，避免 XML 占位符问题）
+     * 根据播放状态显示不同的快捷方式：
+     * - 未播放时：播放、切换
+     * - 播放时：暂停、切换
      */
     private fun createShortcuts() {
+        // 尝试从播放器获取实际状态，如果没有则使用默认值 false
+        val isPlaying = try {
+            if (ExoPlayerMusicPlugin.isPlayerReady()) {
+                val playing = ExoPlayerMusicPlugin.isPlaying()
+                android.util.Log.d("MainActivity", "📱 Getting playback state: player ready, isPlaying=$playing")
+                playing
+            } else {
+                android.util.Log.d("MainActivity", "📱 Player not ready, using default state: false")
+                false
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "⚠️ Failed to get playback state: ${e.message}")
+            false
+        }
+        currentPlayingState = isPlaying
+        android.util.Log.d("MainActivity", "📱 Creating shortcuts with isPlaying=$isPlaying, currentPlayingState=$currentPlayingState")
+        updateShortcuts(isPlaying)
+    }
+    
+    /**
+     * 根据播放状态更新快捷方式
+     * @param isPlaying true=播放中，false=未播放
+     */
+    private fun updateShortcuts(isPlaying: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
             try {
                 val shortcutManager = getSystemService(ShortcutManager::class.java)
                 val shortcuts = mutableListOf<ShortcutInfo>()
                 
-                // 播放快捷方式
-                val playIntent = Intent("$packageName.SHORTCUT_PLAY").apply {
-                    setClassName(packageName, "${packageName}.MusicShortcutActivity")
-                }
-                shortcuts.add(
-                    ShortcutInfo.Builder(this, "play_music")
-                        .setShortLabel(getString(resources.getIdentifier("shortcut_play", "string", packageName)))
-                        .setLongLabel(getString(resources.getIdentifier("shortcut_play_long", "string", packageName)))
-                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_play))
-                        .setIntent(playIntent)
-                        .build()
-                )
+                android.util.Log.d("MainActivity", "🔄 updateShortcuts: isPlaying=$isPlaying, currentPlayingState=$currentPlayingState")
                 
-                // 暂停快捷方式
-                val pauseIntent = Intent("$packageName.SHORTCUT_PAUSE").apply {
-                    setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                if (isPlaying) {
+                    // 播放时：显示"暂停"和"切换"
+                    android.util.Log.d("MainActivity", "▶️ Creating shortcuts for PLAYING state")
+                    
+                    // 暂停快捷方式（双竖杠图标）
+                    val pauseIntent = Intent("$packageName.SHORTCUT_PAUSE").apply {
+                        setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                    }
+                    shortcuts.add(
+                        ShortcutInfo.Builder(this, "pause_music")
+                            .setShortLabel(getString(resources.getIdentifier("shortcut_pause", "string", packageName)))
+                            .setLongLabel(getString(resources.getIdentifier("shortcut_pause_long", "string", packageName)))
+                            .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_pause))
+                            .setIntent(pauseIntent)
+                            .build()
+                    )
+                    
+                    // 切换快捷方式（使用合适的切换图标）
+                    val toggleIntent = Intent("$packageName.SHORTCUT_TOGGLE").apply {
+                        setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                    }
+                    // 使用 ic_menu_revert 作为切换图标（表示切换/反转）
+                    shortcuts.add(
+                        ShortcutInfo.Builder(this, "toggle_music")
+                            .setShortLabel(getString(resources.getIdentifier("shortcut_toggle", "string", packageName)))
+                            .setLongLabel(getString(resources.getIdentifier("shortcut_toggle_long", "string", packageName)))
+                            .setIcon(Icon.createWithResource(this, android.R.drawable.ic_menu_revert))
+                            .setIntent(toggleIntent)
+                            .build()
+                    )
+                } else {
+                    // 未播放时：显示"播放"和"切换"
+                    android.util.Log.d("MainActivity", "⏸️ Creating shortcuts for PAUSED state")
+                    
+                    // 播放快捷方式（三角播放图标）
+                    val playIntent = Intent("$packageName.SHORTCUT_PLAY").apply {
+                        setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                    }
+                    shortcuts.add(
+                        ShortcutInfo.Builder(this, "play_music")
+                            .setShortLabel(getString(resources.getIdentifier("shortcut_play", "string", packageName)))
+                            .setLongLabel(getString(resources.getIdentifier("shortcut_play_long", "string", packageName)))
+                            .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_play))
+                            .setIntent(playIntent)
+                            .build()
+                    )
+                    
+                    // 切换快捷方式（使用合适的切换图标）
+                    val toggleIntent = Intent("$packageName.SHORTCUT_TOGGLE").apply {
+                        setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                    }
+                    // 使用 ic_menu_revert 作为切换图标（表示切换/反转）
+                    shortcuts.add(
+                        ShortcutInfo.Builder(this, "toggle_music")
+                            .setShortLabel(getString(resources.getIdentifier("shortcut_toggle", "string", packageName)))
+                            .setLongLabel(getString(resources.getIdentifier("shortcut_toggle_long", "string", packageName)))
+                            .setIcon(Icon.createWithResource(this, android.R.drawable.ic_menu_revert))
+                            .setIntent(toggleIntent)
+                            .build()
+                    )
                 }
-                shortcuts.add(
-                    ShortcutInfo.Builder(this, "pause_music")
-                        .setShortLabel(getString(resources.getIdentifier("shortcut_pause", "string", packageName)))
-                        .setLongLabel(getString(resources.getIdentifier("shortcut_pause_long", "string", packageName)))
-                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_pause))
-                        .setIntent(pauseIntent)
-                        .build()
-                )
-                
-                // 切换快捷方式
-                val toggleIntent = Intent("$packageName.SHORTCUT_TOGGLE").apply {
-                    setClassName(packageName, "${packageName}.MusicShortcutActivity")
-                }
-                shortcuts.add(
-                    ShortcutInfo.Builder(this, "toggle_music")
-                        .setShortLabel(getString(resources.getIdentifier("shortcut_toggle", "string", packageName)))
-                        .setLongLabel(getString(resources.getIdentifier("shortcut_toggle_long", "string", packageName)))
-                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_play))
-                        .setIntent(toggleIntent)
-                        .build()
-                )
                 
                 shortcutManager.setDynamicShortcuts(shortcuts)
-                android.util.Log.d("MainActivity", "✅ Shortcuts created dynamically: ${shortcuts.size} shortcuts")
+                android.util.Log.d("MainActivity", "✅ Shortcuts updated: isPlaying=$isPlaying, count=${shortcuts.size}, shortcutIds=${shortcuts.map { it.id }}")
             } catch (e: Exception) {
-                android.util.Log.e("MainActivity", "❌ Failed to create shortcuts: ${e.message}")
+                android.util.Log.e("MainActivity", "❌ Failed to update shortcuts: ${e.message}")
                 e.printStackTrace()
             }
         }
@@ -231,6 +283,17 @@ class MainActivity: FlutterActivity() {
         volumeControlStream = AudioManager.STREAM_MUSIC
         android.util.Log.d("MainActivity", "🔊 Volume control stream set to STREAM_MUSIC")
         
+        // ✅ 注册播放状态监听器，当广播触发播放/暂停时更新快捷方式
+        ExoPlayerMusicPlugin.setPlaybackStateListener(object : ExoPlayerMusicPlugin.Companion.PlaybackStateListener {
+            override fun onPlaybackStateChanged(isPlaying: Boolean) {
+                android.util.Log.d("MainActivity", "📱 Playback state changed from broadcast: isPlaying=$isPlaying")
+                // 更新本地状态
+                currentPlayingState = isPlaying
+                // 更新快捷方式
+                updateShortcuts(isPlaying)
+            }
+        })
+        
         // ✅ 初始化 MediaSession
         initMediaSession()
         
@@ -263,6 +326,9 @@ class MainActivity: FlutterActivity() {
                         isPipExpanded = false
                         currentPlayingState = isPlaying
                         currentVideoTitle = title
+                        
+                        // 总是更新快捷方式，确保状态同步
+                        updateShortcuts(isPlaying)
                         
                         val params = PictureInPictureParams.Builder()
                             .setAspectRatio(getPipAspectRatio())
@@ -328,9 +394,14 @@ class MainActivity: FlutterActivity() {
                     val isPlaying = call.argument<Boolean>("isPlaying") ?: false
                     val title = call.argument<String>("title") ?: "EmbyHub"
                     shouldAutoEnterPip = isPlaying
+                    val wasPlaying = currentPlayingState
                     currentPlayingState = isPlaying
                     currentVideoTitle = title
-                    android.util.Log.d("MainActivity", "Set playing state: isPlaying=$isPlaying, title=$title, shouldAutoEnterPip=$shouldAutoEnterPip")
+                    android.util.Log.d("MainActivity", "📱 setPlayingState: isPlaying=$isPlaying, wasPlaying=$wasPlaying, title=$title")
+                    
+                    // 总是更新快捷方式，确保状态同步
+                    updateShortcuts(isPlaying)
+                    
                     result.success(true)
                 }
                 else -> result.notImplemented()
@@ -538,7 +609,12 @@ class MainActivity: FlutterActivity() {
     @RequiresApi(Build.VERSION_CODES.O)
     private fun updatePipActions(isPlaying: Boolean) {
         android.util.Log.d("MainActivity", "Updating PiP actions, isPlaying=$isPlaying, inPipMode=$isInPictureInPictureMode")
+        val wasPlaying = currentPlayingState
         currentPlayingState = isPlaying // 保存播放状态
+        
+        // 总是更新快捷方式，确保状态同步
+        updateShortcuts(isPlaying)
+        
         if (isInPictureInPictureMode) {
             val params = PictureInPictureParams.Builder()
                 .setAspectRatio(getPipAspectRatio())

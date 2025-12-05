@@ -128,6 +128,29 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         @Volatile
         private var instance: ExoPlayerMusicPlugin? = null
         
+        // ✅ 播放状态变化回调接口
+        interface PlaybackStateListener {
+            fun onPlaybackStateChanged(isPlaying: Boolean)
+        }
+        
+        // ✅ 播放状态监听器（供 MainActivity 注册）
+        @Volatile
+        private var playbackStateListener: PlaybackStateListener? = null
+        
+        /**
+         * 注册播放状态监听器
+         */
+        fun setPlaybackStateListener(listener: PlaybackStateListener?) {
+            playbackStateListener = listener
+        }
+        
+        /**
+         * 通知播放状态变化
+         */
+        private fun notifyPlaybackStateChanged(isPlaying: Boolean) {
+            playbackStateListener?.onPlaybackStateChanged(isPlaying)
+        }
+        
         /**
          * 获取当前实例（供外部调用）
          */
@@ -208,6 +231,15 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val p = inst.player ?: return false
             return p.mediaItemCount > 0 || inst.playlist.isNotEmpty()
         }
+        
+        /**
+         * 获取当前播放状态
+         */
+        fun isPlaying(): Boolean {
+            val inst = instance ?: return false
+            val p = inst.player ?: return false
+            return p.isPlaying
+        }
     }
     
     // 进度更新是否正在运行
@@ -266,6 +298,8 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             sendStateUpdate()
             updateNotification()
             updateMediaSessionState()
+            // ✅ 通知 MainActivity 播放状态变化（用于更新快捷方式）
+            Companion.notifyPlaybackStateChanged(isPlaying)
         }
         
         override fun onPlayerError(error: PlaybackException) {
@@ -791,6 +825,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // 播放时激活通知
         showNotification()
         
+        // ✅ 发送媒体按钮播放事件，通知 Flutter 端更新 UI（用于广播/快捷方式触发）
+        handler.post {
+            eventSink?.success(mapOf("event" to "mediaButtonPlay"))
+        }
+        
         // 立即发送状态更新，让 UI 响应更快
         sendStateUpdate()
         // 更新 MediaSession 状态，确保进度条正确显示
@@ -844,6 +883,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     player?.pause()
                     player?.volume = targetVolume  // 恢复音量设置
                     isFadingOut = false
+                    
+                    // ✅ 发送媒体按钮暂停事件，通知 Flutter 端更新 UI（用于广播/快捷方式触发）
+                    handler.post {
+                        eventSink?.success(mapOf("event" to "mediaButtonPause"))
+                    }
                 }
             })
             start()
