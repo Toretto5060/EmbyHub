@@ -9,6 +9,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.util.Rational
@@ -58,6 +60,9 @@ class MainActivity: FlutterActivity() {
         // 检查悬浮窗权限（用于后台启动）
         checkOverlayPermission()
         
+        // 动态创建快捷方式（解决 XML 占位符问题）
+        createShortcuts()
+        
         // 处理来自广播的启动
         handleBroadcastLaunch()
     }
@@ -73,6 +78,63 @@ class MainActivity: FlutterActivity() {
         if (!MusicControlReceiver.canDrawOverlays(this)) {
             android.util.Log.w("MainActivity", "⚠️ 没有悬浮窗权限，后台启动可能无法工作")
             // 可以在这里提示用户授权，但不强制
+        }
+    }
+    
+    /**
+     * 动态创建快捷方式（运行时创建，避免 XML 占位符问题）
+     */
+    private fun createShortcuts() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
+            try {
+                val shortcutManager = getSystemService(ShortcutManager::class.java)
+                val shortcuts = mutableListOf<ShortcutInfo>()
+                
+                // 播放快捷方式
+                val playIntent = Intent("$packageName.SHORTCUT_PLAY").apply {
+                    setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                }
+                shortcuts.add(
+                    ShortcutInfo.Builder(this, "play_music")
+                        .setShortLabel(getString(resources.getIdentifier("shortcut_play", "string", packageName)))
+                        .setLongLabel(getString(resources.getIdentifier("shortcut_play_long", "string", packageName)))
+                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_play))
+                        .setIntent(playIntent)
+                        .build()
+                )
+                
+                // 暂停快捷方式
+                val pauseIntent = Intent("$packageName.SHORTCUT_PAUSE").apply {
+                    setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                }
+                shortcuts.add(
+                    ShortcutInfo.Builder(this, "pause_music")
+                        .setShortLabel(getString(resources.getIdentifier("shortcut_pause", "string", packageName)))
+                        .setLongLabel(getString(resources.getIdentifier("shortcut_pause_long", "string", packageName)))
+                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_pause))
+                        .setIntent(pauseIntent)
+                        .build()
+                )
+                
+                // 切换快捷方式
+                val toggleIntent = Intent("$packageName.SHORTCUT_TOGGLE").apply {
+                    setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                }
+                shortcuts.add(
+                    ShortcutInfo.Builder(this, "toggle_music")
+                        .setShortLabel(getString(resources.getIdentifier("shortcut_toggle", "string", packageName)))
+                        .setLongLabel(getString(resources.getIdentifier("shortcut_toggle_long", "string", packageName)))
+                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_play))
+                        .setIntent(toggleIntent)
+                        .build()
+                )
+                
+                shortcutManager.setDynamicShortcuts(shortcuts)
+                android.util.Log.d("MainActivity", "✅ Shortcuts created dynamically: ${shortcuts.size} shortcuts")
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "❌ Failed to create shortcuts: ${e.message}")
+                e.printStackTrace()
+            }
         }
     }
     

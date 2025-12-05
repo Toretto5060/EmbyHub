@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.util.Log
 import com.tencent.qqmusic.exoplayer.ExoPlayerMusicPlugin
+import android.content.Intent
 
 /**
  * 音乐快捷方式 Activity
@@ -23,30 +24,24 @@ class MusicShortcutActivity : Activity() {
         
         Log.d(TAG, "📱 Received shortcut action: $action")
         
-        // 检查播放器是否就绪
-        if (!ExoPlayerMusicPlugin.isPlayerReady()) {
-            Log.w(TAG, "⚠️ Player not ready, ignoring action: $action")
-            finish()
-            return
+        // 根据 Action 后缀判断操作类型，设置对应的广播 Action
+        val broadcastAction = when {
+            action?.endsWith(".SHORTCUT_PLAY") == true -> "ACTION_PLAY"
+            action?.endsWith(".SHORTCUT_PAUSE") == true -> "ACTION_PAUSE"
+            action?.endsWith(".SHORTCUT_TOGGLE") == true -> "ACTION_TOGGLE"
+            else -> null
         }
         
-        // 根据 Action 后缀判断操作类型，直接调用播放器
-        when {
-            action?.endsWith(".SHORTCUT_PLAY") == true -> {
-                Log.d(TAG, "▶️ Executing: PLAY")
-                ExoPlayerMusicPlugin.externalPlay()
+        if (broadcastAction != null) {
+            val fullAction = "$packageName.$broadcastAction"
+            Log.d(TAG, "📡 Sending broadcast: $fullAction")
+            
+            val broadcastIntent = Intent(fullAction).apply {
+                setClassName(packageName, "${packageName}.MusicControlReceiver")
             }
-            action?.endsWith(".SHORTCUT_PAUSE") == true -> {
-                Log.d(TAG, "⏸️ Executing: PAUSE")
-                ExoPlayerMusicPlugin.externalPause()
-            }
-            action?.endsWith(".SHORTCUT_TOGGLE") == true -> {
-                Log.d(TAG, "⏯️ Executing: TOGGLE")
-                ExoPlayerMusicPlugin.externalToggle()
-            }
-            else -> {
-                Log.w(TAG, "⚠️ Unknown action: $action")
-            }
+            sendBroadcast(broadcastIntent)
+        } else {
+            Log.w(TAG, "⚠️ Unknown action: $action")
         }
         
         // 处理完成后立即关闭，不显示任何界面

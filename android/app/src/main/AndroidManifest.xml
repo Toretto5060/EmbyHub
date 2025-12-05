@@ -51,10 +51,6 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- 应用快捷方式 -->
-            <meta-data
-                android:name="android.app.shortcuts"
-                android:resource="@xml/shortcuts" />
         </activity>
         
         <!-- 音乐快捷方式 Activity（无界面，处理完立即关闭） -->
