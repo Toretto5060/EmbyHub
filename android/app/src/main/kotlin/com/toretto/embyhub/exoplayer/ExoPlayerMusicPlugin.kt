@@ -112,6 +112,8 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private val progressRunnable = object : Runnable {
         override fun run() {
             sendStateUpdate()
+            // 同时更新 MediaSession 进度，让媒体通知的进度条正确显示
+            updateMediaSessionState()
             handler.postDelayed(this, 500)
         }
     }
@@ -1106,11 +1108,21 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 
                 override fun onSkipToNext() {
-                    playNextWithFade()
+                    // 通知 Flutter 端处理下一曲（支持随机播放模式）
+                    handler.post {
+                        eventSink?.success(mapOf(
+                            "event" to "mediaButtonNext"
+                        ))
+                    }
                 }
                 
                 override fun onSkipToPrevious() {
-                    playPreviousWithFade()
+                    // 通知 Flutter 端处理上一曲（支持随机播放模式）
+                    handler.post {
+                        eventSink?.success(mapOf(
+                            "event" to "mediaButtonPrevious"
+                        ))
+                    }
                 }
                 
                 override fun onSeekTo(pos: Long) {

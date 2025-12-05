@@ -24,6 +24,8 @@ class ExoPlayerMusicController {
   StreamController<TrackChangedEvent>? _trackChangedController;
   StreamController<void>? _playlistEndedController;
   StreamController<MusicPlayerState>? _stateController;
+  StreamController<void>? _mediaButtonNextController;
+  StreamController<void>? _mediaButtonPreviousController;
 
   StreamSubscription<dynamic>? _eventSubscription;
 
@@ -318,6 +320,18 @@ class ExoPlayerMusicController {
         (controller) => _stateController = controller,
       );
 
+  /// 媒体按钮下一曲事件流
+  Stream<void> get mediaButtonNextStream => _getStream<void>(
+        () => _mediaButtonNextController,
+        (controller) => _mediaButtonNextController = controller,
+      );
+
+  /// 媒体按钮上一曲事件流
+  Stream<void> get mediaButtonPreviousStream => _getStream<void>(
+        () => _mediaButtonPreviousController,
+        (controller) => _mediaButtonPreviousController = controller,
+      );
+
   // ==================== Private Methods ====================
 
   void _handleEvent(dynamic event) {
@@ -338,6 +352,12 @@ class ExoPlayerMusicController {
         break;
       case 'playlistEnded':
         _addEvent(_playlistEndedController, null);
+        break;
+      case 'mediaButtonNext':
+        _addEvent(_mediaButtonNextController, null);
+        break;
+      case 'mediaButtonPrevious':
+        _addEvent(_mediaButtonPreviousController, null);
         break;
     }
   }

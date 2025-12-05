@@ -183,9 +183,20 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   StreamSubscription<TrackChangedEvent>? _trackChangedSubscription;
   StreamSubscription<void>? _playlistEndedSubscription;
   StreamSubscription<String>? _errorSubscription;
+  StreamSubscription<void>? _mediaButtonNextSubscription;
+  StreamSubscription<void>? _mediaButtonPreviousSubscription;
 
   /// 是否正在切换歌曲（用于在 trackChanged 事件中判断是手动还是自动切换）
   bool _isSwitchingTrack = false;
+
+  /// 随机播放历史记录（存储播放过的歌曲索引）
+  final List<int> _shuffleHistory = [];
+
+  /// 随机播放历史记录的当前位置（用于上一曲/下一曲导航）
+  int _shuffleHistoryIndex = -1;
+
+  /// 已播放过的歌曲索引集合（用于优先播放未播放的歌曲）
+  final Set<int> _playedIndices = {};
 
   /// 初始化播放器
   Future<void> _initializePlayer() async {
@@ -250,6 +261,17 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       print('Music player error: $error');
       // 播放失败，将状态改为暂停
       state = state.copyWith(isPlaying: false);
+    });
+
+    // 监听媒体按钮下一曲（支持随机播放模式）
+    _mediaButtonNextSubscription = player.mediaButtonNextStream.listen((_) {
+      playNext();
+    });
+
+    // 监听媒体按钮上一曲（支持随机播放模式）
+    _mediaButtonPreviousSubscription =
+        player.mediaButtonPreviousStream.listen((_) {
+      playPrevious();
     });
   }
 
@@ -451,6 +473,13 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   Future<void> setPlaylist(List<LocalSong> songs, {int startIndex = 0}) async {
     if (songs.isEmpty) return;
 
+    // 清除随机播放历史记录（新播放列表）
+    _clearShuffleHistory();
+    // 将起始歌曲添加到历史记录
+    if (state.playMode == PlayMode.shuffle) {
+      _addToShuffleHistory(startIndex);
+    }
+
     // 更新 UI 状态
     state = state.copyWith(
       playlist: songs,
@@ -499,15 +528,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         nextIndex = state.currentIndex;
         break;
       case PlayMode.shuffle:
-        // 随机播放：随机选择一首（排除当前歌曲）
-        if (state.playlist.length == 1) {
-          nextIndex = 0;
-        } else {
-          final random = Random();
-          do {
-            nextIndex = random.nextInt(state.playlist.length);
-          } while (nextIndex == state.currentIndex);
-        }
+        // 随机播放（带历史记录）
+        nextIndex = _getNextShuffleIndex();
         break;
       case PlayMode.listLoop:
         // 列表循环：顺序播放
@@ -553,15 +575,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         prevIndex = state.currentIndex;
         break;
       case PlayMode.shuffle:
-        // 随机播放：随机选择一首（排除当前歌曲）
-        if (state.playlist.length == 1) {
-          prevIndex = 0;
-        } else {
-          final random = Random();
-          do {
-            prevIndex = random.nextInt(state.playlist.length);
-          } while (prevIndex == state.currentIndex);
-        }
+        // 随机播放（带历史记录）：回到上一首播放过的歌曲
+        prevIndex = _getPreviousShuffleIndex();
         break;
       case PlayMode.listLoop:
         // 列表循环：顺序播放
@@ -594,6 +609,95 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     _savePlayingState();
   }
 
+  /// 获取下一首随机播放的索引（带历史记录，优先未播放的歌曲）
+  int _getNextShuffleIndex() {
+    if (state.playlist.length == 1) {
+      return 0;
+    }
+
+    // 如果当前在历史记录中间位置，且后面还有记录，则使用历史记录
+    if (_shuffleHistoryIndex >= 0 &&
+        _shuffleHistoryIndex < _shuffleHistory.length - 1) {
+      _shuffleHistoryIndex++;
+      return _shuffleHistory[_shuffleHistoryIndex];
+    }
+
+    // 否则，随机选择一首新歌曲
+    final random = Random();
+    int nextIndex;
+
+    // 找出所有未播放过的歌曲索引
+    final unplayedIndices = <int>[];
+    for (int i = 0; i < state.playlist.length; i++) {
+      if (!_playedIndices.contains(i) && i != state.currentIndex) {
+        unplayedIndices.add(i);
+      }
+    }
+
+    if (unplayedIndices.isNotEmpty) {
+      // 优先从未播放过的歌曲中随机选择
+      nextIndex = unplayedIndices[random.nextInt(unplayedIndices.length)];
+    } else {
+      // 所有歌曲都播放过了，重置已播放记录，重新开始
+      _playedIndices.clear();
+      // 从除当前歌曲外的所有歌曲中随机选择
+      do {
+        nextIndex = random.nextInt(state.playlist.length);
+      } while (nextIndex == state.currentIndex);
+    }
+
+    // 记录到历史
+    _addToShuffleHistory(nextIndex);
+
+    return nextIndex;
+  }
+
+  /// 获取上一首随机播放的索引（从历史记录中获取）
+  int _getPreviousShuffleIndex() {
+    if (state.playlist.length == 1) {
+      return 0;
+    }
+
+    // 如果历史记录中有上一首，则返回上一首
+    if (_shuffleHistoryIndex > 0) {
+      _shuffleHistoryIndex--;
+      return _shuffleHistory[_shuffleHistoryIndex];
+    }
+
+    // 如果没有历史记录或已经是第一首，返回当前歌曲（重新播放）
+    return state.currentIndex;
+  }
+
+  /// 添加索引到随机播放历史记录
+  void _addToShuffleHistory(int index) {
+    // 如果当前不在历史记录末尾，删除后面的记录
+    if (_shuffleHistoryIndex >= 0 &&
+        _shuffleHistoryIndex < _shuffleHistory.length - 1) {
+      _shuffleHistory.removeRange(
+          _shuffleHistoryIndex + 1, _shuffleHistory.length);
+    }
+
+    // 添加新索引到历史记录
+    _shuffleHistory.add(index);
+    _shuffleHistoryIndex = _shuffleHistory.length - 1;
+
+    // 记录为已播放
+    _playedIndices.add(index);
+
+    // 限制历史记录长度，避免内存占用过多
+    if (_shuffleHistory.length > 100) {
+      _shuffleHistory.removeAt(0);
+      _shuffleHistoryIndex--;
+    }
+  }
+
+  /// 清除随机播放历史记录（当播放列表改变或切换播放模式时调用）
+  void _clearShuffleHistory() {
+    _shuffleHistory.clear();
+    _shuffleHistoryIndex = -1;
+    _playedIndices.clear();
+  }
+
   /// 跳转到指定位置
   Future<void> seekTo(Duration position) async {
     if (_player != null) {
@@ -623,7 +727,18 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
   /// 设置播放模式
   Future<void> setPlayMode(PlayMode mode) async {
+    final oldMode = state.playMode;
     state = state.copyWith(playMode: mode);
+
+    // 如果切换到随机模式，初始化历史记录
+    if (mode == PlayMode.shuffle && oldMode != PlayMode.shuffle) {
+      _clearShuffleHistory();
+      // 将当前歌曲添加到历史记录
+      if (state.currentIndex >= 0) {
+        _addToShuffleHistory(state.currentIndex);
+      }
+    }
+
     // 持久化存储
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_playModeKey, mode.index);
@@ -703,6 +818,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     _trackChangedSubscription?.cancel();
     _playlistEndedSubscription?.cancel();
     _errorSubscription?.cancel();
+    _mediaButtonNextSubscription?.cancel();
+    _mediaButtonPreviousSubscription?.cancel();
     // 注意：不要 dispose 单例的 _player
     super.dispose();
   }
