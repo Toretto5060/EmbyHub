@@ -99,14 +99,22 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var isCrossfading: Boolean = false
     
     companion object {
-        const val ACTION_PLAY = "com.toretto.embyhub.music.PLAY"
-        const val ACTION_PAUSE = "com.toretto.embyhub.music.PAUSE"
-        const val ACTION_NEXT = "com.toretto.embyhub.music.NEXT"
-        const val ACTION_PREVIOUS = "com.toretto.embyhub.music.PREVIOUS"
-        const val ACTION_STOP = "com.toretto.embyhub.music.STOP"
+        // 使用相对 Action 名称，避免硬编码包名
+        private const val ACTION_SUFFIX_PLAY = ".music.PLAY"
+        private const val ACTION_SUFFIX_PAUSE = ".music.PAUSE"
+        private const val ACTION_SUFFIX_NEXT = ".music.NEXT"
+        private const val ACTION_SUFFIX_PREVIOUS = ".music.PREVIOUS"
+        private const val ACTION_SUFFIX_STOP = ".music.STOP"
         
         // 淡入淡出时长（毫秒）- 播放/暂停使用较短时间
         const val FADE_DURATION_MS = 300L
+        
+        // 根据包名生成完整的 Action 名称
+        fun getActionPlay(packageName: String) = "$packageName$ACTION_SUFFIX_PLAY"
+        fun getActionPause(packageName: String) = "$packageName$ACTION_SUFFIX_PAUSE"
+        fun getActionNext(packageName: String) = "$packageName$ACTION_SUFFIX_NEXT"
+        fun getActionPrevious(packageName: String) = "$packageName$ACTION_SUFFIX_PREVIOUS"
+        fun getActionStop(packageName: String) = "$packageName$ACTION_SUFFIX_STOP"
         
         // Crossfade 交叉淡化时长（毫秒）- 切换歌曲使用
         const val CROSSFADE_DURATION_MS = 1500L
@@ -1416,13 +1424,16 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         val isPlaying = p.isPlaying
         
+        // 获取当前包名对应的 Action
+        val packageName = ctx.packageName
+        
         // 上一首按钮
         val prevAction = NotificationCompat.Action(
             android.R.drawable.ic_media_previous,
             "上一首",
             PendingIntent.getBroadcast(
                 ctx, 0,
-                Intent(ACTION_PREVIOUS).setPackage(ctx.packageName),
+                Intent(getActionPrevious(packageName)).setPackage(packageName),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
         )
@@ -1434,7 +1445,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 "暂停",
                 PendingIntent.getBroadcast(
                     ctx, 1,
-                    Intent(ACTION_PAUSE).setPackage(ctx.packageName),
+                    Intent(getActionPause(packageName)).setPackage(packageName),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                 )
             )
@@ -1444,7 +1455,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 "播放",
                 PendingIntent.getBroadcast(
                     ctx, 1,
-                    Intent(ACTION_PLAY).setPackage(ctx.packageName),
+                    Intent(getActionPlay(packageName)).setPackage(packageName),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                 )
             )
@@ -1456,7 +1467,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "下一首",
             PendingIntent.getBroadcast(
                 ctx, 2,
-                Intent(ACTION_NEXT).setPackage(ctx.packageName),
+                Intent(getActionNext(packageName)).setPackage(packageName),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
         )
@@ -1472,7 +1483,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // 删除通知时停止播放
         val deleteIntent = PendingIntent.getBroadcast(
             ctx, 3,
-            Intent(ACTION_STOP).setPackage(ctx.packageName),
+            Intent(getActionStop(packageName)).setPackage(packageName),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         
@@ -1523,24 +1534,32 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     private fun registerMediaReceiver() {
         val ctx = context ?: return
+        val packageName = ctx.packageName
+        
+        // 缓存当前包名对应的 Action（用于 when 匹配）
+        val actionPlay = getActionPlay(packageName)
+        val actionPause = getActionPause(packageName)
+        val actionNext = getActionNext(packageName)
+        val actionPrevious = getActionPrevious(packageName)
+        val actionStop = getActionStop(packageName)
         
         mediaReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
-                    ACTION_PLAY -> {
+                    actionPlay -> {
                         requestAudioFocus()
                         playWithFadeIn()
                     }
-                    ACTION_PAUSE -> {
+                    actionPause -> {
                         pauseWithFadeOut()
                     }
-                    ACTION_NEXT -> {
+                    actionNext -> {
                         playNextWithFade()
                     }
-                    ACTION_PREVIOUS -> {
+                    actionPrevious -> {
                         playPreviousWithFade()
                     }
-                    ACTION_STOP -> {
+                    actionStop -> {
                         stopWithFadeOut()
                     }
                 }
@@ -1548,11 +1567,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         
         val filter = IntentFilter().apply {
-            addAction(ACTION_PLAY)
-            addAction(ACTION_PAUSE)
-            addAction(ACTION_NEXT)
-            addAction(ACTION_PREVIOUS)
-            addAction(ACTION_STOP)
+            addAction(actionPlay)
+            addAction(actionPause)
+            addAction(actionNext)
+            addAction(actionPrevious)
+            addAction(actionStop)
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

@@ -61,16 +61,27 @@ class MainActivity: FlutterActivity() {
     private val exoPlayerMusicPlugin = ExoPlayerMusicPlugin()  // ✅ 音乐播放器插件
     
     companion object {
-        const val ACTION_PLAY_PAUSE = "com.toretto.embyhub.PLAY_PAUSE"
-        const val ACTION_NEXT = "com.toretto.embyhub.NEXT"
-        const val ACTION_PREVIOUS = "com.toretto.embyhub.PREVIOUS"
+        // 使用相对 Action 后缀，避免硬编码包名
+        private const val ACTION_SUFFIX_PLAY_PAUSE = ".PLAY_PAUSE"
+        private const val ACTION_SUFFIX_NEXT = ".NEXT"
+        private const val ACTION_SUFFIX_PREVIOUS = ".PREVIOUS"
+        
+        // 根据包名生成完整的 Action 名称
+        fun getActionPlayPause(packageName: String) = "$packageName$ACTION_SUFFIX_PLAY_PAUSE"
+        fun getActionNext(packageName: String) = "$packageName$ACTION_SUFFIX_NEXT"
+        fun getActionPrevious(packageName: String) = "$packageName$ACTION_SUFFIX_PREVIOUS"
     }
+    
+    // 缓存当前包名对应的 Action（延迟初始化）
+    private val actionPlayPause: String by lazy { getActionPlayPause(packageName) }
+    private val actionNext: String by lazy { getActionNext(packageName) }
+    private val actionPrevious: String by lazy { getActionPrevious(packageName) }
     
     private val pipReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             android.util.Log.d("MainActivity", "📡 PiP broadcast received: action=${intent?.action}, pipChannel=${if(pipChannel != null) "available" else "NULL"}")
             when (intent?.action) {
-                ACTION_PLAY_PAUSE -> {
+                actionPlayPause -> {
                     android.util.Log.d("MainActivity", "▶️ Calling togglePlayPause")
                     pipChannel?.invokeMethod("togglePlayPause", null, object : MethodChannel.Result {
                         override fun success(result: Any?) {
@@ -84,11 +95,11 @@ class MainActivity: FlutterActivity() {
                         }
                     })
                 }
-                ACTION_NEXT -> {
+                actionNext -> {
                     android.util.Log.d("MainActivity", "⏭ Calling next")
                     pipChannel?.invokeMethod("next", null)
                 }
-                ACTION_PREVIOUS -> {
+                actionPrevious -> {
                     android.util.Log.d("MainActivity", "⏮ Calling previous")
                     pipChannel?.invokeMethod("previous", null)
                 }
@@ -112,9 +123,9 @@ class MainActivity: FlutterActivity() {
         // 注册广播接收器
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val filter = IntentFilter().apply {
-                addAction(ACTION_PLAY_PAUSE)
-                addAction(ACTION_NEXT)
-                addAction(ACTION_PREVIOUS)
+                addAction(actionPlayPause)
+                addAction(actionNext)
+                addAction(actionPrevious)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(pipReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -438,7 +449,7 @@ class MainActivity: FlutterActivity() {
         val playPauseIntent = PendingIntent.getBroadcast(
             this,
             0,
-            Intent(ACTION_PLAY_PAUSE).setPackage(packageName),
+            Intent(actionPlayPause).setPackage(packageName),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             } else {
@@ -571,7 +582,7 @@ class MainActivity: FlutterActivity() {
                     "暂停",
                     PendingIntent.getBroadcast(
                         this, 0,
-                        Intent(ACTION_PLAY_PAUSE).setPackage(packageName),
+                        Intent(actionPlayPause).setPackage(packageName),
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                     )
                 )
@@ -581,7 +592,7 @@ class MainActivity: FlutterActivity() {
                     "播放",
                     PendingIntent.getBroadcast(
                         this, 0,
-                        Intent(ACTION_PLAY_PAUSE).setPackage(packageName),
+                        Intent(actionPlayPause).setPackage(packageName),
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                     )
                 )
