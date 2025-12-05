@@ -42,12 +42,6 @@ class MusicMiniPlayer extends ConsumerWidget {
               color: isDark
                   ? const Color(0xFF1A1A1A).withOpacity(0.7)
                   : Colors.white.withOpacity(0.7),
-              border: Border(
-                top: BorderSide(
-                  color: isDark ? Colors.white10 : Colors.black12,
-                  width: 0.5,
-                ),
-              ),
             ),
             child: SafeArea(
               top: false,

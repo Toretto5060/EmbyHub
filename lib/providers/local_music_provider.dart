@@ -852,6 +852,9 @@ final musicPageVisibleProvider = StateProvider<bool>((ref) => false);
 /// 音乐页面抽屉是否展开
 final musicDrawerOpenProvider = StateProvider<bool>((ref) => false);
 
+/// 请求关闭抽屉的触发器（每次增加表示请求关闭）
+final closeDrawerTriggerProvider = StateProvider<int>((ref) => 0);
+
 /// 音乐播放页面是否展开
 final musicPlayerExpandedProvider = StateProvider<bool>((ref) => false);
 

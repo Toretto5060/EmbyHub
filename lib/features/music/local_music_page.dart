@@ -35,13 +35,18 @@ class LocalMusicPage extends ConsumerStatefulWidget {
 }
 
 class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // 播放页面展开状态
   bool _isPlayerExpanded = false;
   late AnimationController _playerAnimationController;
   late Animation<double> _playerAnimation;
+
+  // 抽屉动画控制器
+  late AnimationController _drawerAnimationController;
+  late Animation<double> _drawerAnimation;
+  bool _isDrawerOpen = false;
 
   // 滚动控制器 - 用于毛玻璃效果
   final ScrollController _scrollController = ScrollController();
@@ -70,6 +75,18 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeOut, // 使用更平滑的曲线，避免开始时太慢
     );
+
+    // 抽屉动画控制器
+    _drawerAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _drawerAnimation = CurvedAnimation(
+      parent: _drawerAnimationController,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+
     _scrollController.addListener(_onScroll);
   }
 
@@ -78,6 +95,7 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _playerAnimationController.dispose();
+    _drawerAnimationController.dispose();
     super.dispose();
   }
 
@@ -106,7 +124,21 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
   ScrollController get currentScrollController => _scrollController;
 
   void _openDrawer() {
-    _scaffoldKey.currentState?.openDrawer();
+    setState(() {
+      _isDrawerOpen = true;
+    });
+    ref.read(musicDrawerOpenProvider.notifier).state = true;
+    _drawerAnimationController.forward();
+  }
+
+  void _closeDrawer() {
+    // 先更新状态，让 canPop 立即变为 true
+    setState(() {
+      _isDrawerOpen = false;
+    });
+    ref.read(musicDrawerOpenProvider.notifier).state = false;
+    // 然后执行关闭动画
+    _drawerAnimationController.reverse();
   }
 
   void _expandPlayer({bool showPlaylist = false}) {
@@ -228,6 +260,13 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
       }
     });
 
+    // 监听关闭抽屉的请求
+    ref.listen<int>(closeDrawerTriggerProvider, (previous, next) {
+      if (_isDrawerOpen && previous != next) {
+        _closeDrawer();
+      }
+    });
+
     // ✅ 初始展开逻辑：如果需要初始展开，直接显示全屏播放器
     if (shouldInitialExpand && !_isPlayerExpanded) {
       if (currentSong != null) {
@@ -265,66 +304,118 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
       }
     }
 
+    // 抽屉宽度 - 屏幕宽度的一半
+    final drawerWidth = MediaQuery.of(context).size.width / 2;
+
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor:
           isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF8F8F8),
-      onDrawerChanged: (isOpened) {
-        // 更新抽屉状态
-        ref.read(musicDrawerOpenProvider.notifier).state = isOpened;
-      },
-      drawer: MusicDrawer(
-        onExit: () {
-          Navigator.of(context).pop();
-          // 退出音乐页面
-          final wrapper = BottomNavWrapper.of(context);
-          wrapper?.exitMusicPage();
-        },
-      ),
-      body: Stack(
-        children: [
-          // 主内容区域（内容从顶部开始，顶部栏浮动在上方）
-          Positioned.fill(
-            child: _buildContentPage(currentNav),
-          ),
-          // 顶部导航栏（浮动，带毛玻璃效果）
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: _buildTopBar(context, isDark, currentNav),
-          ),
-          // 底部迷你播放器（始终显示，全屏播放器覆盖其上）
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: MusicMiniPlayer(
-              onTap: _expandPlayer,
-            ),
-          ),
-          // 全屏播放页面（覆盖在迷你播放器上方）
-          if (_isPlayerExpanded || _playerAnimationController.isAnimating)
-            AnimatedBuilder(
-              animation: _playerAnimation,
-              builder: (context, child) {
-                return Positioned.fill(
-                  child: Transform.translate(
-                    offset: Offset(
-                      0,
-                      MediaQuery.of(context).size.height *
-                          (1 - _playerAnimation.value),
-                    ),
-                    child: MusicPlayerPage(
-                      key: _playerPageKey,
-                      onCollapseWithOffset: _collapsePlayerWithOffset,
-                      initialPage: _initialPlayerPage,
+      body: AnimatedBuilder(
+        animation: _drawerAnimation,
+        builder: (context, child) {
+          final drawerOffset = _drawerAnimation.value * drawerWidth;
+
+          return Stack(
+            children: [
+              // 抽屉（固定在左侧）
+              if (_isDrawerOpen || _drawerAnimationController.isAnimating)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: drawerWidth,
+                  child: Opacity(
+                    opacity: _drawerAnimation.value,
+                    child: MusicDrawer(
+                      onExit: () {
+                        _closeDrawer();
+                        // 退出音乐页面
+                        final wrapper = BottomNavWrapper.of(context);
+                        wrapper?.exitMusicPage();
+                      },
+                      onClose: _closeDrawer,
                     ),
                   ),
-                );
-              },
-            ),
-        ],
+                ),
+              // 主内容区域（被挤压到右侧）
+              Positioned(
+                left: drawerOffset,
+                top: 0,
+                bottom: 0,
+                width: MediaQuery.of(context).size.width,
+                child: Stack(
+                  children: [
+                    // 主内容区域（内容从顶部开始，顶部栏浮动在上方）
+                    Positioned.fill(
+                      child: _buildContentPage(currentNav),
+                    ),
+                    // 顶部导航栏（浮动，带毛玻璃效果）
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: _buildTopBar(context, isDark, currentNav),
+                    ),
+                  ],
+                ),
+              ),
+              // 底部迷你播放器（不受抽屉影响，但在全屏播放器下方）
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: MusicMiniPlayer(
+                  onTap: _expandPlayer,
+                ),
+              ),
+              // 全屏播放页面（覆盖在迷你播放器上方）
+              if (_isPlayerExpanded || _playerAnimationController.isAnimating)
+                AnimatedBuilder(
+                  animation: _playerAnimation,
+                  builder: (context, child) {
+                    return Positioned.fill(
+                      child: Transform.translate(
+                        offset: Offset(
+                          0,
+                          MediaQuery.of(context).size.height *
+                              (1 - _playerAnimation.value),
+                        ),
+                        child: MusicPlayerPage(
+                          key: _playerPageKey,
+                          onCollapseWithOffset: _collapsePlayerWithOffset,
+                          initialPage: _initialPlayerPage,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              // 遮罩层 - 点击或左滑关闭抽屉（仅在全屏播放器未展开时显示）
+              if (_isDrawerOpen &&
+                  _drawerAnimation.value > 0.5 &&
+                  !_isPlayerExpanded)
+                Positioned(
+                  left: drawerOffset,
+                  top: 0,
+                  bottom: 72, // 迷你播放器高度
+                  right: 0,
+                  child: GestureDetector(
+                    onTap: _closeDrawer,
+                    onHorizontalDragEnd: (details) {
+                      // 左滑关闭抽屉
+                      if (details.primaryVelocity != null &&
+                          details.primaryVelocity! < -200) {
+                        _closeDrawer();
+                      }
+                    },
+                    child: Container(
+                      color: Colors.transparent,
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }

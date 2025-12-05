@@ -158,7 +158,7 @@ class _BottomNavWrapperState extends ConsumerState<BottomNavWrapper>
 
               // 如果抽屉展开，关闭抽屉
               if (isDrawerOpen) {
-                Navigator.of(context).pop();
+                ref.read(closeDrawerTriggerProvider.notifier).state++;
                 return;
               }
               // 如果播放页面展开，请求折叠播放页面
