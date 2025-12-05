@@ -57,11 +57,23 @@ class MainActivity: FlutterActivity() {
         android.util.Log.d("MainActivity", "🎵 from_broadcast: ${intent?.getBooleanExtra("from_broadcast", false)}")
         android.util.Log.d("MainActivity", "🎵 pendingAction: ${MusicControlReceiver.pendingAction}")
         
+        // ✅ 如果应用被清理后重新启动，检查播放器状态并重置
+        val wasCleared = !ExoPlayerMusicPlugin.isPlayerReady()
+        if (wasCleared) {
+            android.util.Log.d("MainActivity", "📱 App cleared from background, resetting playback state to paused")
+            currentPlayingState = false
+        }
+        
         // 检查悬浮窗权限（用于后台启动）
         checkOverlayPermission()
         
         // 动态创建快捷方式（解决 XML 占位符问题）
-        createShortcuts()
+        // ✅ 如果应用被清理，强制更新快捷方式为暂停状态
+        if (wasCleared) {
+            updateShortcuts(false)
+        } else {
+            createShortcuts()
+        }
         
         // 处理来自广播的启动
         handleBroadcastLaunch()
@@ -72,6 +84,34 @@ class MainActivity: FlutterActivity() {
         setIntent(intent)
         android.util.Log.d("MainActivity", "🎵 onNewIntent called")
         handleBroadcastLaunch()
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // ✅ 应用恢复时检查播放器状态，如果被清理则重置快捷方式
+        if (!ExoPlayerMusicPlugin.isPlayerReady()) {
+            android.util.Log.d("MainActivity", "📱 App resumed but player not ready (cleared from background), resetting shortcuts to paused state")
+            currentPlayingState = false
+            updateShortcuts(false)
+        } else {
+            // 如果播放器就绪，同步实际播放状态
+            val actualPlaying = ExoPlayerMusicPlugin.isPlaying()
+            if (currentPlayingState != actualPlaying) {
+                android.util.Log.d("MainActivity", "📱 Syncing playback state: $currentPlayingState -> $actualPlaying")
+                currentPlayingState = actualPlaying
+                updateShortcuts(actualPlaying)
+            }
+        }
+    }
+    
+    override fun onStart() {
+        super.onStart()
+        // ✅ 应用启动时也检查播放器状态，确保快捷方式状态正确
+        if (!ExoPlayerMusicPlugin.isPlayerReady()) {
+            android.util.Log.d("MainActivity", "📱 App started but player not ready, ensuring shortcuts are in paused state")
+            currentPlayingState = false
+            updateShortcuts(false)
+        }
     }
     
     private fun checkOverlayPermission() {
@@ -95,11 +135,12 @@ class MainActivity: FlutterActivity() {
                 android.util.Log.d("MainActivity", "📱 Getting playback state: player ready, isPlaying=$playing")
                 playing
             } else {
-                android.util.Log.d("MainActivity", "📱 Player not ready, using default state: false")
+                // ✅ 如果播放器未就绪（app被清理），强制设置为未播放状态
+                android.util.Log.d("MainActivity", "📱 Player not ready (app may be cleared), forcing paused state: false")
                 false
             }
         } catch (e: Exception) {
-            android.util.Log.w("MainActivity", "⚠️ Failed to get playback state: ${e.message}")
+            android.util.Log.w("MainActivity", "⚠️ Failed to get playback state: ${e.message}, forcing paused state")
             false
         }
         currentPlayingState = isPlaying
@@ -136,11 +177,12 @@ class MainActivity: FlutterActivity() {
                             .build()
                     )
                     
-                    // 切换快捷方式（使用合适的切换图标）
+                    // 切换快捷方式（使用循环图标）
                     val toggleIntent = Intent("$packageName.SHORTCUT_TOGGLE").apply {
                         setClassName(packageName, "${packageName}.MusicShortcutActivity")
                     }
-                    // 使用 ic_menu_revert 作为切换图标（表示切换/反转）
+                    // 使用 ic_menu_revert 作为切换图标（表示切换/循环）
+                    // 注意：如果需要真正的循环图标，需要添加自定义图标资源
                     shortcuts.add(
                         ShortcutInfo.Builder(this, "toggle_music")
                             .setShortLabel(getString(resources.getIdentifier("shortcut_toggle", "string", packageName)))
@@ -166,11 +208,12 @@ class MainActivity: FlutterActivity() {
                             .build()
                     )
                     
-                    // 切换快捷方式（使用合适的切换图标）
+                    // 切换快捷方式（使用循环图标）
                     val toggleIntent = Intent("$packageName.SHORTCUT_TOGGLE").apply {
                         setClassName(packageName, "${packageName}.MusicShortcutActivity")
                     }
-                    // 使用 ic_menu_revert 作为切换图标（表示切换/反转）
+                    // 使用 ic_menu_revert 作为切换图标（表示切换/循环）
+                    // 注意：如果需要真正的循环图标，需要添加自定义图标资源
                     shortcuts.add(
                         ShortcutInfo.Builder(this, "toggle_music")
                             .setShortLabel(getString(resources.getIdentifier("shortcut_toggle", "string", packageName)))

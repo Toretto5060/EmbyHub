@@ -104,17 +104,36 @@ class MusicControlReceiver : BroadcastReceiver() {
         }
         
         private fun executeAction(action: String) {
+            // ✅ 先检查播放器是否就绪
+            if (!ExoPlayerMusicPlugin.isPlayerReady()) {
+                Log.w(TAG, "⚠️ Player not ready, cannot execute action: $action")
+                return
+            }
+            
             when {
                 action.endsWith(".ACTION_PLAY") -> {
-                    Log.d(TAG, "▶️ Executing: PLAY")
+                    // ✅ 如果已经在播放，不重复响应
+                    val isCurrentlyPlaying = ExoPlayerMusicPlugin.isPlaying()
+                    if (isCurrentlyPlaying) {
+                        Log.d(TAG, "▶️ Already playing, ignoring PLAY action")
+                        return
+                    }
+                    Log.d(TAG, "▶️ Executing: PLAY (current state: paused)")
                     ExoPlayerMusicPlugin.externalPlay()
                 }
                 action.endsWith(".ACTION_PAUSE") -> {
-                    Log.d(TAG, "⏸️ Executing: PAUSE")
+                    // ✅ 如果已经暂停，不重复响应
+                    val isCurrentlyPlaying = ExoPlayerMusicPlugin.isPlaying()
+                    if (!isCurrentlyPlaying) {
+                        Log.d(TAG, "⏸️ Already paused, ignoring PAUSE action")
+                        return
+                    }
+                    Log.d(TAG, "⏸️ Executing: PAUSE (current state: playing)")
                     ExoPlayerMusicPlugin.externalPause()
                 }
                 action.endsWith(".ACTION_TOGGLE") -> {
-                    Log.d(TAG, "⏯️ Executing: TOGGLE")
+                    val isCurrentlyPlaying = ExoPlayerMusicPlugin.isPlaying()
+                    Log.d(TAG, "⏯️ Executing: TOGGLE (current state: ${if (isCurrentlyPlaying) "playing" else "paused"})")
                     ExoPlayerMusicPlugin.externalToggle()
                 }
                 action.endsWith(".ACTION_NEXT") -> {
