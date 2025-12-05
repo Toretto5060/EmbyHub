@@ -48,6 +48,58 @@ class MainActivity: FlutterActivity() {
     // ✅ MediaSession 相关
     private var mediaSession: MediaSessionCompat? = null
     private var currentVideoTitle: String = "EmbyHub"
+    
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        android.util.Log.d("MainActivity", "🎵 onCreate called, intent: $intent")
+        android.util.Log.d("MainActivity", "🎵 from_broadcast: ${intent?.getBooleanExtra("from_broadcast", false)}")
+        android.util.Log.d("MainActivity", "🎵 pendingAction: ${MusicControlReceiver.pendingAction}")
+        
+        // 检查悬浮窗权限（用于后台启动）
+        checkOverlayPermission()
+        
+        // 处理来自广播的启动
+        handleBroadcastLaunch()
+    }
+    
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        android.util.Log.d("MainActivity", "🎵 onNewIntent called")
+        handleBroadcastLaunch()
+    }
+    
+    private fun checkOverlayPermission() {
+        if (!MusicControlReceiver.canDrawOverlays(this)) {
+            android.util.Log.w("MainActivity", "⚠️ 没有悬浮窗权限，后台启动可能无法工作")
+            // 可以在这里提示用户授权，但不强制
+        }
+    }
+    
+    private fun handleBroadcastLaunch() {
+        val fromBroadcast = intent?.getBooleanExtra("from_broadcast", false) ?: false
+        val actionFromIntent = intent?.getStringExtra("pending_action")
+        
+        android.util.Log.d("MainActivity", "🎵 handleBroadcastLaunch: fromBroadcast=$fromBroadcast, actionFromIntent=$actionFromIntent")
+        
+        // 如果有来自 Intent 的 action，保存到静态变量
+        if (fromBroadcast && actionFromIntent != null) {
+            MusicControlReceiver.pendingAction = actionFromIntent
+            android.util.Log.d("MainActivity", "🎵 Saved pending action from intent: $actionFromIntent")
+        }
+        
+        // 执行待处理的命令
+        if (MusicControlReceiver.pendingAction != null) {
+            android.util.Log.d("MainActivity", "🎵 Executing pending action...")
+            MusicControlReceiver.executePendingAction()
+            
+            // 如果是从广播启动的，立即将应用移到后台（不显示界面）
+            if (fromBroadcast) {
+                android.util.Log.d("MainActivity", "🎵 Moving app to background...")
+                moveTaskToBack(true)
+            }
+        }
+    }
     private val NOTIFICATION_ID = 1001
     private val CHANNEL_ID = "media_playback_channel"
     
@@ -913,5 +965,6 @@ class MainActivity: FlutterActivity() {
             ""
         }
     }
+    
 }
 

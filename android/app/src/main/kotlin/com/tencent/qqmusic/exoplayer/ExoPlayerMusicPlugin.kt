@@ -190,12 +190,23 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         
         /**
-         * 检查播放器是否已初始化且有媒体
+         * 检查播放器是否已初始化
+         * 注意：只检查实例是否存在，不检查媒体项
+         * 因为用户可能划掉通知后想要恢复播放
          */
         fun isPlayerReady(): Boolean {
             val inst = instance ?: return false
+            // 只要有播放器实例或有播放列表就认为可以操作
+            return inst.player != null || inst.playlist.isNotEmpty()
+        }
+        
+        /**
+         * 检查是否有媒体可以播放
+         */
+        fun hasMedia(): Boolean {
+            val inst = instance ?: return false
             val p = inst.player ?: return false
-            return p.mediaItemCount > 0
+            return p.mediaItemCount > 0 || inst.playlist.isNotEmpty()
         }
     }
     
@@ -1606,10 +1617,10 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             )
         }
         
-        // 删除通知时停止播放
+        // 删除通知时暂停播放（而不是停止，这样用户可以通过广播恢复播放）
         val deleteIntent = PendingIntent.getBroadcast(
             ctx, 3,
-            Intent(getActionStop(packageName)).setPackage(packageName),
+            Intent(getActionPause(packageName)).setPackage(packageName),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         
