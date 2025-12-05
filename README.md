@@ -136,6 +136,42 @@ flutter build apk --release
 
 > ⚠️ **注意**: 更改 `applicationId` 后，Play Store 会将其识别为新应用，用户需要重新安装。
 
+### 修改应用图标
+
+使用 `flutter_launcher_icons` 自动生成所有分辨率的应用图标：
+
+#### 步骤
+
+1. 将你的图标图片放到 `assets/app_icon.png`（建议 1024×1024 px）
+
+2. 修改 `pubspec.yaml` 中的图标配置（如需要）：
+   ```yaml
+   flutter_launcher_icons:
+     android: true
+     ios: false
+     image_path: "assets/app_icon.png"
+     adaptive_icon_background: "#22C55E"  # 自适应图标背景色
+     adaptive_icon_foreground: "assets/app_icon.png"
+   ```
+
+3. 运行命令生成图标：
+   ```bash
+   flutter pub get
+   dart run flutter_launcher_icons
+   ```
+
+#### 配置说明
+
+| 配置项 | 说明 |
+|--------|------|
+| `image_path` | 图标源文件路径 |
+| `adaptive_icon_background` | Android 自适应图标背景色（支持颜色值或图片路径） |
+| `adaptive_icon_foreground` | Android 自适应图标前景图 |
+| `android` | 是否生成 Android 图标 |
+| `ios` | 是否生成 iOS 图标 |
+
+> 💡 **提示**: 自适应图标（Adaptive Icon）是 Android 8.0+ 的特性，允许系统在不同设备上显示不同形状的图标（圆形、方形、圆角方形等）。
+
 ### 项目结构
 
 ```
