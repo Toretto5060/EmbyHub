@@ -1,4 +1,4 @@
-package com.toretto.embyhub.exoplayer
+package com.tencent.qqmusic.exoplayer
 
 import android.content.Context
 import android.graphics.Bitmap

@@ -1,4 +1,4 @@
-package com.toretto.embyhub
+package com.tencent.qqmusic
 
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
@@ -31,8 +31,8 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import com.toretto.embyhub.exoplayer.ExoPlayerTexturePlugin
-import com.toretto.embyhub.exoplayer.ExoPlayerMusicPlugin
+import com.tencent.qqmusic.exoplayer.ExoPlayerTexturePlugin
+import com.tencent.qqmusic.exoplayer.ExoPlayerMusicPlugin
 import io.flutter.plugins.GeneratedPluginRegistrant
 
 class MainActivity: FlutterActivity() {

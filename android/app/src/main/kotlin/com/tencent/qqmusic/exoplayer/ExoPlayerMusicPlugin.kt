@@ -1,4 +1,4 @@
-package com.toretto.embyhub.exoplayer
+package com.tencent.qqmusic.exoplayer
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -30,7 +30,7 @@ import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.source.DefaultMediaSourceFactory
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
-import com.toretto.embyhub.R
+import com.tencent.qqmusic.R
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall

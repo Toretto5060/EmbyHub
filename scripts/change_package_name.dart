@@ -10,10 +10,11 @@ import 'dart:io';
 // ============================================================
 // 🔧 只需要修改这里的包名！
 // ============================================================
-const String newPackageName = 'com.toretto.embyhub'; // ← 修改为你的新包名
+const String newPackageName = 'com.tencent.qqmusic'; // ← 修改为你的新包名
 // ============================================================
 
 const String oldPackageName = 'com.toretto.embyhub';
+// const String oldPackageName = 'com.toretto.embyhub';
 
 void main() async {
   print('🚀 开始修改包名: $oldPackageName → $newPackageName\n');
@@ -139,8 +140,8 @@ Future<void> _renameDirectories(Directory projectDir) async {
   // 复制所有文件到新目录
   await _copyDirectory(oldDir, newDir);
 
-  // 删除旧目录（从最深层开始删除）
-  await _deleteOldPackageDir(kotlinBaseDir, oldPackageName);
+  // 删除旧目录（整个旧包名目录树）
+  await _deleteOldPackageDir(kotlinBaseDir, oldPackageName, newPackageName);
 
   print('✅ 已重命名目录结构');
 }
@@ -161,22 +162,37 @@ Future<void> _copyDirectory(Directory source, Directory destination) async {
 }
 
 Future<void> _deleteOldPackageDir(
-    Directory kotlinBaseDir, String packageName) async {
-  final parts = packageName.split('.');
+    Directory kotlinBaseDir, String oldPackage, String newPackage) async {
+  final oldParts = oldPackage.split('.');
+  final newParts = newPackage.split('.');
 
-  // 从最深层开始删除空目录
-  for (int i = parts.length; i > 0; i--) {
-    final path = '${kotlinBaseDir.path}/${parts.sublist(0, i).join('/')}';
-    final dir = Directory(path);
+  // 找到新旧包名的公共前缀长度
+  int commonPrefixLength = 0;
+  for (int i = 0; i < oldParts.length && i < newParts.length; i++) {
+    if (oldParts[i] == newParts[i]) {
+      commonPrefixLength = i + 1;
+    } else {
+      break;
+    }
+  }
 
-    if (dir.existsSync()) {
-      final contents = dir.listSync();
-      if (contents.isEmpty) {
-        await dir.delete();
-      } else {
-        // 如果目录不为空，删除所有内容
-        await dir.delete(recursive: true);
-        break;
+  // 删除旧包名中不属于公共前缀的部分
+  // 例如: com.toretto.embyhub → com.tencent.qqmusic
+  // 公共前缀是 com，所以要删除 com/toretto 整个目录
+  if (commonPrefixLength < oldParts.length) {
+    // 要删除的目录是公共前缀后的第一个不同的目录
+    final deleteFromIndex = commonPrefixLength;
+    final pathToDelete =
+        '${kotlinBaseDir.path}/${oldParts.sublist(0, deleteFromIndex + 1).join('/')}';
+    final dirToDelete = Directory(pathToDelete);
+
+    if (dirToDelete.existsSync()) {
+      try {
+        await dirToDelete.delete(recursive: true);
+        print(
+            '🗑️  已删除旧目录: ${oldParts.sublist(0, deleteFromIndex + 1).join('/')}');
+      } catch (e) {
+        print('⚠️  删除旧目录失败: $e');
       }
     }
   }
