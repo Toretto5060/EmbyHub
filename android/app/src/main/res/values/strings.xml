@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">EmbyHub</string>
+    
+    <!-- 快捷方式文字 -->
+    <string name="shortcut_play">播放</string>
+    <string name="shortcut_play_long">播放音乐</string>
+    <string name="shortcut_pause">暂停</string>
+    <string name="shortcut_pause_long">暂停音乐</string>
+    <string name="shortcut_toggle">播放/暂停</string>
+    <string name="shortcut_toggle_long">切换播放状态</string>
+</resources>
+

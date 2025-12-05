@@ -108,6 +108,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         private const val ACTION_SUFFIX_NEXT = ".music.NEXT"
         private const val ACTION_SUFFIX_PREVIOUS = ".music.PREVIOUS"
         private const val ACTION_SUFFIX_STOP = ".music.STOP"
+        private const val ACTION_SUFFIX_TOGGLE = ".music.TOGGLE"
         
         // 淡入淡出时长（毫秒）- 播放/暂停使用较短时间
         const val FADE_DURATION_MS = 300L
@@ -118,9 +119,84 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         fun getActionNext(packageName: String) = "$packageName$ACTION_SUFFIX_NEXT"
         fun getActionPrevious(packageName: String) = "$packageName$ACTION_SUFFIX_PREVIOUS"
         fun getActionStop(packageName: String) = "$packageName$ACTION_SUFFIX_STOP"
+        fun getActionToggle(packageName: String) = "$packageName$ACTION_SUFFIX_TOGGLE"
         
         // Crossfade 交叉淡化时长（毫秒）- 切换歌曲使用
         const val CROSSFADE_DURATION_MS = 1500L
+        
+        // ✅ 静态实例，供 MusicControlReceiver 直接调用
+        @Volatile
+        private var instance: ExoPlayerMusicPlugin? = null
+        
+        /**
+         * 获取当前实例（供外部调用）
+         */
+        fun getInstance(): ExoPlayerMusicPlugin? = instance
+        
+        /**
+         * 外部控制：播放
+         */
+        fun externalPlay() {
+            instance?.let {
+                it.handler.post {
+                    it.requestAudioFocus()
+                    it.playWithFadeIn()
+                }
+            }
+        }
+        
+        /**
+         * 外部控制：暂停
+         */
+        fun externalPause() {
+            instance?.let {
+                it.handler.post {
+                    it.pauseWithFadeOut()
+                }
+            }
+        }
+        
+        /**
+         * 外部控制：切换播放/暂停
+         */
+        fun externalToggle() {
+            instance?.let {
+                it.handler.post {
+                    it.togglePlayPause()
+                }
+            }
+        }
+        
+        /**
+         * 外部控制：下一首
+         */
+        fun externalNext() {
+            instance?.let {
+                it.handler.post {
+                    it.playNextWithFade()
+                }
+            }
+        }
+        
+        /**
+         * 外部控制：上一首
+         */
+        fun externalPrevious() {
+            instance?.let {
+                it.handler.post {
+                    it.playPreviousWithFade()
+                }
+            }
+        }
+        
+        /**
+         * 检查播放器是否已初始化且有媒体
+         */
+        fun isPlayerReady(): Boolean {
+            val inst = instance ?: return false
+            val p = inst.player ?: return false
+            return p.mediaItemCount > 0
+        }
     }
     
     // 进度更新是否正在运行
@@ -208,6 +284,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
         
+        // 设置静态实例，供 MusicControlReceiver 调用
+        instance = this
+        
         methodChannel = MethodChannel(
             binding.binaryMessenger,
             "com.embyhub/exoplayer_music"
@@ -243,6 +322,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        // 清除静态实例
+        instance = null
+        
         stopProgressUpdates()
         methodChannel.setMethodCallHandler(null)
         disposePlayer()
@@ -754,6 +836,20 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
             })
             start()
+        }
+    }
+    
+    /**
+     * 切换播放/暂停状态（用于快捷方式）
+     */
+    private fun togglePlayPause() {
+        val p = player ?: return
+        
+        if (p.isPlaying) {
+            pauseWithFadeOut()
+        } else {
+            requestAudioFocus()
+            playWithFadeIn()
         }
     }
     
@@ -1572,6 +1668,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val actionNext = getActionNext(packageName)
         val actionPrevious = getActionPrevious(packageName)
         val actionStop = getActionStop(packageName)
+        val actionToggle = getActionToggle(packageName)
         
         mediaReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
@@ -1592,6 +1689,10 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     actionStop -> {
                         stopWithFadeOut()
                     }
+                    actionToggle -> {
+                        // 切换播放/暂停状态
+                        togglePlayPause()
+                    }
                 }
             }
         }
@@ -1602,6 +1703,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             addAction(actionNext)
             addAction(actionPrevious)
             addAction(actionStop)
+            addAction(actionToggle)
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

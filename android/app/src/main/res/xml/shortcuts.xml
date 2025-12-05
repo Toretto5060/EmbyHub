@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 播放音乐快捷方式 -->
+    <shortcut
+        android:shortcutId="play_music"
+        android:enabled="true"
+        android:icon="@android:drawable/ic_media_play"
+        android:shortcutShortLabel="@string/shortcut_play"
+        android:shortcutLongLabel="@string/shortcut_play_long">
+        <intent
+            android:action="${applicationId}.SHORTCUT_PLAY"
+            android:targetPackage="${applicationId}"
+            android:targetClass="${applicationId}.MusicShortcutActivity" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <!-- 暂停音乐快捷方式 -->
+    <shortcut
+        android:shortcutId="pause_music"
+        android:enabled="true"
+        android:icon="@android:drawable/ic_media_pause"
+        android:shortcutShortLabel="@string/shortcut_pause"
+        android:shortcutLongLabel="@string/shortcut_pause_long">
+        <intent
+            android:action="${applicationId}.SHORTCUT_PAUSE"
+            android:targetPackage="${applicationId}"
+            android:targetClass="${applicationId}.MusicShortcutActivity" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <!-- 播放/暂停切换快捷方式（放最后） -->
+    <shortcut
+        android:shortcutId="toggle_music"
+        android:enabled="true"
+        android:icon="@android:drawable/ic_media_play"
+        android:shortcutShortLabel="@string/shortcut_toggle"
+        android:shortcutLongLabel="@string/shortcut_toggle_long">
+        <intent
+            android:action="${applicationId}.SHORTCUT_TOGGLE"
+            android:targetPackage="${applicationId}"
+            android:targetClass="${applicationId}.MusicShortcutActivity" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+</shortcuts>
+
