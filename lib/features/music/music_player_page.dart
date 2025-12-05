@@ -1986,21 +1986,74 @@ class _LyricLine {
   const _LyricLine(this.time, this.text);
 }
 
+/// 判断字符是否为中文
+bool _isChinese(int code) {
+  // 中文字符 Unicode 范围：\u4e00-\u9fff (CJK统一汉字)
+  // 以及 \u3400-\u4dbf (CJK统一汉字扩展A)
+  return (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf);
+}
+
+/// 判断字符是否为日语假名（平假名或片假名）
+bool _isJapaneseKana(int code) {
+  // 平假名：\u3040-\u309f
+  // 片假名：\u30a0-\u30ff
+  // 片假名扩展：\u31f0-\u31ff
+  return (code >= 0x3040 && code <= 0x309f) ||
+      (code >= 0x30a0 && code <= 0x30ff) ||
+      (code >= 0x31f0 && code <= 0x31ff);
+}
+
 /// 查找字符串中第一个中文字符的索引
 int _findFirstChineseIndex(String text) {
   for (int i = 0; i < text.length; i++) {
     final code = text.codeUnitAt(i);
-    // 中文字符 Unicode 范围：\u4e00-\u9fff (CJK统一汉字)
-    // 以及 \u3400-\u4dbf (CJK统一汉字扩展A)
-    if ((code >= 0x4e00 && code <= 0x9fff) ||
-        (code >= 0x3400 && code <= 0x4dbf)) {
+    if (_isChinese(code)) {
       return i;
     }
   }
   return -1;
 }
 
-/// 格式化双语歌词：在英文和中文之间自动换行
+/// 查找日语部分结束、中文部分开始的分界点
+/// 返回中文部分开始的索引，如果没找到返回 -1
+int _findJapaneseChineseBoundary(String text) {
+  bool hasJapaneseKana = false;
+  int lastJapaneseOrCommonIndex = -1;
+
+  for (int i = 0; i < text.length; i++) {
+    final code = text.codeUnitAt(i);
+
+    if (_isJapaneseKana(code)) {
+      hasJapaneseKana = true;
+      lastJapaneseOrCommonIndex = i;
+    } else if (_isChinese(code)) {
+      // 遇到中文字符
+      if (hasJapaneseKana && lastJapaneseOrCommonIndex >= 0) {
+        // 之前有日语假名，现在遇到中文，检查是否是纯中文序列的开始
+        // 往后看几个字符，如果连续都是中文且没有假名，说明是翻译部分
+        int chineseCount = 0;
+        int kanaCount = 0;
+        for (int j = i; j < text.length && j < i + 10; j++) {
+          final c = text.codeUnitAt(j);
+          if (_isChinese(c)) {
+            chineseCount++;
+          } else if (_isJapaneseKana(c)) {
+            kanaCount++;
+          }
+        }
+        // 如果后续中文明显多于假名，认为这是分界点
+        if (chineseCount >= 3 && kanaCount == 0) {
+          return i;
+        }
+      }
+      lastJapaneseOrCommonIndex = i;
+    }
+  }
+  return -1;
+}
+
+/// 格式化双语歌词：在不同语言之间自动换行
 String _formatBilingualLyrics(String text) {
   // 已经包含换行符的直接返回
   if (text.contains('\n')) return text;
@@ -2027,7 +2080,17 @@ String _formatBilingualLyrics(String text) {
         .join('\n');
   }
 
-  // 2. 检测英文后紧跟中文的情况（无分隔符）
+  // 2. 检测日语后紧跟中文的情况（日语歌词 + 中文翻译）
+  final jpCnBoundary = _findJapaneseChineseBoundary(text);
+  if (jpCnBoundary > 0) {
+    final japanesePart = text.substring(0, jpCnBoundary).trim();
+    final chinesePart = text.substring(jpCnBoundary).trim();
+    if (japanesePart.isNotEmpty && chinesePart.isNotEmpty) {
+      return '$japanesePart\n$chinesePart';
+    }
+  }
+
+  // 3. 检测英文后紧跟中文的情况（无分隔符）
   // 查找第一个中文字符的位置
   final chineseIndex = _findFirstChineseIndex(text);
   if (chineseIndex > 0) {
@@ -2133,7 +2196,7 @@ class _LyricsViewState extends State<_LyricsView> {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           0,
-          duration: const Duration(milliseconds: 100),
+          duration: const Duration(milliseconds: 10),
           curve: Curves.easeOutCubic,
         );
       }
@@ -2214,7 +2277,7 @@ class _LyricsViewState extends State<_LyricsView> {
     } else {
       _scrollController.animateTo(
         targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 300),
+        duration: const Duration(milliseconds: 10),
         curve: Curves.easeOutCubic,
       );
     }
@@ -2305,7 +2368,7 @@ class _LyricsViewState extends State<_LyricsView> {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   alignment: Alignment.centerLeft,
                   child: AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 300),
+                    duration: const Duration(milliseconds: 120),
                     curve: Curves.easeOutCubic,
                     style: TextStyle(
                       fontSize: isCurrent ? 26 : 21,
@@ -2323,7 +2386,7 @@ class _LyricsViewState extends State<_LyricsView> {
                       height: 1.4,
                     ),
                     child: AnimatedScale(
-                      duration: const Duration(milliseconds: 300),
+                      duration: const Duration(milliseconds: 120),
                       curve: Curves.easeOutCubic,
                       scale: isCurrent ? 1.0 : 0.95,
                       alignment: Alignment.centerLeft,
