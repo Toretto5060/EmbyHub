@@ -274,8 +274,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 val startIndex = call.argument<Int>("startIndex") ?: 0
                 val autoPlay = call.argument<Boolean>("autoPlay") ?: true
+                val startPositionMs = call.argument<Number>("startPositionMs")?.toLong() ?: 0L
                 
-                setPlaylist(items, startIndex, autoPlay)
+                setPlaylist(items, startIndex, autoPlay, startPositionMs)
                 result.success(null)
             }
             
@@ -380,6 +381,13 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 releaseMediaSession()
                 hideNotification()
                 result.success(null)
+            }
+            
+            "isPlayerReady" -> {
+                // 检查播放器是否准备好（有媒体源且可以播放）
+                val p = player
+                val isReady = p != null && p.playbackState == Player.STATE_READY
+                result.success(isReady)
             }
             
             else -> result.notImplemented()
@@ -513,7 +521,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         sendStateUpdate()
     }
     
-    private fun setPlaylist(items: List<Map<String, Any?>>, startIndex: Int, autoPlay: Boolean) {
+    private fun setPlaylist(items: List<Map<String, Any?>>, startIndex: Int, autoPlay: Boolean, startPositionMs: Long = 0L) {
         initializePlayer()
         
         playlist.clear()
@@ -556,8 +564,8 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             requestAudioFocus()
         }
         
-        // 设置播放列表
-        p.setMediaItems(mediaItems, currentIndex, 0)
+        // 设置播放列表（支持从指定位置开始播放）
+        p.setMediaItems(mediaItems, currentIndex, startPositionMs)
         p.prepare()
         p.playWhenReady = autoPlay
         

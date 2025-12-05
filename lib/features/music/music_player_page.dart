@@ -704,6 +704,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
               Navigator.of(context).pop();
               // 停止播放并清空队列
               ref.read(localMusicPlayerProvider.notifier).stop();
+              // 清除播放列表的持久化缓存
+              ref.read(localMusicPlayerProvider.notifier).clearSavedPlaylist();
               // 返回到第一屏
               scrollToPlayer();
               // 折叠播放器

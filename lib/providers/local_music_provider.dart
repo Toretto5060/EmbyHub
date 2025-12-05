@@ -425,16 +425,21 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     final wasPlaying = state.isPlaying;
     state = state.copyWith(isPlaying: !wasPlaying);
 
-    // 异步调用原生播放器（不等待）
+    // 异步调用原生播放器
     if (_player != null) {
       if (wasPlaying) {
         _player!.pause(); // 不使用 await
       } else {
-        // 如果没有当前歌曲但有播放列表，先加载
-        if (state.currentSong != null && !_player!.isInitialized) {
-          await _openCurrentSong();
+        // 使用与 play() 相同的逻辑：检查播放器是否真正准备好
+        if (state.currentSong != null) {
+          final isReady = await _player!.checkPlayerReady();
+          if (!isReady) {
+            // 播放器未准备好（可能是通知被清除后停止了），需要重新加载媒体源并自动播放
+            await _openCurrentSongAndPlay();
+          } else {
+            _player!.play(); // 不使用 await
+          }
         }
-        _player!.play(); // 不使用 await
       }
     }
   }
@@ -455,28 +460,47 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     state = state.copyWith(isPlaying: true);
 
     // 异步调用原生播放器
-    if (_player != null) {
-      if (state.currentSong != null && !_player!.isReady) {
-        await _openCurrentSong();
+    if (_player != null && state.currentSong != null) {
+      // 每次播放前都检查播放器是否真正准备好（同步查询原生端状态）
+      // 这样可以正确处理通知被清除后播放器被停止的情况
+      final isReady = await _player!.checkPlayerReady();
+      if (!isReady) {
+        // 播放器未准备好（可能是通知被清除后停止了），需要重新加载媒体源并自动播放
+        await _openCurrentSongAndPlay();
+      } else {
+        _player!.play(); // 不使用 await
       }
-      _player!.play(); // 不使用 await
     }
   }
 
-  /// 打开当前歌曲（如果有播放列表，则加载整个播放列表）
-  Future<void> _openCurrentSong() async {
+  /// 打开当前歌曲并自动播放（用于播放器被停止后重新开始播放）
+  Future<void> _openCurrentSongAndPlay() async {
     final song = state.currentSong;
     if (_player == null || song == null) return;
 
-    // 如果有播放列表，加载整个播放列表
+    // 如果有播放列表，加载整个播放列表并自动播放
     if (state.playlist.isNotEmpty) {
-      await _preloadPlaylistToPlayer(
-        state.playlist,
-        state.currentIndex,
-        state.position,
-      );
+      final items = state.playlist
+          .where((s) => s.path != null)
+          .map((s) => MusicItem(
+                url: s.path!,
+                title: s.title,
+                artist: s.artist,
+                album: s.album ?? '',
+                coverUrl: s.albumArt,
+              ))
+          .toList();
+
+      if (items.isNotEmpty) {
+        await _player!.setPlaylist(
+          items: items,
+          startIndex: state.currentIndex,
+          autoPlay: true, // 自动播放
+          startPosition: state.position, // 从当前位置开始播放
+        );
+      }
     } else if (song.path != null) {
-      // 否则只打开单首歌曲
+      // 否则只打开单首歌曲并自动播放
       await _player!.open(
         url: song.path!,
         title: song.title,
@@ -484,7 +508,7 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         album: song.album ?? '',
         coverUrl: song.albumArt,
         startPosition: state.position,
-        autoPlay: false,
+        autoPlay: true, // 自动播放
       );
     }
   }
@@ -849,6 +873,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     } catch (e) {
       print('Failed to clear saved state: $e');
     }
+  }
+
+  /// 清除播放列表的持久化缓存（公开方法）
+  Future<void> clearSavedPlaylist() async {
+    await _clearSavedState();
   }
 
   @override

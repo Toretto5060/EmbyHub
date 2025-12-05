@@ -294,13 +294,15 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
           ),
         );
       } else {
-        // 歌曲还没加载，显示空白页面等待（避免显示歌曲列表）
-        return Scaffold(
-          key: _scaffoldKey,
-          backgroundColor:
-              isDark ? const Color(0xFF0A0A0A) : const Color(0xFFF8F8F8),
-          body: const SizedBox.shrink(),
-        );
+        // 歌曲还没加载，清除标记并显示正常页面（避免永久黑屏）
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            InitialExpandMarker.clear();
+            setState(() {
+              _hasCheckedInitialExpand = true;
+            });
+          }
+        });
       }
     }
 

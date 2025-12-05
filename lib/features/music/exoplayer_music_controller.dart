@@ -97,6 +97,7 @@ class ExoPlayerMusicController {
     required List<MusicItem> items,
     int startIndex = 0,
     bool autoPlay = true,
+    Duration? startPosition,
   }) async {
     _ensureNotDisposed();
     await _ensureInitialized();
@@ -116,6 +117,7 @@ class ExoPlayerMusicController {
       'items': itemsList,
       'startIndex': startIndex,
       'autoPlay': autoPlay,
+      'startPositionMs': startPosition?.inMilliseconds ?? 0,
     });
   }
 
@@ -214,6 +216,20 @@ class ExoPlayerMusicController {
       'album': album,
       'coverUrl': coverUrl,
     });
+  }
+
+  /// 检查播放器是否准备好（有媒体源且可以播放）
+  /// 用于在播放前检测播放器状态，如果通知被清除导致播放器停止，需要重新加载媒体
+  Future<bool> checkPlayerReady() async {
+    _ensureNotDisposed();
+    if (!_isInitialized) return false;
+
+    try {
+      final result = await _channel.invokeMethod<bool>('isPlayerReady');
+      return result == true;
+    } catch (e) {
+      return false;
+    }
   }
 
   /// 释放资源
