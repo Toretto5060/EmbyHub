@@ -2173,6 +2173,14 @@ class _LyricsViewState extends State<_LyricsView> {
   double _containerHeight = 0;
   // 是否已经完成首次滚动定位
   bool _hasInitialScroll = false;
+  // 当前行是否已经到达屏幕中间（用于控制顶部虚化）
+  bool _hasReachedCenter = false;
+  // 是否已经滚动到底部（用于控制底部虚化）
+  bool _hasReachedBottom = false;
+  // 是否刚刚切换了歌曲（用于强制从顶部开始）
+  bool _justSwitchedSong = false;
+  // 估算的每行高度
+  static const double _estimatedItemHeight = 50.0;
 
   @override
   void initState() {
@@ -2191,15 +2199,17 @@ class _LyricsViewState extends State<_LyricsView> {
       _currentIndex = -1;
       _lastScrolledIndex = -1;
       _hasInitialScroll = false; // 重置首次滚动标记
+      _hasReachedCenter = false; // 重置居中状态
+      _hasReachedBottom = false; // 重置底部状态
+      _justSwitchedSong = true; // 标记刚刚切换了歌曲
 
-      // 滚动回顶部（带动画）
+      // 滚动回顶部
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          0,
-          duration: const Duration(milliseconds: 10),
-          curve: Curves.easeOutCubic,
-        );
+        _scrollController.jumpTo(0);
       }
+
+      // 触发 UI 更新以应用虚化状态变化
+      setState(() {});
     }
   }
 
@@ -2210,24 +2220,153 @@ class _LyricsViewState extends State<_LyricsView> {
   }
 
   /// 根据当前播放位置找到对应的歌词索引
+  /// 如果位置在第一句歌词之前，返回 0（最近的歌词）
+  /// 如果位置在最后一句歌词之后，返回最后一句的索引
   int _findCurrentIndex(Duration position) {
     if (_lines.isEmpty) return -1;
 
+    // 如果位置在第一句歌词之前，返回第一句（最近的）
+    if (position < _lines.first.time) {
+      return 0;
+    }
+
+    // 正常查找：找到最后一个时间小于等于当前位置的歌词
     for (int i = _lines.length - 1; i >= 0; i--) {
       if (position >= _lines[i].time) {
         return i;
       }
     }
-    return -1;
+
+    // 不应该到达这里，但作为保险返回最后一句
+    return _lines.length - 1;
   }
 
-  /// 滚动到当前歌词（让当前歌词始终在屏幕中间）
+  /// 计算当前行的自然位置（不滚动时的位置）
+  /// 使用实际渲染的高度，如果无法获取则使用估算值
+  double _calculateNaturalPosition(int index) {
+    double totalHeight = 16.0; // 顶部 padding
+
+    for (int i = 0; i < index && i < _itemKeys.length; i++) {
+      final key = _itemKeys[i];
+      final context = key.currentContext;
+      if (context != null) {
+        final renderBox = context.findRenderObject() as RenderBox?;
+        if (renderBox != null) {
+          totalHeight += renderBox.size.height;
+          continue;
+        }
+      }
+      // 无法获取实际高度，使用估算值
+      totalHeight += _estimatedItemHeight;
+    }
+
+    return totalHeight;
+  }
+
+  /// 获取当前行的实际高度
+  double _getItemHeight(int index) {
+    if (index < 0 || index >= _itemKeys.length) return _estimatedItemHeight;
+
+    final key = _itemKeys[index];
+    final context = key.currentContext;
+    if (context != null) {
+      final renderBox = context.findRenderObject() as RenderBox?;
+      if (renderBox != null) {
+        return renderBox.size.height;
+      }
+    }
+    return _estimatedItemHeight;
+  }
+
+  /// 判断当前行是否已经到达或超过屏幕中间
+  bool _shouldScrollToCenter(int index) {
+    final naturalPosition = _calculateNaturalPosition(index);
+    final itemHeight = _getItemHeight(index);
+    final centerThreshold = _containerHeight / 2 - itemHeight / 2;
+    return naturalPosition >= centerThreshold;
+  }
+
+  /// 判断是否已经到达底部（最后几行不需要居中，让歌词自然停在底部）
+  bool _isNearBottom(int index) {
+    if (_lines.isEmpty) return false;
+
+    // 计算剩余歌词的总高度（使用实际高度）
+    double remainingHeight = 0;
+    for (int i = index + 1; i < _lines.length && i < _itemKeys.length; i++) {
+      remainingHeight += _getItemHeight(i);
+    }
+
+    // 如果剩余高度不足半屏，说明到底部了
+    return remainingHeight < _containerHeight / 2;
+  }
+
+  /// 滚动到当前歌词
+  /// 只有当当前行到达屏幕中间后才开始居中滚动
+  /// 到达底部后不再强制居中
   void _scrollToCurrentLine(int index, {bool isInitial = false}) {
     if (!_scrollController.hasClients || index < 0 || index >= _itemKeys.length)
       return;
     if (index == _lastScrolledIndex) return; // 避免重复滚动
 
     _lastScrolledIndex = index;
+
+    // 判断是否需要居中滚动
+    final shouldCenter = _shouldScrollToCenter(index);
+    // 判断是否到达底部
+    final isNearBottom = _isNearBottom(index);
+
+    // 更新居中状态
+    if (shouldCenter && !_hasReachedCenter) {
+      setState(() {
+        _hasReachedCenter = true;
+      });
+    } else if (!shouldCenter && _hasReachedCenter) {
+      // 快退到中间之前的位置，重置状态并滚动回顶部
+      setState(() {
+        _hasReachedCenter = false;
+        _hasReachedBottom = false;
+      });
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
+      return;
+    }
+
+    // 更新底部状态
+    if (isNearBottom && !_hasReachedBottom) {
+      setState(() {
+        _hasReachedBottom = true;
+      });
+    } else if (!isNearBottom && _hasReachedBottom) {
+      setState(() {
+        _hasReachedBottom = false;
+      });
+    }
+
+    // 如果还没到达中间，不需要滚动
+    if (!shouldCenter) {
+      return;
+    }
+
+    // 如果已经到达底部，不再强制居中，让歌词自然停在底部
+    if (isNearBottom) {
+      // 滚动到最大位置即可
+      final maxOffset = _scrollController.position.maxScrollExtent;
+      if (_scrollController.offset < maxOffset) {
+        if (isInitial) {
+          _scrollController.jumpTo(maxOffset);
+        } else {
+          _scrollController.animateTo(
+            maxOffset,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      }
+      return;
+    }
 
     // 获取当前歌词项的 RenderBox
     final key = _itemKeys[index];
@@ -2237,11 +2376,11 @@ class _LyricsViewState extends State<_LyricsView> {
     if (itemContext == null) {
       if (isInitial) {
         // 首次滚动时，使用估算的行高直接跳转
-        // 估算每行高度约 50 像素（21号字体 + padding）
-        const estimatedItemHeight = 50.0;
-        final estimatedOffset = index * estimatedItemHeight;
+        final naturalPosition = _calculateNaturalPosition(index);
+        final centerThreshold = _containerHeight / 2 - _estimatedItemHeight / 2;
+        final targetOffset = naturalPosition - centerThreshold;
         final maxOffset = _scrollController.position.maxScrollExtent;
-        _scrollController.jumpTo(estimatedOffset.clamp(0.0, maxOffset));
+        _scrollController.jumpTo(targetOffset.clamp(0.0, maxOffset));
         // 跳转后重置标记，让下一帧可以精确滚动
         _lastScrolledIndex = -1;
       }
@@ -2277,7 +2416,7 @@ class _LyricsViewState extends State<_LyricsView> {
     } else {
       _scrollController.animateTo(
         targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 10),
+        duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic,
       );
     }
@@ -2293,25 +2432,58 @@ class _LyricsViewState extends State<_LyricsView> {
       _hasInitialScroll = true;
       _currentIndex = newIndex;
       _lastScrolledIndex = -1; // 强制触发滚动
-      // 使用多次 postFrameCallback 确保 ListView 完全渲染
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          // 首次滚动，使用 isInitial=true 支持估算位置跳转
-          _scrollToCurrentLine(_currentIndex, isInitial: true);
-          // 跳转后再次尝试精确定位
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _lastScrolledIndex == -1) {
-              _scrollToCurrentLine(_currentIndex, isInitial: true);
-            }
-          });
-        }
-      });
+
+      // 如果刚刚切换了歌曲，强制从顶部开始，不滚动到当前位置
+      if (_justSwitchedSong) {
+        _justSwitchedSong = false;
+        // 确保滚动到顶部
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _scrollController.hasClients) {
+            _scrollController.jumpTo(0);
+          }
+        });
+      } else {
+        // 不是切换歌曲（比如恢复播放位置），需要滚动到当前歌词
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            // 首次滚动，使用 isInitial=true 支持估算位置跳转
+            _scrollToCurrentLine(_currentIndex, isInitial: true);
+            // 跳转后再次尝试精确定位
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _lastScrolledIndex == -1) {
+                _scrollToCurrentLine(_currentIndex, isInitial: true);
+              }
+            });
+          }
+        });
+      }
     } else if (newIndex != _currentIndex) {
+      final oldIndex = _currentIndex;
       _currentIndex = newIndex;
-      // 在下一帧滚动，确保布局完成
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToCurrentLine(_currentIndex);
-      });
+
+      // 检查是否是大幅度跳转（快进/快退超过5行，或者 oldIndex 无效）
+      final isLargeJump = oldIndex < 0 || (newIndex - oldIndex).abs() > 5;
+
+      if (isLargeJump) {
+        // 大幅度跳转时，重置滚动索引，使用 isInitial 模式确保能滚动到位
+        _lastScrolledIndex = -1;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _scrollToCurrentLine(_currentIndex, isInitial: true);
+            // 再次尝试精确定位
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _lastScrolledIndex == -1) {
+                _scrollToCurrentLine(_currentIndex, isInitial: true);
+              }
+            });
+          }
+        });
+      } else {
+        // 正常播放，在下一帧滚动
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToCurrentLine(_currentIndex);
+        });
+      }
     }
 
     if (_lines.isEmpty) {
@@ -2331,23 +2503,49 @@ class _LyricsViewState extends State<_LyricsView> {
       builder: (context, constraints) {
         // 保存容器高度
         _containerHeight = constraints.maxHeight;
-        // 上下 padding，让第一行和最后一行都能滚动到中间
-        final verticalPadding = _containerHeight / 2;
+        // 底部 padding：如果还没到底部，需要留出空间让歌词能滚动到中间
+        // 如果已经到底部，不需要额外 padding
+        final bottomPadding = _hasReachedBottom ? 16.0 : _containerHeight / 2;
+
+        // 根据顶部和底部状态决定虚化效果
+        List<Color> gradientColors;
+        if (_hasReachedCenter && _hasReachedBottom) {
+          // 中间状态：顶部虚化，底部不虚化
+          gradientColors = const [
+            Colors.transparent,
+            Colors.white,
+            Colors.white,
+            Colors.white,
+          ];
+        } else if (_hasReachedCenter) {
+          // 正常居中状态：顶部和底部都虚化
+          gradientColors = const [
+            Colors.transparent,
+            Colors.white,
+            Colors.white,
+            Colors.transparent,
+          ];
+        } else {
+          // 开头状态：顶部不虚化，底部虚化
+          gradientColors = const [
+            Colors.white,
+            Colors.white,
+            Colors.white,
+            Colors.transparent,
+          ];
+        }
 
         return Padding(
           padding: const EdgeInsets.only(left: 40, right: 40),
-          // 使用 ShaderMask 让文字在上下边缘渐变透明
+          // 使用 ShaderMask 让文字在边缘渐变透明
+          // 顶部虚化只在当前行到达中间后才启用
+          // 底部虚化在到达底部后取消
           child: ShaderMask(
             shaderCallback: (Rect bounds) {
               return LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: const [
-                  Colors.transparent,
-                  Colors.white,
-                  Colors.white,
-                  Colors.transparent,
-                ],
+                colors: gradientColors,
                 // 顶部30%和底部30%渐变，中间40%完全显示
                 stops: const [0.0, 0.30, 0.70, 1.0],
               ).createShader(bounds);
@@ -2355,8 +2553,8 @@ class _LyricsViewState extends State<_LyricsView> {
             blendMode: BlendMode.dstIn,
             child: ListView.builder(
               controller: _scrollController,
-              // 上下 padding 保持半容器高度，让歌词能滚动到中间
-              padding: EdgeInsets.symmetric(vertical: verticalPadding),
+              // 顶部不需要 padding，底部 padding 让最后一行能滚动到中间
+              padding: EdgeInsets.only(top: 16, bottom: bottomPadding),
               itemCount: _lines.length,
               itemBuilder: (context, index) {
                 final line = _lines[index];

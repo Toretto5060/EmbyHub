@@ -222,14 +222,17 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     // 注意：isPlaying 状态由用户操作控制，不从原生播放器同步
     // 只同步 position、duration、isBuffering
     _stateSubscription = player.stateStream.listen((playerState) {
+      final oldPositionSec = state.position.inSeconds;
+      final newPositionSec = playerState.position.inSeconds;
+
       state = state.copyWith(
         position: playerState.position,
         duration: playerState.duration,
         isBuffering: playerState.isBuffering,
       );
 
-      // 每10秒保存一次位置
-      if (playerState.position.inSeconds % 10 == 0 && state.isPlaying) {
+      // 每秒保存一次位置（当秒数变化时保存）
+      if (newPositionSec != oldPositionSec && state.isPlaying) {
         _savePlayingState();
       }
     });
@@ -374,6 +377,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       if (startPosition.inMilliseconds > 0) {
         await _player!.seek(startPosition);
       }
+
+      // 将当前歌曲添加到随机播放历史记录（用于上一首功能）
+      _addToShuffleHistory(startIndex);
     }
   }
 
@@ -666,7 +672,7 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     return nextIndex;
   }
 
-  /// 获取上一首随机播放的索引（从历史记录中获取）
+  /// 获取上一首随机播放的索引（从历史记录中获取，没有则随机）
   int _getPreviousShuffleIndex() {
     if (state.playlist.length == 1) {
       return 0;
@@ -678,8 +684,19 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       return _shuffleHistory[_shuffleHistoryIndex];
     }
 
-    // 如果没有历史记录或已经是第一首，返回当前歌曲（重新播放）
-    return state.currentIndex;
+    // 如果没有历史记录或已经是第一首，随机选择一首（不同于当前歌曲）
+    final random = Random();
+    int randomIndex;
+    do {
+      randomIndex = random.nextInt(state.playlist.length);
+    } while (randomIndex == state.currentIndex && state.playlist.length > 1);
+
+    // 将随机选择的歌曲插入到历史记录开头
+    _shuffleHistory.insert(0, randomIndex);
+    // _shuffleHistoryIndex 保持为 0，指向新插入的歌曲
+    _shuffleHistoryIndex = 0;
+
+    return randomIndex;
   }
 
   /// 添加索引到随机播放历史记录
@@ -783,10 +800,18 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     }
   }
 
+  // 上次保存的秒数，用于避免同一秒内重复保存
+  int _lastSavedPositionSec = -1;
+
   void updatePosition(Duration position) {
+    final oldPositionSec = state.position.inSeconds;
     state = state.copyWith(position: position);
-    // 每10秒保存一次位置，避免频繁写入
-    if (position.inSeconds % 10 == 0) {
+
+    // 每秒保存一次位置（当秒数变化时保存）
+    final newPositionSec = position.inSeconds;
+    if (newPositionSec != oldPositionSec &&
+        newPositionSec != _lastSavedPositionSec) {
+      _lastSavedPositionSec = newPositionSec;
       _savePlayingState();
     }
   }
