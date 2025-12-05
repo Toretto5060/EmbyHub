@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,9 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/local_music_provider.dart';
 import '../../../providers/local_music_storage_provider.dart';
 import '../../../utils/theme_utils.dart';
-
-/// 封面图片缓存
-final Map<String, ImageProvider> _albumArtCache = {};
+import '../../../widgets/default_album_cover.dart';
 
 /// 音质信息
 class _QualityInfo {
@@ -232,61 +229,13 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
-  /// 获取缓存的封面图片
-  ImageProvider? _getCachedAlbumArt(String? path) {
-    if (path == null) return null;
-
-    if (_albumArtCache.containsKey(path)) {
-      return _albumArtCache[path];
-    }
-
-    final file = File(path);
-    if (file.existsSync()) {
-      final provider = FileImage(file);
-      _albumArtCache[path] = provider;
-      return provider;
-    }
-
-    return null;
-  }
-
   /// 构建专辑封面组件
   Widget _buildAlbumArt(LocalSong song, bool isPlaying, bool isDark) {
-    final albumArtProvider = _getCachedAlbumArt(song.albumArt);
-
-    return Container(
-      width: 48,
-      height: 48,
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: albumArtProvider != null
-          ? Image(
-              image: albumArtProvider,
-              width: 48,
-              height: 48,
-              fit: BoxFit.cover,
-              gaplessPlayback: true, // 防止滚动时闪烁
-              errorBuilder: (context, error, stackTrace) {
-                return _buildDefaultMusicIcon(isPlaying, isDark);
-              },
-            )
-          : _buildDefaultMusicIcon(isPlaying, isDark),
-    );
-  }
-
-  /// 构建默认音乐图标
-  Widget _buildDefaultMusicIcon(bool isPlaying, bool isDark) {
-    return Center(
-      child: Icon(
-        CupertinoIcons.double_music_note,
-        size: 24,
-        color: isPlaying
-            ? CupertinoColors.activeBlue
-            : (isDark ? Colors.white38 : Colors.black26),
-      ),
+    return AlbumCoverImage(
+      albumArt: song.albumArt,
+      size: 48,
+      iconSize: 24,
+      borderRadius: BorderRadius.circular(6),
     );
   }
 

@@ -109,29 +109,44 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         const val CROSSFADE_DURATION_MS = 1500L
     }
     
+    // 进度更新是否正在运行
+    private var isProgressRunnableRunning = false
+    
     private val progressRunnable = object : Runnable {
         override fun run() {
             sendStateUpdate()
             // 同时更新 MediaSession 进度，让媒体通知的进度条正确显示
             updateMediaSessionState()
-            handler.postDelayed(this, 500)
+            if (isProgressRunnableRunning) {
+                handler.postDelayed(this, 500)
+            }
+        }
+    }
+    
+    private fun startProgressUpdates() {
+        if (!isProgressRunnableRunning) {
+            isProgressRunnableRunning = true
+            handler.post(progressRunnable)
+        }
+    }
+    
+    private fun stopProgressUpdates() {
+        if (isProgressRunnableRunning) {
+            isProgressRunnableRunning = false
+            handler.removeCallbacks(progressRunnable)
         }
     }
     
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
-            val stateStr = when (playbackState) {
-                Player.STATE_IDLE -> "IDLE"
-                Player.STATE_BUFFERING -> "BUFFERING"
-                Player.STATE_READY -> "READY"
-                Player.STATE_ENDED -> "ENDED"
-                else -> "UNKNOWN($playbackState)"
-            }
-            android.util.Log.d("ExoPlayerMusicPlugin", "Playback state changed: $stateStr, isCrossfading=$isCrossfading")
-            
             sendStateUpdate()
             updateNotification()
             updateMediaSessionState()
+            
+            // 当播放器准备好时，更新 MediaSession 元数据（此时 duration 才有效）
+            if (playbackState == Player.STATE_READY) {
+                updateMediaSessionMetadata()
+            }
             
             // 播放结束时自动播放下一首（但 crossfade 过程中不处理，避免冲突）
             if (playbackState == Player.STATE_ENDED && !isCrossfading) {
@@ -147,14 +162,12 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            android.util.Log.d("ExoPlayerMusicPlugin", "isPlaying changed: $isPlaying")
             sendStateUpdate()
             updateNotification()
             updateMediaSessionState()
         }
         
         override fun onPlayerError(error: PlaybackException) {
-            android.util.Log.e("ExoPlayerMusicPlugin", "Player error: ${error.errorCode} - ${error.message}", error)
             eventSink?.success(hashMapOf(
                 "event" to "error",
                 "message" to (error.localizedMessage ?: "Unknown playback error")
@@ -162,7 +175,6 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            android.util.Log.d("ExoPlayerMusicPlugin", "Media item transition: ${mediaItem?.mediaId}, reason=$reason, isCrossfading=$isCrossfading")
             // 在 crossfade 过程中，元数据已经在 startRealCrossfade 中更新了，不需要再次更新
             // 避免重复更新导致的问题
             if (mediaItem != null && !isCrossfading) {
@@ -173,6 +185,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 updateCurrentMetadata()
                 updateMediaSessionMetadata()
+                updateMediaSessionState()
                 updateNotification()
             }
         }
@@ -194,12 +207,13 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         eventChannel.setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                 eventSink = events
-                handler.post(progressRunnable)
+                // 启动进度更新（如果还没启动）
+                startProgressUpdates()
                 sendStateUpdate()
             }
             
             override fun onCancel(arguments: Any?) {
-                handler.removeCallbacks(progressRunnable)
+                // 注意：不要停止进度更新，因为媒体通知仍然需要更新进度
                 eventSink = null
             }
         })
@@ -215,7 +229,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        handler.removeCallbacks(progressRunnable)
+        stopProgressUpdates()
         methodChannel.setMethodCallHandler(null)
         disposePlayer()
         releaseMediaSession()
@@ -246,8 +260,6 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val coverUrl = call.argument<String>("coverUrl")
                 val startPositionMs = call.argument<Number>("startPositionMs")?.toLong()
                 val autoPlay = call.argument<Boolean>("autoPlay") ?: true
-                
-                android.util.Log.d("ExoPlayerMusicPlugin", "open called: url=$url, title=$title, coverUrl=$coverUrl, autoPlay=$autoPlay")
                 
                 openMedia(url, headers, title, artist, album, coverUrl, startPositionMs, autoPlay)
                 result.success(null)
@@ -291,6 +303,8 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 // 在 crossfade 过程中，seek 操作应该作用于新播放器
                 val targetPlayer = if (isCrossfading) crossfadePlayer else player
                 targetPlayer?.seekTo(position)
+                // 更新 MediaSession 状态，确保进度条正确显示
+                updateMediaSessionState()
                 result.success(null)
             }
             
@@ -373,14 +387,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     private fun initializePlayer() {
-        if (player != null) {
-            android.util.Log.d("ExoPlayerMusicPlugin", "Player already initialized")
-            return
-        }
+        if (player != null) return
         
         val ctx = context ?: return
-        
-        android.util.Log.d("ExoPlayerMusicPlugin", "Initializing ExoPlayer for music")
         
         val exoPlayer = ExoPlayer.Builder(ctx).build()
         
@@ -404,7 +413,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // 初始化 MediaSession
         initMediaSession()
         
-        android.util.Log.d("ExoPlayerMusicPlugin", "ExoPlayer initialized successfully")
+        // 启动进度更新（用于更新媒体通知的进度条）
+        startProgressUpdates()
+        
         sendStateUpdate()
     }
     
@@ -476,8 +487,6 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         val p = player ?: return
         
-        android.util.Log.d("ExoPlayerMusicPlugin", "Opening media: $uri, autoPlay=$autoPlay")
-        
         if (startPositionMs != null && startPositionMs > 0) {
             p.setMediaSource(mediaSourceFactory.createMediaSource(mediaItem), startPositionMs)
         } else {
@@ -486,23 +495,21 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         // 先请求音频焦点，再准备播放
         if (autoPlay) {
-            android.util.Log.d("ExoPlayerMusicPlugin", "Requesting audio focus before playback")
             requestAudioFocus()
         }
         
-        android.util.Log.d("ExoPlayerMusicPlugin", "Preparing player")
         p.prepare()
         p.playWhenReady = autoPlay
         
-        // 更新 MediaSession 元数据
+        // 更新 MediaSession 元数据和状态
         updateMediaSessionMetadata()
+        updateMediaSessionState()
         
         // 只在自动播放时激活通知
         if (autoPlay) {
             showNotification()
         }
         
-        android.util.Log.d("ExoPlayerMusicPlugin", "Media opened successfully")
         sendStateUpdate()
     }
     
@@ -554,7 +561,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         p.prepare()
         p.playWhenReady = autoPlay
         
+        // 更新 MediaSession 元数据和状态
         updateMediaSessionMetadata()
+        updateMediaSessionState()
         
         // 只在自动播放时激活通知
         if (autoPlay) {
@@ -624,7 +633,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             currentIndex = index
             updateCurrentMetadata()
             updateMediaSessionMetadata()
+            updateMediaSessionState()
             updateNotification()
+            sendStateUpdate()
         }
     }
     
@@ -653,6 +664,8 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         // 立即发送状态更新，让 UI 响应更快
         sendStateUpdate()
+        // 更新 MediaSession 状态，确保进度条正确显示
+        updateMediaSessionState()
         
         // 淡入到目标音量
         fadeAnimator = android.animation.ValueAnimator.ofFloat(0f, targetVolume).apply {
@@ -753,12 +766,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         // 计算下一首的索引
         val nextIndex = currentIndex + 1
-        if (nextIndex >= playlist.size) {
-            android.util.Log.d("ExoPlayerMusicPlugin", "playNextWithFade: No next track, at end of playlist")
-            return
-        }
-        
-        android.util.Log.d("ExoPlayerMusicPlugin", "playNextWithFade: currentIndex=$currentIndex, nextIndex=$nextIndex")
+        if (nextIndex >= playlist.size) return
         
         // 开始真正的 Crossfade
         startRealCrossfade(nextIndex)
@@ -781,21 +789,18 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         // 如果当前播放超过 3 秒，则重新播放当前曲目（带淡入淡出）
         if (p.currentPosition > 3000) {
-            android.util.Log.d("ExoPlayerMusicPlugin", "playPreviousWithFade: Restarting current track (position > 3s)")
             restartCurrentTrackWithFade()
             return
         }
         
         // 如果已经是第一首，只是重新播放
         if (currentIndex == 0) {
-            android.util.Log.d("ExoPlayerMusicPlugin", "playPreviousWithFade: Already at first track, restarting")
             restartCurrentTrackWithFade()
             return
         }
         
         // 计算上一首的索引
         val prevIndex = currentIndex - 1
-        android.util.Log.d("ExoPlayerMusicPlugin", "playPreviousWithFade: currentIndex=$currentIndex, prevIndex=$prevIndex")
         
         // 开始真正的 Crossfade
         startRealCrossfade(prevIndex)
@@ -817,6 +822,8 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
                     player?.seekTo(0)
+                    // 更新 MediaSession 状态
+                    updateMediaSessionState()
                     // 淡入
                     fadeAnimator = android.animation.ValueAnimator.ofFloat(0f, targetVolume).apply {
                         duration = FADE_DURATION_MS
@@ -841,12 +848,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val ctx = context ?: return
         val fadingOutPlayer = player ?: return
         
-        if (targetIndex < 0 || targetIndex >= playlist.size) {
-            android.util.Log.e("ExoPlayerMusicPlugin", "startRealCrossfade: Invalid targetIndex=$targetIndex, playlist.size=${playlist.size}")
-            return
-        }
-        
-        android.util.Log.d("ExoPlayerMusicPlugin", "startRealCrossfade: Starting crossfade from $currentIndex to $targetIndex")
+        if (targetIndex < 0 || targetIndex >= playlist.size) return
         
         isCrossfading = true
         
@@ -857,6 +859,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         currentIndex = targetIndex
         updateCurrentMetadata()
         updateMediaSessionMetadata()
+        updateMediaSessionState()
         updateNotification()
         sendStateUpdate()
         
@@ -923,7 +926,6 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 
                 override fun onAnimationCancel(animation: android.animation.Animator) {
                     // 注意：cancel 后不做任何处理，由调用者决定如何处理
-                    android.util.Log.d("ExoPlayerMusicPlugin", "Crossfade animation cancelled")
                 }
             })
             start()
@@ -936,8 +938,6 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun finishCrossfade() {
         val newPlayer = crossfadePlayer ?: return
         val oldPlayer = fadingOutPlayerRef  // 使用保存的淡出播放器引用
-        
-        android.util.Log.d("ExoPlayerMusicPlugin", "finishCrossfade: Switching players, currentIndex=$currentIndex")
         
         // 停止并释放旧播放器
         oldPlayer?.let {
@@ -959,8 +959,8 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         // 发送最终状态更新
         sendStateUpdate()
-        
-        android.util.Log.d("ExoPlayerMusicPlugin", "finishCrossfade: Complete")
+        // 更新 MediaSession 状态，确保进度条正确显示
+        updateMediaSessionState()
     }
     
     /**
@@ -991,6 +991,8 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             player = newPlayer
             newPlayer.volume = targetVolume
             newPlayer.addListener(playerListener)
+            // 更新 MediaSession 状态
+            updateMediaSessionState()
         } else {
             // 没有新播放器，只清理状态
             crossfadePlayer = null
@@ -1058,7 +1060,6 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     if (file.exists()) {
                         BitmapFactory.decodeFile(filePath)
                     } else {
-                        android.util.Log.w("ExoPlayerMusicPlugin", "Cover file not found: $filePath")
                         null
                     }
                 } else {
@@ -1077,10 +1078,38 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     updateNotification()
                 }
             } catch (e: Exception) {
-                android.util.Log.e("ExoPlayerMusicPlugin", "Failed to load cover: $e")
                 currentCoverBitmap = null
             }
         }
+    }
+    
+    // 默认封面缓存
+    private var defaultAlbumCoverBitmap: Bitmap? = null
+    
+    /// 获取默认专辑封面
+    private fun getDefaultAlbumCover(): Bitmap? {
+        if (defaultAlbumCoverBitmap != null) {
+            return defaultAlbumCoverBitmap
+        }
+        
+        val ctx = context ?: return null
+        
+        try {
+            // 从 drawable 资源加载默认封面
+            val drawable = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.default_album_cover)
+            if (drawable != null) {
+                val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bitmap)
+                drawable.setBounds(0, 0, canvas.width, canvas.height)
+                drawable.draw(canvas)
+                defaultAlbumCoverBitmap = bitmap
+                return bitmap
+            }
+        } catch (e: Exception) {
+            // 忽略加载失败
+        }
+        
+        return null
     }
     
     // ==================== MediaSession ====================
@@ -1097,31 +1126,57 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 override fun onPlay() {
                     requestAudioFocus()
                     playWithFadeIn()
+                    // 通知 Flutter 端播放状态变化（由媒体通知触发）
+                    handler.post {
+                        eventSink?.success(mapOf("event" to "mediaButtonPlay"))
+                    }
                 }
                 
                 override fun onPause() {
                     pauseWithFadeOut()
+                    // 通知 Flutter 端暂停状态变化（由媒体通知触发）
+                    handler.post {
+                        eventSink?.success(mapOf("event" to "mediaButtonPause"))
+                    }
                 }
                 
                 override fun onStop() {
                     stopWithFadeOut()
+                    // 通知 Flutter 端停止状态变化（由媒体通知触发）
+                    handler.post {
+                        eventSink?.success(mapOf("event" to "mediaButtonStop"))
+                    }
                 }
                 
                 override fun onSkipToNext() {
                     // 通知 Flutter 端处理下一曲（支持随机播放模式）
-                    handler.post {
-                        eventSink?.success(mapOf(
-                            "event" to "mediaButtonNext"
-                        ))
+                    if (eventSink != null) {
+                        handler.post {
+                            eventSink?.success(mapOf(
+                                "event" to "mediaButtonNext"
+                            ))
+                        }
+                    } else {
+                        // 如果 eventSink 为空，直接在原生端处理
+                        handler.post {
+                            playNextWithFade()
+                        }
                     }
                 }
                 
                 override fun onSkipToPrevious() {
                     // 通知 Flutter 端处理上一曲（支持随机播放模式）
-                    handler.post {
-                        eventSink?.success(mapOf(
-                            "event" to "mediaButtonPrevious"
-                        ))
+                    if (eventSink != null) {
+                        handler.post {
+                            eventSink?.success(mapOf(
+                                "event" to "mediaButtonPrevious"
+                            ))
+                        }
+                    } else {
+                        // 如果 eventSink 为空，直接在原生端处理
+                        handler.post {
+                            playPreviousWithFade()
+                        }
                     }
                 }
                 
@@ -1157,7 +1212,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         
         // 在 crossfade 过程中，使用新播放器的状态
         val p = if (isCrossfading) crossfadePlayer ?: player else player
-        if (p == null) return
+        if (p == null) {
+            return
+        }
         
         val state = when {
             p.isPlaying -> PlaybackStateCompat.STATE_PLAYING
@@ -1200,7 +1257,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
         
-        currentCoverBitmap?.let {
+        // 使用封面或默认封面
+        val coverBitmap = currentCoverBitmap ?: getDefaultAlbumCover()
+        coverBitmap?.let {
             builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it)
         }
         
@@ -1236,22 +1295,17 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 .setAcceptsDelayedFocusGain(true)
                 .setWillPauseWhenDucked(true)
                 .setOnAudioFocusChangeListener { focusChange ->
-                    android.util.Log.d("ExoPlayerMusicPlugin", "Audio focus changed: $focusChange")
                     when (focusChange) {
                         AudioManager.AUDIOFOCUS_LOSS -> {
-                            android.util.Log.d("ExoPlayerMusicPlugin", "Audio focus LOSS - pausing")
                             player?.pause()
                         }
                         AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                            android.util.Log.d("ExoPlayerMusicPlugin", "Audio focus LOSS_TRANSIENT - pausing")
                             player?.pause()
                         }
                         AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                            android.util.Log.d("ExoPlayerMusicPlugin", "Audio focus CAN_DUCK - lowering volume")
                             player?.volume = 0.3f
                         }
                         AudioManager.AUDIOFOCUS_GAIN -> {
-                            android.util.Log.d("ExoPlayerMusicPlugin", "Audio focus GAIN - resuming")
                             player?.volume = 1.0f
                             // 不自动恢复播放，让用户手动控制
                         }
@@ -1260,13 +1314,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 .build()
             
             audioFocusRequest = focusRequest
-            val result = audioMgr.requestAudioFocus(focusRequest)
-            android.util.Log.d("ExoPlayerMusicPlugin", "Audio focus request result: $result (GRANTED=1, FAILED=0, DELAYED=2)")
+            audioMgr.requestAudioFocus(focusRequest)
         } else {
             @Suppress("DEPRECATION")
-            val result = audioMgr.requestAudioFocus(
+            audioMgr.requestAudioFocus(
                 { focusChange ->
-                    android.util.Log.d("ExoPlayerMusicPlugin", "Audio focus changed (legacy): $focusChange")
                     when (focusChange) {
                         AudioManager.AUDIOFOCUS_LOSS,
                         AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
@@ -1283,7 +1335,6 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 AudioManager.STREAM_MUSIC,
                 AudioManager.AUDIOFOCUS_GAIN
             )
-            android.util.Log.d("ExoPlayerMusicPlugin", "Audio focus request result (legacy): $result")
         }
     }
     
@@ -1398,12 +1449,15 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         
+        // 使用封面或默认封面
+        val notificationCover = currentCoverBitmap ?: getDefaultAlbumCover()
+        
         val notification = NotificationCompat.Builder(ctx, CHANNEL_ID)
             .setContentTitle(currentTitle.ifEmpty { "未知歌曲" })
             .setContentText(currentArtist.ifEmpty { "未知艺术家" })
             .setSubText(currentAlbum)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setLargeIcon(currentCoverBitmap)
+            .setLargeIcon(notificationCover)
             .setStyle(MediaStyle()
                 .setMediaSession(session.sessionToken)
                 .setShowActionsInCompactView(0, 1, 2))  // 显示所有三个按钮
@@ -1433,6 +1487,8 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      */
     private fun showNotification() {
         isNotificationActive = true
+        // 更新 MediaSession 状态，确保进度条正确显示
+        updateMediaSessionState()
         updateNotification()
     }
     
@@ -1547,6 +1603,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     
     private fun disposePlayer() {
+        // 停止进度更新
+        stopProgressUpdates()
+        
         // 取消淡入淡出动画和 Crossfade
         cancelFadeAnimation()
         cancelCrossfade()

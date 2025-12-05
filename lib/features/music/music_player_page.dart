@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/local_music_provider.dart';
 import '../../utils/theme_utils.dart';
+import '../../widgets/default_album_cover.dart';
 
 /// 音质信息
 class _QualityInfo {
@@ -856,38 +857,11 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                       child: Row(
                         children: [
                           // 封面
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.white10
-                                  : Colors.black.withOpacity(0.05),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            clipBehavior: Clip.antiAlias,
-                            child: song.albumArt != null &&
-                                    File(song.albumArt!).existsSync()
-                                ? Image.file(
-                                    File(song.albumArt!),
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Icon(
-                                        CupertinoIcons.double_music_note,
-                                        size: 20,
-                                        color: isDark
-                                            ? Colors.white38
-                                            : Colors.black26,
-                                      );
-                                    },
-                                  )
-                                : Icon(
-                                    CupertinoIcons.double_music_note,
-                                    size: 20,
-                                    color: isDark
-                                        ? Colors.white38
-                                        : Colors.black26,
-                                  ),
+                          AlbumCoverImage(
+                            albumArt: song.albumArt,
+                            size: 48,
+                            iconSize: 20,
+                            borderRadius: BorderRadius.circular(6),
                           ),
                           const SizedBox(width: 12),
                           // 歌曲信息
@@ -1330,25 +1304,11 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
         fit: BoxFit.cover,
         gaplessPlayback: true,
         errorBuilder: (context, error, stackTrace) {
-          return _buildPlaceholder(isDark);
+          return DefaultAlbumCover(iconSize: 80);
         },
       );
     }
-    return _buildPlaceholder(isDark);
-  }
-
-  // 构建占位符（带灰色背景）
-  Widget _buildPlaceholder(bool isDark) {
-    return Container(
-      color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
-      child: Center(
-        child: Icon(
-          CupertinoIcons.double_music_note,
-          size: 80,
-          color: isDark ? Colors.white24 : Colors.black12,
-        ),
-      ),
-    );
+    return DefaultAlbumCover(iconSize: 80);
   }
 
   // 进度条拖动状态

@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/local_music_provider.dart';
 import '../../utils/theme_utils.dart';
+import '../../widgets/default_album_cover.dart';
 
 class MusicMiniPlayer extends ConsumerWidget {
   const MusicMiniPlayer({
@@ -57,36 +57,11 @@ class MusicMiniPlayer extends ConsumerWidget {
                 child: Row(
                   children: [
                     // 专辑封面
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.white10
-                            : Colors.black.withOpacity(0.05),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: hasCurrentSong &&
-                              currentSong.albumArt != null &&
-                              File(currentSong.albumArt!).existsSync()
-                          ? Image.file(
-                              File(currentSong.albumArt!),
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Icon(
-                                  CupertinoIcons.double_music_note,
-                                  size: 24,
-                                  color:
-                                      isDark ? Colors.white38 : Colors.black26,
-                                );
-                              },
-                            )
-                          : Icon(
-                              CupertinoIcons.double_music_note,
-                              size: 24,
-                              color: isDark ? Colors.white38 : Colors.black26,
-                            ),
+                    AlbumCoverImage(
+                      albumArt: hasCurrentSong ? currentSong.albumArt : null,
+                      size: 48,
+                      iconSize: 24,
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     const SizedBox(width: 12),
                     // 歌曲信息

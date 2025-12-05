@@ -26,6 +26,8 @@ class ExoPlayerMusicController {
   StreamController<MusicPlayerState>? _stateController;
   StreamController<void>? _mediaButtonNextController;
   StreamController<void>? _mediaButtonPreviousController;
+  StreamController<void>? _mediaButtonPlayController;
+  StreamController<void>? _mediaButtonPauseController;
 
   StreamSubscription<dynamic>? _eventSubscription;
 
@@ -332,6 +334,18 @@ class ExoPlayerMusicController {
         (controller) => _mediaButtonPreviousController = controller,
       );
 
+  /// 媒体按钮播放事件流（由媒体通知触发）
+  Stream<void> get mediaButtonPlayStream => _getStream<void>(
+        () => _mediaButtonPlayController,
+        (controller) => _mediaButtonPlayController = controller,
+      );
+
+  /// 媒体按钮暂停事件流（由媒体通知触发）
+  Stream<void> get mediaButtonPauseStream => _getStream<void>(
+        () => _mediaButtonPauseController,
+        (controller) => _mediaButtonPauseController = controller,
+      );
+
   // ==================== Private Methods ====================
 
   void _handleEvent(dynamic event) {
@@ -358,6 +372,12 @@ class ExoPlayerMusicController {
         break;
       case 'mediaButtonPrevious':
         _addEvent(_mediaButtonPreviousController, null);
+        break;
+      case 'mediaButtonPlay':
+        _addEvent(_mediaButtonPlayController, null);
+        break;
+      case 'mediaButtonPause':
+        _addEvent(_mediaButtonPauseController, null);
         break;
     }
   }

@@ -185,6 +185,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   StreamSubscription<String>? _errorSubscription;
   StreamSubscription<void>? _mediaButtonNextSubscription;
   StreamSubscription<void>? _mediaButtonPreviousSubscription;
+  StreamSubscription<void>? _mediaButtonPlaySubscription;
+  StreamSubscription<void>? _mediaButtonPauseSubscription;
 
   /// 是否正在切换歌曲（用于在 trackChanged 事件中判断是手动还是自动切换）
   bool _isSwitchingTrack = false;
@@ -272,6 +274,18 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     _mediaButtonPreviousSubscription =
         player.mediaButtonPreviousStream.listen((_) {
       playPrevious();
+    });
+
+    // 监听媒体按钮播放（由媒体通知触发）
+    _mediaButtonPlaySubscription = player.mediaButtonPlayStream.listen((_) {
+      // 更新 UI 状态为播放中
+      state = state.copyWith(isPlaying: true);
+    });
+
+    // 监听媒体按钮暂停（由媒体通知触发）
+    _mediaButtonPauseSubscription = player.mediaButtonPauseStream.listen((_) {
+      // 更新 UI 状态为暂停
+      state = state.copyWith(isPlaying: false);
     });
   }
 
@@ -820,6 +834,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     _errorSubscription?.cancel();
     _mediaButtonNextSubscription?.cancel();
     _mediaButtonPreviousSubscription?.cancel();
+    _mediaButtonPlaySubscription?.cancel();
+    _mediaButtonPauseSubscription?.cancel();
     // 注意：不要 dispose 单例的 _player
     super.dispose();
   }
