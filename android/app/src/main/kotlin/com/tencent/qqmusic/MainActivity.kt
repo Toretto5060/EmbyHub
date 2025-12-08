@@ -149,8 +149,8 @@ class MainActivity: FlutterActivity() {
     }
     
     /**
-     * 根据播放状态更新快捷方式
-     * @param isPlaying true=播放中，false=未播放
+     * 更新快捷方式（始终显示：播放、暂停、切换）
+     * @param isPlaying 播放状态（仅用于日志记录）
      */
     private fun updateShortcuts(isPlaying: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
@@ -158,74 +158,49 @@ class MainActivity: FlutterActivity() {
                 val shortcutManager = getSystemService(ShortcutManager::class.java)
                 val shortcuts = mutableListOf<ShortcutInfo>()
                 
-                android.util.Log.d("MainActivity", "🔄 updateShortcuts: isPlaying=$isPlaying, currentPlayingState=$currentPlayingState")
+                android.util.Log.d("MainActivity", "🔄 updateShortcuts: creating fixed shortcuts (play, pause, toggle)")
                 
-                if (isPlaying) {
-                    // 播放时：显示"暂停"和"切换"
-                    android.util.Log.d("MainActivity", "▶️ Creating shortcuts for PLAYING state")
-                    
-                    // 暂停快捷方式（双竖杠图标）
-                    val pauseIntent = Intent("$packageName.SHORTCUT_PAUSE").apply {
-                        setClassName(packageName, "${packageName}.MusicShortcutActivity")
-                    }
-                    shortcuts.add(
-                        ShortcutInfo.Builder(this, "pause_music")
-                            .setShortLabel(getString(resources.getIdentifier("shortcut_pause", "string", packageName)))
-                            .setLongLabel(getString(resources.getIdentifier("shortcut_pause_long", "string", packageName)))
-                            .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_pause))
-                            .setIntent(pauseIntent)
-                            .build()
-                    )
-                    
-                    // 切换快捷方式（使用循环图标）
-                    val toggleIntent = Intent("$packageName.SHORTCUT_TOGGLE").apply {
-                        setClassName(packageName, "${packageName}.MusicShortcutActivity")
-                    }
-                    // 使用 ic_menu_revert 作为切换图标（表示切换/循环）
-                    // 注意：如果需要真正的循环图标，需要添加自定义图标资源
-                    shortcuts.add(
-                        ShortcutInfo.Builder(this, "toggle_music")
-                            .setShortLabel(getString(resources.getIdentifier("shortcut_toggle", "string", packageName)))
-                            .setLongLabel(getString(resources.getIdentifier("shortcut_toggle_long", "string", packageName)))
-                            .setIcon(Icon.createWithResource(this, android.R.drawable.ic_menu_revert))
-                            .setIntent(toggleIntent)
-                            .build()
-                    )
-                } else {
-                    // 未播放时：显示"播放"和"切换"
-                    android.util.Log.d("MainActivity", "⏸️ Creating shortcuts for PAUSED state")
-                    
-                    // 播放快捷方式（三角播放图标）
-                    val playIntent = Intent("$packageName.SHORTCUT_PLAY").apply {
-                        setClassName(packageName, "${packageName}.MusicShortcutActivity")
-                    }
-                    shortcuts.add(
-                        ShortcutInfo.Builder(this, "play_music")
-                            .setShortLabel(getString(resources.getIdentifier("shortcut_play", "string", packageName)))
-                            .setLongLabel(getString(resources.getIdentifier("shortcut_play_long", "string", packageName)))
-                            .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_play))
-                            .setIntent(playIntent)
-                            .build()
-                    )
-                    
-                    // 切换快捷方式（使用循环图标）
-                    val toggleIntent = Intent("$packageName.SHORTCUT_TOGGLE").apply {
-                        setClassName(packageName, "${packageName}.MusicShortcutActivity")
-                    }
-                    // 使用 ic_menu_revert 作为切换图标（表示切换/循环）
-                    // 注意：如果需要真正的循环图标，需要添加自定义图标资源
-                    shortcuts.add(
-                        ShortcutInfo.Builder(this, "toggle_music")
-                            .setShortLabel(getString(resources.getIdentifier("shortcut_toggle", "string", packageName)))
-                            .setLongLabel(getString(resources.getIdentifier("shortcut_toggle_long", "string", packageName)))
-                            .setIcon(Icon.createWithResource(this, android.R.drawable.ic_menu_revert))
-                            .setIntent(toggleIntent)
-                            .build()
-                    )
+                // ✅ 播放快捷方式
+                val playIntent = Intent("$packageName.SHORTCUT_PLAY").apply {
+                    setClassName(packageName, "${packageName}.MusicShortcutActivity")
                 }
+                shortcuts.add(
+                    ShortcutInfo.Builder(this, "play_music")
+                        .setShortLabel("播放")
+                        .setLongLabel("播放音乐")
+                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_play))
+                        .setIntent(playIntent)
+                        .build()
+                )
+                
+                // ✅ 暂停快捷方式
+                val pauseIntent = Intent("$packageName.SHORTCUT_PAUSE").apply {
+                    setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                }
+                shortcuts.add(
+                    ShortcutInfo.Builder(this, "pause_music")
+                        .setShortLabel("暂停")
+                        .setLongLabel("暂停音乐")
+                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_media_pause))
+                        .setIntent(pauseIntent)
+                        .build()
+                )
+                
+                // ✅ 切换快捷方式（随机切换歌曲）
+                val toggleIntent = Intent("$packageName.SHORTCUT_TOGGLE").apply {
+                    setClassName(packageName, "${packageName}.MusicShortcutActivity")
+                }
+                shortcuts.add(
+                    ShortcutInfo.Builder(this, "toggle_music")
+                        .setShortLabel("切换")
+                        .setLongLabel("切换状态")
+                        .setIcon(Icon.createWithResource(this, android.R.drawable.ic_menu_rotate))
+                        .setIntent(toggleIntent)
+                        .build()
+                )
                 
                 shortcutManager.setDynamicShortcuts(shortcuts)
-                android.util.Log.d("MainActivity", "✅ Shortcuts updated: isPlaying=$isPlaying, count=${shortcuts.size}, shortcutIds=${shortcuts.map { it.id }}")
+                android.util.Log.d("MainActivity", "✅ Shortcuts updated: count=${shortcuts.size}, shortcutIds=${shortcuts.map { it.id }}")
             } catch (e: Exception) {
                 android.util.Log.e("MainActivity", "❌ Failed to update shortcuts: ${e.message}")
                 e.printStackTrace()
