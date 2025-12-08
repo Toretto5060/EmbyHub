@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../providers/local_music_provider.dart';
 import '../../../providers/local_music_storage_provider.dart';
+import '../../../providers/local_music_matcher_provider.dart';
 import '../../../utils/theme_utils.dart';
 import '../../../widgets/default_album_cover.dart';
+import '../../../widgets/local_file_badge.dart';
 
 /// 音质信息
 class _QualityInfo {
@@ -285,14 +287,43 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
-  /// 构建专辑封面组件
-  Widget _buildAlbumArt(LocalSong song, bool isPlaying, bool isDark) {
-    return AlbumCoverImage(
-      albumArt: song.albumArt,
-      size: 48,
-      iconSize: 24,
-      borderRadius: BorderRadius.circular(6),
+  /// 构建专辑封面组件（带本地文件标识）
+  Widget _buildAlbumArt(
+      LocalSong song, bool isPlaying, bool isDark, WidgetRef ref) {
+    // 检查是否有本地文件
+    final hasLocalFile = _checkHasLocalFile(song, ref);
+
+    return AlbumCoverWithLocalBadge(
+      hasLocalFile: hasLocalFile,
+      badgeSize: 14,
+      badgeOffset: 1,
+      child: AlbumCoverImage(
+        albumArt: song.albumArt,
+        size: 48,
+        iconSize: 24,
+        borderRadius: BorderRadius.circular(6),
+      ),
     );
+  }
+
+  /// 检查歌曲是否有本地文件（仅对服务器音乐显示）
+  bool _checkHasLocalFile(LocalSong song, WidgetRef ref) {
+    // 只有服务器音乐才显示本地文件标识
+    // 本地音乐本身就是本地的，不需要显示标识
+    if (!song.isServerMusic) return false;
+
+    // 如果歌曲本身已经标记有本地文件，直接返回
+    if (song.hasLocalFile) return true;
+
+    // 检查本地文件匹配
+    final matcherState = ref.watch(localMusicMatcherProvider);
+    if (!matcherState.isInitialized) return false;
+
+    final match = ref.read(localMusicMatcherProvider.notifier).matchLocalFile(
+          song.title,
+          song.artist,
+        );
+    return match.hasLocalFile;
   }
 
   void _shufflePlay(List<LocalSong> songs) {
@@ -623,8 +654,8 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                       ),
                       const SizedBox(width: 12),
                     ],
-                    // 专辑封面
-                    _buildAlbumArt(song, isPlaying, isDark),
+                    // 专辑封面（带本地文件标识）
+                    _buildAlbumArt(song, isPlaying, isDark, ref),
                     const SizedBox(width: 12),
                     // 歌曲信息
                     Expanded(

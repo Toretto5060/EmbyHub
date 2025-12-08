@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'package:audiotags/audiotags.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/emby_api.dart';
@@ -160,6 +161,8 @@ class LocalSong {
     this.isServerMusic = false, // 是否为服务器媒体库音乐
     this.embyItemId, // Emby 媒体项ID（用于服务器音乐）
     this.subtitleIndex, // 歌词字幕流索引（用于从服务器获取歌词）
+    this.localFilePath, // 本地文件路径（用于媒体库音乐匹配本地文件）
+    this.localLyricsPath, // 本地歌词文件路径
   });
 
   final String id;
@@ -178,6 +181,11 @@ class LocalSong {
   final bool isServerMusic; // 是否为服务器媒体库音乐
   final String? embyItemId; // Emby 媒体项ID（用于服务器音乐播放上报）
   final int? subtitleIndex; // 歌词字幕流索引（用于从服务器获取歌词）
+  final String? localFilePath; // 本地文件路径（媒体库音乐匹配到本地文件时使用）
+  final String? localLyricsPath; // 本地歌词文件路径
+
+  /// 是否有本地文件（用于显示绿色对勾）
+  bool get hasLocalFile => localFilePath != null && localFilePath!.isNotEmpty;
 
   /// 从 JSON 创建 LocalSong
   factory LocalSong.fromJson(Map<String, dynamic> json) {
@@ -200,6 +208,8 @@ class LocalSong {
       isServerMusic: json['isServerMusic'] as bool? ?? false,
       embyItemId: json['embyItemId'] as String?,
       subtitleIndex: json['subtitleIndex'] as int?,
+      localFilePath: json['localFilePath'] as String?,
+      localLyricsPath: json['localLyricsPath'] as String?,
     );
   }
 
@@ -222,6 +232,8 @@ class LocalSong {
       'isServerMusic': isServerMusic,
       'embyItemId': embyItemId,
       'subtitleIndex': subtitleIndex,
+      'localFilePath': localFilePath,
+      'localLyricsPath': localLyricsPath,
     };
   }
 
@@ -243,6 +255,8 @@ class LocalSong {
     bool? isServerMusic,
     String? embyItemId,
     int? subtitleIndex,
+    String? localFilePath,
+    String? localLyricsPath,
   }) {
     return LocalSong(
       id: id ?? this.id,
@@ -261,6 +275,8 @@ class LocalSong {
       isServerMusic: isServerMusic ?? this.isServerMusic,
       embyItemId: embyItemId ?? this.embyItemId,
       subtitleIndex: subtitleIndex ?? this.subtitleIndex,
+      localFilePath: localFilePath ?? this.localFilePath,
+      localLyricsPath: localLyricsPath ?? this.localLyricsPath,
     );
   }
 }
@@ -363,7 +379,10 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   }
 
   /// 上报播放开始到 Emby 服务器
+  /// 注意：本地文件不应调用此方法
   Future<void> _reportPlaybackStart(LocalSong song) async {
+    // 本地文件不上报
+    if (song.hasLocalFile) return;
     if (!song.isServerMusic || song.embyItemId == null) return;
     if (_embyApi == null || _userId == null) return;
     if (_playSessionId == null || _mediaSourceId == null) return;
@@ -385,8 +404,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   }
 
   /// 上报播放进度到 Emby 服务器
+  /// 注意：本地文件不应调用此方法
   Future<void> _reportPlaybackProgress(LocalSong song, Duration position,
       {bool isPaused = false}) async {
+    // 本地文件不上报
+    if (song.hasLocalFile) return;
     if (!song.isServerMusic || song.embyItemId == null) return;
     if (_embyApi == null || _userId == null) return;
     if (_playSessionId == null) return;
@@ -417,7 +439,10 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   }
 
   /// 上报播放停止到 Emby 服务器
+  /// 注意：本地文件不应调用此方法
   Future<void> _reportPlaybackStopped(LocalSong song, Duration position) async {
+    // 本地文件不上报
+    if (song.hasLocalFile) return;
     if (!song.isServerMusic || song.embyItemId == null) return;
     if (_embyApi == null || _userId == null) return;
     if (_playSessionId == null) return;
@@ -437,7 +462,10 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   }
 
   /// 更新服务器音乐会话（切换歌曲时调用）
+  /// 注意：本地文件不应调用此方法
   Future<void> _updateServerMusicSession(LocalSong song) async {
+    // 本地文件不需要与 Emby 交互
+    if (song.hasLocalFile) return;
     if (!song.isServerMusic || song.embyItemId == null) return;
     if (_embyApi == null) return;
 
@@ -498,9 +526,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       if (newPositionSec != oldPositionSec && state.isPlaying) {
         _savePlayingState();
 
-        // 上报播放进度到 Emby 服务器
+        // 上报播放进度到 Emby 服务器（本地文件不上报）
         final currentSong = state.currentSong;
-        if (currentSong != null && currentSong.isServerMusic) {
+        if (currentSong != null &&
+            currentSong.isServerMusic &&
+            !currentSong.hasLocalFile) {
           _reportPlaybackProgress(currentSong, playerState.position);
         }
       }
@@ -512,9 +542,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     // 监听曲目切换（自动播放下一首时触发）
     _trackChangedSubscription = player.trackChangedStream.listen((event) async {
       if (event.index >= 0 && event.index < state.playlist.length) {
-        // 上报上一首歌曲的播放停止
+        // 上报上一首歌曲的播放停止（本地文件不上报）
         final oldSong = state.currentSong;
-        if (oldSong != null && oldSong.isServerMusic) {
+        if (oldSong != null && oldSong.isServerMusic && !oldSong.hasLocalFile) {
           await _reportPlaybackStopped(oldSong, state.position);
         }
 
@@ -531,9 +561,29 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         );
         _savePlayingState();
 
-        // 如果是服务器音乐，需要获取新的播放会话并上报
-        if (newSong.isServerMusic && newSong.embyItemId != null) {
+        // 如果是服务器音乐且没有本地文件，需要获取新的播放会话并上报
+        if (newSong.isServerMusic &&
+            newSong.embyItemId != null &&
+            !newSong.hasLocalFile) {
           await _updateServerMusicSession(newSong);
+        } else if (newSong.hasLocalFile) {
+          // 本地文件：重置 Emby 会话，加载本地歌词
+          _playSessionId = null;
+          _mediaSourceId = null;
+          _hasReportedPlaybackStart = false;
+
+          // 加载本地歌词（.lrc 文件或内嵌歌词）
+          if (newSong.lyrics == null) {
+            final songWithLyrics = await _loadLocalLyrics(newSong);
+            if (songWithLyrics.lyrics != null) {
+              final updatedPlaylist = List<LocalSong>.from(state.playlist);
+              updatedPlaylist[event.index] = songWithLyrics;
+              state = state.copyWith(
+                currentSong: songWithLyrics,
+                playlist: updatedPlaylist,
+              );
+            }
+          }
         }
 
         // 解析新歌曲的歌词（用于车载蓝牙显示）
@@ -577,9 +627,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       // 更新 UI 状态为暂停
       state = state.copyWith(isPlaying: false);
 
-      // 上报暂停状态到 Emby 服务器
+      // 上报暂停状态到 Emby 服务器（本地文件不上报）
       final currentSong = state.currentSong;
-      if (currentSong != null && currentSong.isServerMusic) {
+      if (currentSong != null &&
+          currentSong.isServerMusic &&
+          !currentSong.hasLocalFile) {
         _reportPlaybackProgress(currentSong, state.position, isPaused: true);
       }
     });
@@ -617,24 +669,60 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
             .toList();
       }
 
-      // 加载播放列表索引
-      final playlistIndex = prefs.getInt(_lastPlaylistIndexKey) ?? 0;
+      // 过滤播放列表，移除不存在的本地文件
+      // 服务器音乐保留，本地音乐检查文件是否存在
+      final validPlaylist = <LocalSong>[];
+      for (final s in playlist) {
+        if (s.isServerMusic) {
+          // 服务器音乐直接保留
+          validPlaylist.add(s);
+        } else if (s.path != null) {
+          // 本地音乐检查文件是否存在
+          final file = File(s.path!);
+          if (await file.exists()) {
+            validPlaylist.add(s);
+          } else {
+            print(
+                '🎵 [Music] Removed non-existent song from playlist: ${s.title}');
+          }
+        }
+      }
 
-      // 确保播放列表不为空
-      final finalPlaylist = playlist.isNotEmpty ? playlist : [song];
-      final finalIndex = playlistIndex.clamp(0, finalPlaylist.length - 1);
+      // 检查当前歌曲是否存在
+      LocalSong? validSong = song;
+      if (!song.isServerMusic && song.path != null) {
+        final file = File(song.path!);
+        if (!await file.exists()) {
+          validSong = null;
+          print('🎵 [Music] Current song no longer exists: ${song.title}');
+        }
+      }
+
+      // 如果播放列表为空或当前歌曲不存在，清除播放状态
+      if (validPlaylist.isEmpty || validSong == null) {
+        await _clearSavedState();
+        return;
+      }
+
+      // 重新计算当前歌曲在有效播放列表中的索引
+      int finalIndex = validPlaylist.indexWhere((s) => s.id == validSong!.id);
+      if (finalIndex < 0) {
+        // 当前歌曲不在播放列表中，使用第一首
+        finalIndex = 0;
+        validSong = validPlaylist.first;
+      }
 
       // 更新状态（不自动播放，只恢复状态）
       state = state.copyWith(
-        currentSong: song,
+        currentSong: validSong,
         position: position,
-        playlist: finalPlaylist,
+        playlist: validPlaylist,
         currentIndex: finalIndex,
         isPlaying: false, // 不自动播放
       );
 
       // ✅ 将播放列表预加载到原生播放器（不自动播放）
-      await _preloadPlaylistToPlayer(finalPlaylist, finalIndex, position);
+      await _preloadPlaylistToPlayer(validPlaylist, finalIndex, position);
     } catch (e) {
       // 加载失败时忽略错误
       print('Failed to load last playing state: $e');
@@ -649,21 +737,28 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   ) async {
     if (_player == null || playlist.isEmpty) return;
 
-    final items = playlist
-        .where((s) => s.path != null)
-        .map((s) => MusicItem(
-              url: s.path!,
-              title: s.title,
-              artist: s.artist,
-              album: s.album ?? '',
-              coverUrl: s.albumArt,
-            ))
-        .toList();
+    // 构建播放列表，优先使用本地文件路径
+    final items = <MusicItem>[];
+    for (final s in playlist) {
+      // 优先使用本地文件路径，其次使用服务器路径
+      final url = s.localFilePath ?? s.path;
+      if (url != null) {
+        items.add(MusicItem(
+          url: url,
+          title: s.title,
+          artist: s.artist,
+          album: s.album ?? '',
+          coverUrl: s.albumArt,
+        ));
+      }
+    }
 
     if (items.isNotEmpty) {
+      // 确保 startIndex 有效
+      final validIndex = startIndex.clamp(0, items.length - 1);
       await _player!.setPlaylist(
         items: items,
-        startIndex: startIndex,
+        startIndex: validIndex,
         autoPlay: false, // 不自动播放
       );
       // 恢复播放位置
@@ -672,7 +767,7 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       }
 
       // 将当前歌曲添加到随机播放历史记录（用于上一首功能）
-      _addToShuffleHistory(startIndex);
+      _addToShuffleHistory(validIndex);
 
       // 解析当前歌曲的歌词（用于车载蓝牙显示）
       _parseLyricsForCurrentSong();
@@ -754,9 +849,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     // 异步调用原生播放器（不等待）
     _player?.pause();
 
-    // 上报暂停状态到 Emby 服务器
+    // 上报暂停状态到 Emby 服务器（本地文件不上报）
     final currentSong = state.currentSong;
-    if (currentSong != null && currentSong.isServerMusic) {
+    if (currentSong != null &&
+        currentSong.isServerMusic &&
+        !currentSong.hasLocalFile) {
       _reportPlaybackProgress(currentSong, state.position, isPaused: true);
     }
 
@@ -787,7 +884,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     final song = state.currentSong;
     if (_player == null || song == null) return;
 
-    // 如果是服务器音乐，使用服务器播放列表方式
+    // 如果是服务器音乐（包括有本地文件的），使用服务器播放列表方式
+    // _playServerMusicPlaylist 会自动判断是否使用本地文件
     if (song.isServerMusic &&
         song.embyItemId != null &&
         state.playlist.isNotEmpty) {
@@ -798,9 +896,10 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     // 如果有播放列表，加载整个播放列表并自动播放
     if (state.playlist.isNotEmpty) {
       final items = state.playlist
-          .where((s) => s.path != null)
+          .where((s) => s.path != null || s.localFilePath != null)
           .map((s) => MusicItem(
-                url: s.path!,
+                // 优先使用本地文件路径
+                url: s.localFilePath ?? s.path!,
                 title: s.title,
                 artist: s.artist,
                 album: s.album ?? '',
@@ -816,17 +915,20 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
           startPosition: state.position, // 从当前位置开始播放
         );
       }
-    } else if (song.path != null) {
+    } else {
       // 否则只打开单首歌曲并自动播放
-      await _player!.open(
-        url: song.path!,
-        title: song.title,
-        artist: song.artist,
-        album: song.album ?? '',
-        coverUrl: song.albumArt,
-        startPosition: state.position,
-        autoPlay: true, // 自动播放
-      );
+      final url = song.localFilePath ?? song.path;
+      if (url != null) {
+        await _player!.open(
+          url: url,
+          title: song.title,
+          artist: song.artist,
+          album: song.album ?? '',
+          coverUrl: song.albumArt,
+          startPosition: state.position,
+          autoPlay: true, // 自动播放
+        );
+      }
     }
   }
 
@@ -841,9 +943,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       _addToShuffleHistory(startIndex);
     }
 
-    // 停止之前的播放并上报
+    // 停止之前的播放并上报（本地文件不上报）
     final oldSong = state.currentSong;
-    if (oldSong != null && oldSong.isServerMusic) {
+    if (oldSong != null && oldSong.isServerMusic && !oldSong.hasLocalFile) {
       await _reportPlaybackStopped(oldSong, state.position);
     }
 
@@ -897,54 +999,99 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   }
 
   /// 播放服务器音乐播放列表
+  /// 优先使用本地文件，如果没有本地文件则使用服务器流
+  /// 本地文件播放时不与 Emby 服务器交互
   Future<void> _playServerMusicPlaylist(
       List<LocalSong> songs, int startIndex) async {
-    if (_embyApi == null || _player == null) return;
+    if (_player == null) return;
 
     var currentSong = songs[startIndex];
 
-    // 为当前播放的歌曲获取带会话信息的播放地址
+    // 检查当前歌曲是否有本地文件
+    final hasLocalFile = currentSong.hasLocalFile;
+
+    // 为当前播放的歌曲获取播放地址
     String? currentSongUrl;
-    if (currentSong.isServerMusic && currentSong.embyItemId != null) {
-      try {
-        final audioInfo =
-            await _embyApi!.getAudioPlaybackInfo(currentSong.embyItemId!);
-        _playSessionId = audioInfo.playSessionId;
-        _mediaSourceId = audioInfo.mediaSourceId;
-        currentSongUrl = audioInfo.url; // 使用带会话信息的 URL
-        print('🎵 [Music] Got playback info - PlaySessionId: $_playSessionId');
-        print('🎵 [Music] Audio URL: $currentSongUrl');
-      } catch (e) {
-        print('⚠️ [Music] Failed to get playback info: $e');
-        // 失败时使用预存的 URL
+
+    if (hasLocalFile) {
+      // 使用本地文件，不与 Emby 交互
+      currentSongUrl = currentSong.localFilePath;
+      print(
+          '🎵 [Music] Using local file (no Emby interaction): $currentSongUrl');
+
+      // 重置 Emby 会话（本地文件不需要）
+      _playSessionId = null;
+      _mediaSourceId = null;
+      _hasReportedPlaybackStart = false;
+
+      // 加载本地歌词（.lrc 文件或内嵌歌词）
+      if (currentSong.lyrics == null) {
+        currentSong = await _loadLocalLyrics(currentSong);
+        final updatedSongs = List<LocalSong>.from(songs);
+        updatedSongs[startIndex] = currentSong;
+        state = state.copyWith(
+          currentSong: currentSong,
+          playlist: updatedSongs,
+        );
+      }
+    } else {
+      // 没有本地文件，使用服务器流
+      if (_embyApi != null &&
+          currentSong.isServerMusic &&
+          currentSong.embyItemId != null) {
+        try {
+          final audioInfo =
+              await _embyApi!.getAudioPlaybackInfo(currentSong.embyItemId!);
+          _playSessionId = audioInfo.playSessionId;
+          _mediaSourceId = audioInfo.mediaSourceId;
+          currentSongUrl = audioInfo.url; // 使用带会话信息的 URL
+          print(
+              '🎵 [Music] Got playback info - PlaySessionId: $_playSessionId');
+          print('🎵 [Music] Audio URL: $currentSongUrl');
+        } catch (e) {
+          print('⚠️ [Music] Failed to get playback info: $e');
+          // 失败时使用预存的 URL
+          currentSongUrl = currentSong.path;
+        }
+      } else {
         currentSongUrl = currentSong.path;
       }
-    }
 
-    // 获取当前歌曲的歌词（如果有字幕流）
-    if (currentSong.isServerMusic &&
-        currentSong.embyItemId != null &&
-        currentSong.subtitleIndex != null &&
-        currentSong.lyrics == null) {
-      currentSong = await _fetchLyricsForSong(currentSong);
-      // 更新播放列表中的歌曲
-      final updatedSongs = List<LocalSong>.from(songs);
-      updatedSongs[startIndex] = currentSong;
-      // 更新状态中的当前歌曲和播放列表
-      state = state.copyWith(
-        currentSong: currentSong,
-        playlist: updatedSongs,
-      );
+      // 获取当前歌曲的歌词（如果有字幕流且没有本地歌词）
+      if (_embyApi != null &&
+          currentSong.isServerMusic &&
+          currentSong.embyItemId != null &&
+          currentSong.subtitleIndex != null &&
+          currentSong.lyrics == null) {
+        currentSong = await _fetchLyricsForSong(currentSong);
+        // 更新播放列表中的歌曲
+        final updatedSongs = List<LocalSong>.from(songs);
+        updatedSongs[startIndex] = currentSong;
+        // 更新状态中的当前歌曲和播放列表
+        state = state.copyWith(
+          currentSong: currentSong,
+          playlist: updatedSongs,
+        );
+      }
     }
 
     // 为所有歌曲构建播放地址
     final items = <MusicItem>[];
     for (int i = 0; i < songs.length; i++) {
       final song = songs[i];
-      // 当前歌曲使用带会话信息的 URL，其他歌曲使用预存的 path
-      final url = (i == startIndex && currentSongUrl != null)
-          ? currentSongUrl
-          : song.path;
+      String? url;
+
+      if (i == startIndex && currentSongUrl != null) {
+        // 当前歌曲使用已获取的 URL
+        url = currentSongUrl;
+      } else if (song.hasLocalFile) {
+        // 其他歌曲优先使用本地文件
+        url = song.localFilePath;
+      } else {
+        // 没有本地文件，使用服务器 URL
+        url = song.path;
+      }
+
       if (url != null) {
         items.add(MusicItem(
           url: url,
@@ -968,11 +1115,62 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         autoPlay: true,
       );
 
-      // 上报播放开始
-      if (currentSong.isServerMusic) {
+      // 只有非本地文件才上报播放开始到 Emby
+      if (!hasLocalFile && currentSong.isServerMusic) {
         await _reportPlaybackStart(currentSong);
       }
     }
+  }
+
+  /// 加载本地歌词（优先 .lrc 文件，其次内嵌歌词）
+  Future<LocalSong> _loadLocalLyrics(LocalSong song) async {
+    // 1. 优先尝试加载 .lrc 歌词文件
+    if (song.localLyricsPath != null) {
+      try {
+        final lrcFile = File(song.localLyricsPath!);
+        if (await lrcFile.exists()) {
+          final lyrics = await lrcFile.readAsString();
+          print('🎵 [Music] Loaded local .lrc lyrics for: ${song.title}');
+          return song.copyWith(lyrics: lyrics);
+        }
+      } catch (e) {
+        print('⚠️ [Music] Failed to load local .lrc lyrics: $e');
+      }
+    }
+
+    // 2. 尝试从本地音频文件读取内嵌歌词
+    if (song.localFilePath != null) {
+      try {
+        final tag = await AudioTags.read(song.localFilePath!);
+        if (tag != null && tag.lyrics != null && tag.lyrics!.isNotEmpty) {
+          print('🎵 [Music] Loaded embedded lyrics for: ${song.title}');
+          return song.copyWith(lyrics: tag.lyrics);
+        }
+      } catch (e) {
+        print('⚠️ [Music] Failed to read embedded lyrics: $e');
+      }
+
+      // 3. 尝试加载同目录下的 .lrc 文件
+      try {
+        final audioDir = File(song.localFilePath!).parent.path;
+        final audioBaseName = song.localFilePath!
+            .split(Platform.pathSeparator)
+            .last
+            .replaceAll(RegExp(r'\.[^.]+$'), '');
+        final lrcPath = '$audioDir${Platform.pathSeparator}$audioBaseName.lrc';
+        final lrcFile = File(lrcPath);
+        if (await lrcFile.exists()) {
+          final lyrics = await lrcFile.readAsString();
+          print(
+              '🎵 [Music] Loaded .lrc from same directory for: ${song.title}');
+          return song.copyWith(lyrics: lyrics);
+        }
+      } catch (e) {
+        print('⚠️ [Music] Failed to load .lrc from same directory: $e');
+      }
+    }
+
+    return song;
   }
 
   /// 获取歌曲的歌词
@@ -1290,9 +1488,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
   /// 停止播放并清除状态
   Future<void> stop() async {
-    // 上报播放停止到 Emby 服务器
+    // 上报播放停止到 Emby 服务器（本地文件不上报）
     final currentSong = state.currentSong;
-    if (currentSong != null && currentSong.isServerMusic) {
+    if (currentSong != null &&
+        currentSong.isServerMusic &&
+        !currentSong.hasLocalFile) {
       await _reportPlaybackStopped(currentSong, state.position);
     }
 
@@ -1309,9 +1509,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
   /// 清除播放状态
   Future<void> clear() async {
-    // 上报播放停止到 Emby 服务器
+    // 上报播放停止到 Emby 服务器（本地文件不上报）
     final currentSong = state.currentSong;
-    if (currentSong != null && currentSong.isServerMusic) {
+    if (currentSong != null &&
+        currentSong.isServerMusic &&
+        !currentSong.hasLocalFile) {
       await _reportPlaybackStopped(currentSong, state.position);
     }
 

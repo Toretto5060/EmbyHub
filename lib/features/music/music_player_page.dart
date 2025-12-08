@@ -6,8 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/local_music_provider.dart';
+import '../../providers/local_music_matcher_provider.dart';
+import '../../services/music_download_service.dart';
 import '../../utils/theme_utils.dart';
 import '../../widgets/default_album_cover.dart';
+import '../../widgets/local_file_badge.dart';
 
 /// 音质信息
 class _QualityInfo {
@@ -541,6 +544,9 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _jumpToCurrentSong(playerState.currentIndex);
       });
+
+      // 触发边下边播（如果启用）
+      _triggerProgressiveDownload(currentSong);
     } else {
       // 没有切换歌曲时，更新当前封面路径
       _previousAlbumArt = currentCoverUrl;
@@ -860,12 +866,17 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                           : Colors.transparent,
                       child: Row(
                         children: [
-                          // 封面
-                          AlbumCoverImage(
-                            albumArt: song.albumArt,
-                            size: 48,
-                            iconSize: 20,
-                            borderRadius: BorderRadius.circular(6),
+                          // 封面（带本地文件标识）
+                          AlbumCoverWithLocalBadge(
+                            hasLocalFile: _checkHasLocalFile(song),
+                            badgeSize: 14,
+                            badgeOffset: 1,
+                            child: AlbumCoverImage(
+                              albumArt: song.albumArt,
+                              size: 48,
+                              iconSize: 20,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
                           ),
                           const SizedBox(width: 12),
                           // 歌曲信息
@@ -964,13 +975,26 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _MarqueeText(
-                            text: song.title,
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
+                          // 歌曲标题 + 本地文件标识
+                          Row(
+                            children: [
+                              Flexible(
+                                child: _MarqueeText(
+                                  text: song.title,
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    color:
+                                        isDark ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              // 本地文件标识（绿色对勾）
+                              if (_checkHasLocalFile(song)) ...[
+                                const SizedBox(width: 6),
+                                LocalFileBadge(size: 14),
+                              ],
+                            ],
                           ),
                           const SizedBox(height: 4),
                           _MarqueeText(
@@ -1213,6 +1237,40 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
       position: playerState.position,
       isDark: isDark,
     );
+  }
+
+  /// 检查歌曲是否有本地文件（仅对服务器音乐显示）
+  bool _checkHasLocalFile(LocalSong song) {
+    // 只有服务器音乐才显示本地文件标识
+    // 本地音乐本身就是本地的，不需要显示标识
+    if (!song.isServerMusic) return false;
+
+    // 如果歌曲本身已经标记有本地文件，直接返回
+    if (song.hasLocalFile) return true;
+
+    // 检查本地文件匹配
+    final matcherState = ref.watch(localMusicMatcherProvider);
+    if (!matcherState.isInitialized) return false;
+
+    final match = ref.read(localMusicMatcherProvider.notifier).matchLocalFile(
+          song.title,
+          song.artist,
+        );
+    return match.hasLocalFile;
+  }
+
+  /// 触发边下边播
+  void _triggerProgressiveDownload(LocalSong song) {
+    // 异步触发，不阻塞UI
+    Future.microtask(() {
+      try {
+        final downloadService = ref.read(musicDownloadServiceProvider);
+        downloadService.startProgressiveDownload(song);
+      } catch (e) {
+        // 静默处理错误
+        print('⚠️ [MusicPlayer] Failed to trigger progressive download: $e');
+      }
+    });
   }
 
   Widget _buildAlbumArt(BuildContext context, bool isDark, LocalSong song) {

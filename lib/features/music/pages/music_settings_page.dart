@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../providers/local_music_matcher_provider.dart';
 import '../../../utils/theme_utils.dart';
 
 class MusicSettingsPage extends ConsumerStatefulWidget {
@@ -76,6 +77,14 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
               isDark: isDark,
               onChanged: (value) => setState(() => _crossfadeDuration = value),
             ),
+          const SizedBox(height: 24),
+          // 媒体库设置
+          _buildSectionTitle('媒体库', isDark),
+          _buildProgressiveDownloadSwitch(isDark),
+          _buildInfoHint(
+            '开启后，播放媒体库音乐时会自动下载到本地扫描文件夹中的 Embyhub_Music_Download 目录',
+            isDark,
+          ),
           const SizedBox(height: 24),
           // 显示设置
           _buildSectionTitle('显示', isDark),
@@ -360,6 +369,103 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 边下边播开关
+  Widget _buildProgressiveDownloadSwitch(bool isDark) {
+    final matcherState = ref.watch(localMusicMatcherProvider);
+    final hasScanDirs = matcherState.scanDirectories.isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withOpacity(0.05)
+              : Colors.black.withOpacity(0.03),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              CupertinoIcons.cloud_download,
+              size: 22,
+              color: isDark ? Colors.white54 : Colors.black45,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '边下边播',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  Text(
+                    hasScanDirs ? '播放时自动下载到本地' : '请先设置扫描文件夹',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: hasScanDirs
+                          ? (isDark ? Colors.white54 : Colors.black45)
+                          : CupertinoColors.systemOrange,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            CupertinoSwitch(
+              value: matcherState.progressiveDownloadEnabled && hasScanDirs,
+              onChanged: hasScanDirs
+                  ? (value) async {
+                      // 开启时，立即创建下载文件夹
+                      if (value) {
+                        await ref
+                            .read(localMusicMatcherProvider.notifier)
+                            .getDownloadDirectory();
+                      }
+                      ref
+                          .read(localMusicMatcherProvider.notifier)
+                          .setProgressiveDownloadEnabled(value);
+                    }
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 信息提示
+  Widget _buildInfoHint(String text, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            CupertinoIcons.info_circle,
+            size: 14,
+            color: isDark ? Colors.white38 : Colors.black26,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white38 : Colors.black26,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

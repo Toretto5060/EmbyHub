@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/local_music_provider.dart';
+import '../../providers/local_music_matcher_provider.dart';
 import '../../utils/theme_utils.dart';
 import '../../widgets/default_album_cover.dart';
+import '../../widgets/local_file_badge.dart';
 
 class MusicMiniPlayer extends ConsumerWidget {
   const MusicMiniPlayer({
@@ -14,6 +16,46 @@ class MusicMiniPlayer extends ConsumerWidget {
   });
 
   final VoidCallback onTap;
+
+  /// 检查歌曲是否有本地文件（仅对服务器音乐显示）
+  bool _checkHasLocalFile(LocalSong song, WidgetRef ref) {
+    // 只有服务器音乐才显示本地文件标识
+    // 本地音乐本身就是本地的，不需要显示标识
+    if (!song.isServerMusic) return false;
+
+    // 如果歌曲本身已经标记有本地文件，直接返回
+    if (song.hasLocalFile) return true;
+
+    // 检查本地文件匹配
+    final matcherState = ref.watch(localMusicMatcherProvider);
+    if (!matcherState.isInitialized) return false;
+
+    final match = ref.read(localMusicMatcherProvider.notifier).matchLocalFile(
+          song.title,
+          song.artist,
+        );
+    return match.hasLocalFile;
+  }
+
+  /// 构建专辑封面（带本地文件标识）
+  Widget _buildAlbumCover(BuildContext context, WidgetRef ref,
+      LocalSong? currentSong, bool hasCurrentSong) {
+    final hasLocalFile = hasCurrentSong && currentSong != null
+        ? _checkHasLocalFile(currentSong, ref)
+        : false;
+
+    return AlbumCoverWithLocalBadge(
+      hasLocalFile: hasLocalFile,
+      badgeSize: 14,
+      badgeOffset: 1,
+      child: AlbumCoverImage(
+        albumArt: hasCurrentSong ? currentSong?.albumArt : null,
+        size: 48,
+        iconSize: 24,
+        borderRadius: BorderRadius.circular(8),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -50,13 +92,8 @@ class MusicMiniPlayer extends ConsumerWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: Row(
                   children: [
-                    // 专辑封面
-                    AlbumCoverImage(
-                      albumArt: hasCurrentSong ? currentSong.albumArt : null,
-                      size: 48,
-                      iconSize: 24,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                    // 专辑封面（带本地文件标识）
+                    _buildAlbumCover(context, ref, currentSong, hasCurrentSong),
                     const SizedBox(width: 12),
                     // 歌曲信息
                     Expanded(

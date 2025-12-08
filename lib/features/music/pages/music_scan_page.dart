@@ -781,10 +781,11 @@ class _MusicScanPageState extends ConsumerState<MusicScanPage> {
         }
       }
 
-      // 保存扫描到的歌曲
-      if (foundSongs.isNotEmpty) {
-        await ref.read(localMusicStorageProvider.notifier).addSongs(foundSongs);
-      }
+      // 替换扫描到的歌曲（清空旧列表，使用新列表）
+      // 同时会清理播放列表中不存在的歌曲引用
+      await ref
+          .read(localMusicStorageProvider.notifier)
+          .replaceSongs(foundSongs);
 
       if (mounted) {
         setState(() {

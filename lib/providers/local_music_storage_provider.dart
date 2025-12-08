@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/emby_api.dart';
 import 'local_music_provider.dart';
+import 'local_music_matcher_provider.dart';
 import 'settings_provider.dart';
 
 /// 本地音乐数据存储管理
@@ -302,6 +303,37 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     await _savePlaylists(updatedPlaylists);
   }
 
+  /// 替换所有歌曲（用于扫描后更新）
+  /// 会清除播放列表中不存在的歌曲引用
+  Future<void> replaceSongs(List<LocalSong> newSongs) async {
+    // 获取新歌曲的所有ID
+    final newSongIds = newSongs.map((s) => s.id).toSet();
+
+    // 更新播放列表，移除不存在的歌曲引用
+    final updatedPlaylists = state.playlists.map((playlist) {
+      final validSongIds = playlist.songIds
+          .where((songId) => newSongIds.contains(songId))
+          .toList();
+      if (validSongIds.length != playlist.songIds.length) {
+        return playlist.copyWith(songIds: validSongIds);
+      }
+      return playlist;
+    }).toList();
+
+    // 更新状态
+    state = state.copyWith(
+      songs: newSongs,
+      playlists: updatedPlaylists,
+    );
+
+    // 保存到持久化存储
+    await _saveSongs(newSongs);
+    await _savePlaylists(updatedPlaylists);
+
+    print(
+        '🎵 [Storage] Replaced ${newSongs.length} songs, cleaned up playlists');
+  }
+
   /// 创建歌单
   Future<MusicPlaylist> createPlaylist(String name) async {
     final newPlaylist = MusicPlaylist(
@@ -442,6 +474,9 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
 
   /// 切换到本地模式
   Future<void> switchToLocalMode() async {
+    // 如果已经是本地模式，不需要切换
+    if (state.sourceMode == MusicSourceMode.local) return;
+
     final playerNotifier = _ref.read(localMusicPlayerProvider.notifier);
     final playerState = _ref.read(localMusicPlayerProvider);
 
@@ -451,13 +486,17 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     // 设置加载状态
     state = state.copyWith(isLoading: true);
 
-    // 保存当前服务器播放队列
-    final serverQueueCache = PlayQueueCache(
-      currentSong: playerState.currentSong,
-      playlist: playerState.playlist,
-      currentIndex: playerState.currentIndex,
-      position: playerState.position,
-    );
+    // 只有当前播放的是服务器音乐时，才保存到服务器播放队列
+    PlayQueueCache serverQueueCache = state.serverPlayQueue;
+    if (playerState.currentSong != null &&
+        playerState.currentSong!.isServerMusic) {
+      serverQueueCache = PlayQueueCache(
+        currentSong: playerState.currentSong,
+        playlist: playerState.playlist,
+        currentIndex: playerState.currentIndex,
+        position: playerState.position,
+      );
+    }
 
     // 停止当前播放并清空状态
     await playerNotifier.clear();
@@ -499,13 +538,17 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     // 记录开始时间
     final startTime = DateTime.now();
 
-    // 保存当前本地播放队列
-    final localQueueCache = PlayQueueCache(
-      currentSong: playerState.currentSong,
-      playlist: playerState.playlist,
-      currentIndex: playerState.currentIndex,
-      position: playerState.position,
-    );
+    // 只有当前播放的是本地音乐时，才保存到本地播放队列
+    PlayQueueCache localQueueCache = state.localPlayQueue;
+    if (playerState.currentSong != null &&
+        !playerState.currentSong!.isServerMusic) {
+      localQueueCache = PlayQueueCache(
+        currentSong: playerState.currentSong,
+        playlist: playerState.playlist,
+        currentIndex: playerState.currentIndex,
+        position: playerState.position,
+      );
+    }
 
     // 停止当前播放并清空状态
     await playerNotifier.clear();
@@ -924,6 +967,17 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
       }
     }
 
+    // 检查本地文件匹配
+    String? localFilePath;
+    String? localLyricsPath;
+    final matcherNotifier = _ref.read(localMusicMatcherProvider.notifier);
+    final match = matcherNotifier.matchLocalFile(item.name, artist);
+    if (match.hasLocalFile) {
+      localFilePath = match.localFilePath;
+      localLyricsPath = match.localLyricsPath;
+      print('🎵 [Music] Found local file for: ${item.name} -> $localFilePath');
+    }
+
     return LocalSong(
       id: item.id ?? '',
       title: item.name,
@@ -940,6 +994,8 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
       isServerMusic: true, // 标记为服务器音乐
       embyItemId: item.id, // 保存 Emby 媒体项ID
       subtitleIndex: subtitleIndex, // 歌词字幕流索引
+      localFilePath: localFilePath, // 本地文件路径
+      localLyricsPath: localLyricsPath, // 本地歌词路径
     );
   }
 }
@@ -963,6 +1019,8 @@ Map<String, dynamic> _localSongToJson(LocalSong song) {
     'isServerMusic': song.isServerMusic,
     'embyItemId': song.embyItemId,
     'subtitleIndex': song.subtitleIndex,
+    'localFilePath': song.localFilePath,
+    'localLyricsPath': song.localLyricsPath,
   };
 }
 
@@ -986,6 +1044,8 @@ LocalSong _localSongFromJson(Map<String, dynamic> json) {
     isServerMusic: json['isServerMusic'] as bool? ?? false,
     embyItemId: json['embyItemId'] as String?,
     subtitleIndex: json['subtitleIndex'] as int?,
+    localFilePath: json['localFilePath'] as String?,
+    localLyricsPath: json['localLyricsPath'] as String?,
   );
 }
 
