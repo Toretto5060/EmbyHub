@@ -230,6 +230,10 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
         isLoading: false,
         sourceMode: MusicSourceMode.local,
       );
+
+      // 恢复本地模式的播放状态
+      final playerNotifier = _ref.read(localMusicPlayerProvider.notifier);
+      await playerNotifier.restoreLastPlayingState(isServerMode: false);
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
@@ -583,9 +587,12 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
           hasMoreServerSongs: false, // 缓存数据不需要上拉加载
         );
 
-        // 恢复服务器播放队列（如果有）
+        // 恢复服务器播放队列（如果有缓存的队列）
         if (!state.serverPlayQueue.isEmpty) {
           await _restorePlayQueue(state.serverPlayQueue);
+        } else {
+          // 没有缓存的队列，尝试从持久化存储恢复
+          await playerNotifier.restoreLastPlayingState(isServerMode: true);
         }
         // 不在这里后台刷新，而是在滚动时触发
 
@@ -632,9 +639,13 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     await _saveServerMusicCache(
         serverId, libraryId, result.songs, result.totalCount);
 
-    // 恢复服务器播放队列（如果有）
+    // 恢复服务器播放队列（如果有缓存的队列）
+    final playerNotifier = _ref.read(localMusicPlayerProvider.notifier);
     if (!state.serverPlayQueue.isEmpty) {
       await _restorePlayQueue(state.serverPlayQueue);
+    } else {
+      // 没有缓存的队列，尝试从持久化存储恢复
+      await playerNotifier.restoreLastPlayingState(isServerMode: true);
     }
 
     // 确保 loading 至少显示 1 秒

@@ -13,6 +13,7 @@ const String _lastPlayingSongKey = 'last_playing_song';
 const String _lastPlayingPositionKey = 'last_playing_position';
 const String _lastPlaylistKey = 'last_playlist';
 const String _lastPlaylistIndexKey = 'last_playlist_index';
+const String _lastSourceModeKey = 'last_music_source_mode'; // 上次的音乐来源模式
 
 /// 播放模式键 - 使用 app_ 前缀表示这是应用级别设置，不会被缓存清除影响
 /// 本地音乐和媒体库音乐共用同一个播放模式
@@ -637,16 +638,39 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     });
   }
 
-  /// 加载上次播放状态
+  /// 加载上次播放状态（只加载播放模式设置）
   Future<void> _loadLastPlayingState() async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // 加载播放模式
+      // 只加载播放模式设置（循环/随机等）
       final playModeIndex = prefs.getInt(_playModeKey) ?? 0;
       final playMode =
           PlayMode.values[playModeIndex.clamp(0, PlayMode.values.length - 1)];
       state = state.copyWith(playMode: playMode);
+
+      // 不再自动恢复播放状态，由 LocalMusicStorageNotifier 根据模式决定
+    } catch (e) {
+      print('Failed to load play mode: $e');
+    }
+  }
+
+  /// 获取上次保存的音乐来源模式
+  static Future<bool> getLastSourceModeIsServer() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mode = prefs.getString(_lastSourceModeKey);
+      return mode == 'server';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// 恢复上次的播放状态（由外部调用，根据模式决定）
+  /// [isServerMode] 当前是否为服务器模式
+  Future<void> restoreLastPlayingState({required bool isServerMode}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
       // 加载上次播放的歌曲
       final songJson = prefs.getString(_lastPlayingSongKey);
@@ -654,6 +678,13 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
       final songData = jsonDecode(songJson) as Map<String, dynamic>;
       final song = LocalSong.fromJson(songData);
+
+      // 检查歌曲类型是否与当前模式匹配
+      if (song.isServerMusic != isServerMode) {
+        print(
+            '🎵 [Music] Skipping restore: song mode mismatch (song: ${song.isServerMusic ? "server" : "local"}, current: ${isServerMode ? "server" : "local"})');
+        return;
+      }
 
       // 加载上次播放位置
       final positionMs = prefs.getInt(_lastPlayingPositionKey) ?? 0;
@@ -669,10 +700,12 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
             .toList();
       }
 
-      // 过滤播放列表，移除不存在的本地文件
-      // 服务器音乐保留，本地音乐检查文件是否存在
+      // 过滤播放列表，只保留与当前模式匹配的歌曲
       final validPlaylist = <LocalSong>[];
       for (final s in playlist) {
+        // 只保留与当前模式匹配的歌曲
+        if (s.isServerMusic != isServerMode) continue;
+
         if (s.isServerMusic) {
           // 服务器音乐直接保留
           validPlaylist.add(s);
@@ -698,9 +731,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         }
       }
 
-      // 如果播放列表为空或当前歌曲不存在，清除播放状态
+      // 如果播放列表为空或当前歌曲不存在，不恢复
       if (validPlaylist.isEmpty || validSong == null) {
-        await _clearSavedState();
         return;
       }
 
@@ -723,9 +755,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
       // ✅ 将播放列表预加载到原生播放器（不自动播放）
       await _preloadPlaylistToPlayer(validPlaylist, finalIndex, position);
+
+      print(
+          '🎵 [Music] Restored ${isServerMode ? "server" : "local"} playlist with ${validPlaylist.length} songs');
     } catch (e) {
-      // 加载失败时忽略错误
-      print('Failed to load last playing state: $e');
+      print('Failed to restore last playing state: $e');
     }
   }
 
@@ -796,6 +830,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
           await prefs.setString(_lastPlaylistKey, playlistJson);
           await prefs.setInt(_lastPlaylistIndexKey, state.currentIndex);
         }
+
+        // 保存音乐来源模式（根据当前歌曲类型）
+        final isServerMusic = state.currentSong!.isServerMusic;
+        await prefs.setString(
+            _lastSourceModeKey, isServerMusic ? 'server' : 'local');
       }
     } catch (e) {
       // 保存失败时忽略错误
