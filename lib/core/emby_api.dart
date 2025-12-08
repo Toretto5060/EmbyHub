@@ -570,13 +570,21 @@ class EmbyApi {
       String? sortOrder,
       bool? groupItemsIntoCollections,
       String? genres}) async {
+    // 基础 Fields
+    String fields =
+        'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag,DateLastSaved,DateLastSavedForUser,DateModified,DateAdded,UserData';
+
+    // 如果是音频类型，添加 MediaStreams 字段以获取位深和采样率
+    if (includeItemTypes == 'Audio') {
+      fields += ',MediaStreams';
+    }
+
     final queryParams = {
       'ParentId': parentId,
       'StartIndex': startIndex,
       'Limit': limit,
       'Recursive': true,
-      'Fields':
-          'PrimaryImageAspectRatio,MediaSources,RunTimeTicks,Overview,PremiereDate,EndDate,Status,ProductionYear,CommunityRating,ChildCount,ProviderIds,SeriesId,SeasonId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,ImageTags,BackdropImageTags,SeriesPrimaryImageTag,SeasonPrimaryImageTag,DateLastSaved,DateLastSavedForUser,DateModified,DateAdded,UserData',
+      'Fields': fields,
     };
 
     // 如果指定了类型，使用指定的；否则使用默认的
@@ -1415,9 +1423,77 @@ class EmbyApi {
         maxWidth: 300, maxHeight: 300, tag: tag, quality: 90);
   }
 
-  // ✅ 获取音频流URL
+  // ✅ 获取音频流URL（简单版本，用于备用）
   String getAudioStreamUrl(String itemId) {
     return '${_dio.options.baseUrl}/Audio/$itemId/universal?Container=opus,webm|opus,mp3,aac,m4a|aac,m4b|aac,flac,webma,webm|webma,wav,ogg&TranscodingContainer=ts&TranscodingProtocol=hls&AudioCodec=aac&api_key=${_getToken()}';
+  }
+
+  /// 获取音频流URL（异步版本，使用 SharedPreferences 获取 token）
+  Future<String> getAudioStreamUrlAsync(String itemId) async {
+    final prefs = await sp.SharedPreferences.getInstance();
+    final token = prefs.getString('emby_token') ?? '';
+    final userId = prefs.getString('emby_user_id') ?? '';
+    final deviceId = await _getDeviceId();
+    // 使用与网页端相同的参数格式
+    return '${_dio.options.baseUrl}/Audio/$itemId/universal?UserId=$userId&DeviceId=$deviceId&MaxStreamingBitrate=140000000&Container=opus,mp3|mp3,aac|aac,m4a|aac,flac,webma,webm,wav|PCM_S16LE,wav|PCM_S24LE,ogg&TranscodingContainer=aac&TranscodingProtocol=hls&AudioCodec=aac&StartTimeTicks=0&EnableRedirection=true&EnableRemoteMedia=false&api_key=$token';
+  }
+
+  /// 获取音频播放信息（包含播放地址和会话信息）
+  /// 用于媒体库音乐播放，支持播放进度上报
+  Future<AudioPlaybackInfo> getAudioPlaybackInfo(String itemId) async {
+    final prefs = await sp.SharedPreferences.getInstance();
+    final token = prefs.getString('emby_token') ?? '';
+    final userId = prefs.getString('emby_user_id') ?? '';
+
+    if (userId.isEmpty) {
+      throw Exception('User ID is empty');
+    }
+
+    // 获取 PlaybackInfo 以获得 PlaySessionId
+    final playbackInfo = await getPlaybackInfo(
+      itemId: itemId,
+      userId: userId,
+      startTimeTicks: 0,
+      isPlayback: true,
+      autoOpenLiveStream: true,
+    );
+
+    // 获取 PlaySessionId
+    String? playSessionId = playbackInfo['PlaySessionId'] as String?;
+    if (playSessionId == null || playSessionId.isEmpty) {
+      playSessionId = DateTime.now().millisecondsSinceEpoch.toString();
+    }
+
+    // 获取 MediaSourceId
+    String mediaSourceId = itemId;
+    if (playbackInfo['MediaSources'] != null &&
+        playbackInfo['MediaSources'] is List &&
+        (playbackInfo['MediaSources'] as List).isNotEmpty) {
+      final firstSource = (playbackInfo['MediaSources'] as List).first;
+      if (firstSource is Map && firstSource['Id'] != null) {
+        mediaSourceId = firstSource['Id'] as String;
+      }
+    }
+
+    // 构建音频播放地址（使用与网页端相同的参数格式）
+    final deviceId = await _getDeviceId();
+    final playUrl =
+        '${_dio.options.baseUrl}/Audio/$itemId/universal?UserId=$userId&DeviceId=$deviceId&MaxStreamingBitrate=140000000&Container=opus,mp3|mp3,aac|aac,m4a|aac,flac,webma,webm,wav|PCM_S16LE,wav|PCM_S24LE,ogg&TranscodingContainer=aac&TranscodingProtocol=hls&AudioCodec=aac&PlaySessionId=$playSessionId&StartTimeTicks=0&EnableRedirection=true&EnableRemoteMedia=false&api_key=$token';
+
+    return AudioPlaybackInfo(
+      url: playUrl,
+      playSessionId: playSessionId,
+      mediaSourceId: mediaSourceId,
+      headers: {
+        'X-Emby-Token': token,
+      },
+    );
+  }
+
+  /// 获取设备ID
+  Future<String> _getDeviceId() async {
+    final prefs = await sp.SharedPreferences.getInstance();
+    return await _ensureDeviceId(prefs);
   }
 
   // 获取当前token
@@ -2571,6 +2647,21 @@ class MediaSourceUrl {
   final Duration? duration;
   final String? playSessionId; // ✅ PlaySessionId，用于调用 /Sessions/Playing
   final String? mediaSourceId; // ✅ MediaSourceId，用于调用 /Sessions/Playing
+}
+
+/// 音频播放信息
+class AudioPlaybackInfo {
+  AudioPlaybackInfo({
+    required this.url,
+    required this.playSessionId,
+    required this.mediaSourceId,
+    this.headers = const {},
+  });
+
+  final String url;
+  final String playSessionId;
+  final String mediaSourceId;
+  final Map<String, String> headers;
 }
 
 class ExternalUrlInfo {

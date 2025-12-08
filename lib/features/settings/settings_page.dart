@@ -15,6 +15,7 @@ import '../../utils/theme_utils.dart';
 import '../home/bottom_nav_wrapper.dart';
 import '../../services/server_cache_manager.dart';
 import '../../providers/local_music_provider.dart';
+import '../../providers/local_music_storage_provider.dart';
 
 // ✅ 缓存刷新触发器 Provider
 final cacheRefreshTriggerProvider = StateProvider<int>((ref) => 0);
@@ -1692,6 +1693,7 @@ class _CacheManager extends ConsumerStatefulWidget {
 class _CacheManagerState extends ConsumerState<_CacheManager> {
   String _imageCacheSize = '计算中...';
   String _dataCacheSize = '计算中...';
+  String _musicCacheInfo = '计算中...';
   bool _isLoading = false;
   bool _isLoadingCacheSize = false;
   int _lastTriggerValue = 0;
@@ -1717,16 +1719,59 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
       // ✅ 数据缓存是用户级别的，需要传userId
       final dataSize =
           await ServerCacheManager.getDataCacheSize(userId: userId);
+      // ✅ 获取当前服务器的音乐缓存大小
+      final musicCacheSize = await _getCurrentServerMusicCacheSize();
 
       if (mounted) {
         setState(() {
           _imageCacheSize = ServerCacheManager.formatCacheSize(imageSize);
           _dataCacheSize = ServerCacheManager.formatCacheSize(dataSize);
+          _musicCacheInfo = ServerCacheManager.formatCacheSize(musicCacheSize);
         });
       }
     } finally {
       _isLoadingCacheSize = false;
     }
+  }
+
+  /// 获取当前服务器的音乐缓存大小（字节）
+  Future<int> _getCurrentServerMusicCacheSize() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final serverId = prefs.getString('emby_server_id') ?? 'default';
+      final keys = prefs.getKeys();
+      int totalSize = 0;
+
+      for (final key in keys) {
+        // key 格式: server_music_{serverId}_{libraryId}
+        if (key.startsWith('server_music_${serverId}_')) {
+          final cacheJson = prefs.getString(key);
+          if (cacheJson != null && cacheJson.isNotEmpty) {
+            // 计算 JSON 字符串的字节大小
+            totalSize += cacheJson.length * 2; // UTF-16 编码，每个字符约2字节
+          }
+        }
+      }
+      return totalSize;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /// 检查当前用户是否有音乐媒体库
+  bool _hasMusicLibrary(WidgetRef ref) {
+    // 优先使用 serverMusicLibraryProvider（如果已经初始化）
+    final serverMusicLib = ref.watch(serverMusicLibraryProvider);
+    if (serverMusicLib.isAvailable) {
+      return true;
+    }
+
+    // 如果 serverMusicLibraryProvider 未初始化，直接检查 viewsProvider
+    final viewsAsync = ref.watch(viewsProvider);
+    return viewsAsync.maybeWhen(
+      data: (views) => views.any((v) => v.collectionType == 'music'),
+      orElse: () => false,
+    );
   }
 
   Future<void> _clearImageCache() async {
@@ -1803,6 +1848,43 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
       await _loadCacheSize();
 
       CustomToast.showSuccess(context, '数据缓存已清除');
+    }
+  }
+
+  /// 清除媒体库音乐缓存（只清除服务器音乐缓存，不影响本地音乐）
+  Future<void> _clearMusicCache() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('音乐缓存'),
+        content: const Text(
+            '确定要清除当前服务器的媒体库音乐缓存吗？\n\n• 只会清除当前服务器的音乐列表缓存\n• 不会影响本地音乐数据\n• 清除后将重新从服务器加载音乐列表'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    setState(() => _isLoading = true);
+
+    // ✅ 只清除服务器音乐缓存（server_music_ 开头的键）
+    await ref.read(localMusicStorageProvider.notifier).clearServerMusicCache();
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+      await _loadCacheSize();
+
+      CustomToast.showSuccess(context, '媒体库音乐缓存已清除');
     }
   }
 
@@ -1923,6 +2005,58 @@ class _CacheManagerState extends ConsumerState<_CacheManager> {
               ),
             ],
           ),
+          // 媒体库音乐缓存 - 仅在当前用户有音乐媒体库时显示
+          if (_hasMusicLibrary(ref)) ...[
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.music_note_rounded,
+                            size: 20,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            '音乐缓存',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _musicCacheInfo,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).textTheme.bodySmall?.color,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                OutlinedButton(
+                  onPressed: _isLoading ? null : _clearMusicCache,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.orange,
+                    side: BorderSide(color: Colors.orange.withOpacity(0.5)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  child: const Text('清除'),
+                ),
+              ],
+            ),
+          ],
           if (_isLoading) ...[
             const SizedBox(height: 16),
             const Center(

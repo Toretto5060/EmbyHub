@@ -705,7 +705,7 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
 
     final songs = <LocalSong>[];
     for (final item in result.items) {
-      final song = _convertItemInfoToLocalSong(item, api);
+      final song = await _convertItemInfoToLocalSongAsync(item, api);
       songs.add(song);
     }
 
@@ -767,6 +767,30 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     }
   }
 
+  /// 清除服务器音乐缓存
+  /// [serverId] 如果提供，只清除指定服务器的缓存；否则清除所有服务器的缓存
+  Future<void> clearServerMusicCache({String? serverId}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys().toList(); // 转为 List 避免并发修改
+
+      // 如果没有指定 serverId，使用当前服务器的 ID
+      final targetServerId =
+          serverId ?? prefs.getString('emby_server_id') ?? 'default';
+
+      for (final key in keys) {
+        // 只清除指定服务器的缓存
+        if (key.startsWith('server_music_${targetServerId}_')) {
+          await prefs.remove(key);
+        }
+      }
+      print(
+          '🎵 [Music] Server music cache cleared for server: $targetServerId');
+    } catch (e) {
+      print('⚠️ [Music] Failed to clear cache: $e');
+    }
+  }
+
   /// 恢复播放队列（不自动播放，只恢复状态）
   Future<void> _restorePlayQueue(PlayQueueCache cache) async {
     if (cache.isEmpty) return;
@@ -782,8 +806,9 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     );
   }
 
-  /// 将 ItemInfo 转换为 LocalSong
-  LocalSong _convertItemInfoToLocalSong(ItemInfo item, EmbyApi api) {
+  /// 将 ItemInfo 转换为 LocalSong（异步版本，获取正确的播放 URL）
+  Future<LocalSong> _convertItemInfoToLocalSongAsync(
+      ItemInfo item, EmbyApi api) async {
     // 获取时长（runTimeTicks 是 100纳秒为单位）
     Duration? duration;
     if (item.runTimeTicks != null) {
@@ -817,20 +842,42 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
       albumArtLarge = api.getMusicCoverUrlLarge(item.id!, tag: imageTag);
     }
 
-    // 获取播放URL
+    // 获取播放URL（使用异步版本确保 token 正确）
     String? playUrl;
     if (item.id != null) {
-      playUrl = api.getAudioStreamUrl(item.id!);
+      playUrl = await api.getAudioStreamUrlAsync(item.id!);
     }
 
-    // 获取比特率
+    // 获取音频信息（比特率、位深、采样率）
     int? bitrate;
+    int? bitDepth;
+    int? sampleRate;
     if (item.mediaSources != null && item.mediaSources!.isNotEmpty) {
       final mediaSource = item.mediaSources!.first;
+      // 获取比特率
       bitrate = (mediaSource['Bitrate'] as num?)?.toInt();
       if (bitrate != null) {
         bitrate = bitrate ~/ 1000; // 转换为 kbps
       }
+
+      // 从 MediaStreams 中获取音频流的位深和采样率
+      final mediaStreams = mediaSource['MediaStreams'] as List<dynamic>?;
+      print(
+          '🎵 [Music] ${item.name} - MediaStreams: ${mediaStreams?.length ?? 0} streams');
+      if (mediaStreams != null && mediaStreams.isNotEmpty) {
+        // 找到音频流（Type == 'Audio'）
+        for (final stream in mediaStreams) {
+          if (stream is Map<String, dynamic> && stream['Type'] == 'Audio') {
+            bitDepth = (stream['BitDepth'] as num?)?.toInt();
+            sampleRate = (stream['SampleRate'] as num?)?.toInt();
+            print(
+                '🎵 [Music] ${item.name} - BitDepth: $bitDepth, SampleRate: $sampleRate');
+            break;
+          }
+        }
+      }
+    } else {
+      print('🎵 [Music] ${item.name} - No MediaSources');
     }
 
     return LocalSong(
@@ -843,6 +890,10 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
       duration: duration,
       path: playUrl,
       bitrate: bitrate,
+      bitDepth: bitDepth,
+      sampleRate: sampleRate,
+      isServerMusic: true, // 标记为服务器音乐
+      embyItemId: item.id, // 保存 Emby 媒体项ID
     );
   }
 }
@@ -862,6 +913,8 @@ Map<String, dynamic> _localSongToJson(LocalSong song) {
     'sampleRate': song.sampleRate,
     'duration': song.duration?.inMilliseconds,
     'path': song.path,
+    'isServerMusic': song.isServerMusic,
+    'embyItemId': song.embyItemId,
   };
 }
 
@@ -881,6 +934,8 @@ LocalSong _localSongFromJson(Map<String, dynamic> json) {
         ? Duration(milliseconds: json['duration'] as int)
         : null,
     path: json['path'] as String?,
+    isServerMusic: json['isServerMusic'] as bool? ?? false,
+    embyItemId: json['embyItemId'] as String?,
   );
 }
 
