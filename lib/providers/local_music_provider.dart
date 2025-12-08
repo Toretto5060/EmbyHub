@@ -145,6 +145,7 @@ class LocalSong {
     required this.artist,
     this.album,
     this.albumArt,
+    this.albumArtLarge, // 大尺寸封面（用于全屏播放页面）
     this.lyrics,
     this.bitrate,
     this.bitDepth,
@@ -157,7 +158,8 @@ class LocalSong {
   final String title;
   final String artist;
   final String? album;
-  final String? albumArt;
+  final String? albumArt; // 小尺寸封面（用于列表和迷你播放器，80x80）
+  final String? albumArtLarge; // 大尺寸封面（用于全屏播放页面，300x300）
   final String? lyrics; // 歌词
   final int? bitrate; // 比特率 (kbps)
   final int? bitDepth; // 位深 (bits)
@@ -173,6 +175,7 @@ class LocalSong {
       artist: json['artist'] as String,
       album: json['album'] as String?,
       albumArt: json['albumArt'] as String?,
+      albumArtLarge: json['albumArtLarge'] as String?,
       lyrics: json['lyrics'] as String?,
       bitrate: json['bitrate'] as int?,
       bitDepth: json['bitDepth'] as int?,
@@ -192,6 +195,7 @@ class LocalSong {
       'artist': artist,
       'album': album,
       'albumArt': albumArt,
+      'albumArtLarge': albumArtLarge,
       'lyrics': lyrics,
       'bitrate': bitrate,
       'bitDepth': bitDepth,
@@ -208,6 +212,7 @@ class LocalSong {
     String? artist,
     String? album,
     String? albumArt,
+    String? albumArtLarge,
     String? lyrics,
     int? bitrate,
     int? bitDepth,
@@ -221,6 +226,7 @@ class LocalSong {
       artist: artist ?? this.artist,
       album: album ?? this.album,
       albumArt: albumArt ?? this.albumArt,
+      albumArtLarge: albumArtLarge ?? this.albumArtLarge,
       lyrics: lyrics ?? this.lyrics,
       bitrate: bitrate ?? this.bitrate,
       bitDepth: bitDepth ?? this.bitDepth,
@@ -961,6 +967,29 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     await _clearSavedState();
   }
 
+  /// 恢复播放队列（不自动播放，只恢复状态和预加载）
+  Future<void> restorePlayQueue({
+    required List<LocalSong> playlist,
+    required int currentIndex,
+    required Duration position,
+  }) async {
+    if (playlist.isEmpty) return;
+
+    final song = playlist[currentIndex.clamp(0, playlist.length - 1)];
+
+    // 更新状态（不自动播放）
+    state = state.copyWith(
+      playlist: playlist,
+      currentIndex: currentIndex,
+      currentSong: song,
+      position: position,
+      isPlaying: false,
+    );
+
+    // 预加载到原生播放器（不自动播放）
+    await _preloadPlaylistToPlayer(playlist, currentIndex, position);
+  }
+
   /// 解析当前歌曲的歌词（用于车载蓝牙显示）
   void _parseLyricsForCurrentSong() {
     final lyrics = state.currentSong?.lyrics;
@@ -1088,9 +1117,36 @@ enum MusicSourceMode {
   server, // 服务器媒体库音乐
 }
 
-/// 当前音乐来源模式
+/// 当前音乐来源模式（默认本地）
 final musicSourceModeProvider =
     StateProvider<MusicSourceMode>((ref) => MusicSourceMode.local);
+
+/// 服务器音乐媒体库信息
+class ServerMusicLibrary {
+  const ServerMusicLibrary({
+    this.isAvailable = false,
+    this.libraryId,
+    this.libraryName,
+  });
+
+  /// 服务器是否有可用的音乐媒体库
+  final bool isAvailable;
+
+  /// 音乐媒体库ID
+  final String? libraryId;
+
+  /// 音乐媒体库名称
+  final String? libraryName;
+
+  @override
+  String toString() =>
+      'ServerMusicLibrary(isAvailable: $isAvailable, libraryId: $libraryId, libraryName: $libraryName)';
+}
+
+/// 服务器音乐媒体库状态 Provider（手动更新）
+/// 由 MusicDrawer 在检测到服务器媒体库变化时更新
+final serverMusicLibraryProvider =
+    StateProvider<ServerMusicLibrary>((ref) => const ServerMusicLibrary());
 
 /// 启动页面模式
 enum StartupPageMode {

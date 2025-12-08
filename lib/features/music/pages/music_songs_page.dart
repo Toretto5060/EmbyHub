@@ -221,6 +221,62 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
   bool _isMultiSelectMode = false;
   final Set<String> _selectedSongIds = {};
 
+  // 滚动监听器（用于上拉加载更多）
+  ScrollController? _internalScrollController;
+
+  // 是否已触发后台刷新（每次切换模式重置）
+  bool _hasTriggeredBackgroundRefresh = false;
+  // 上次的 sourceMode，用于检测模式切换
+  MusicSourceMode? _lastSourceMode;
+
+  ScrollController get _effectiveScrollController {
+    return widget.scrollController ??
+        (_internalScrollController ??= ScrollController());
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // 添加滚动监听
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _effectiveScrollController.addListener(_onScroll);
+    });
+  }
+
+  @override
+  void dispose() {
+    _effectiveScrollController.removeListener(_onScroll);
+    _internalScrollController?.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final storageState = ref.read(localMusicStorageProvider);
+    // 只在服务器模式下处理
+    if (storageState.sourceMode != MusicSourceMode.server) return;
+
+    final maxScroll = _effectiveScrollController.position.maxScrollExtent;
+    final currentScroll = _effectiveScrollController.position.pixels;
+
+    // 如果还有更多数据需要加载（首次加载时），距离底部200像素时加载更多
+    if (storageState.hasMoreServerSongs && !storageState.isLoadingMore) {
+      if (currentScroll >= maxScroll - 200) {
+        ref.read(localMusicStorageProvider.notifier).loadMoreServerSongs();
+      }
+    }
+    // 如果已经加载完全部数据（有缓存），滚动时触发后台静默刷新（只触发一次）
+    else if (!storageState.hasMoreServerSongs &&
+        !_hasTriggeredBackgroundRefresh) {
+      if (currentScroll > 100) {
+        // 滚动超过100像素时触发后台刷新
+        _hasTriggeredBackgroundRefresh = true;
+        ref
+            .read(localMusicStorageProvider.notifier)
+            .refreshServerMusicInBackground();
+      }
+    }
+  }
+
   String _formatDuration(Duration? duration) {
     if (duration == null) return '--:--';
     final totalSeconds = duration.inSeconds;
@@ -457,6 +513,12 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
     final storageState = ref.watch(localMusicStorageProvider);
     final musicSourceMode = ref.watch(musicSourceModeProvider);
 
+    // 检测模式切换，重置后台刷新标记
+    if (_lastSourceMode != musicSourceMode) {
+      _lastSourceMode = musicSourceMode;
+      _hasTriggeredBackgroundRefresh = false;
+    }
+
     // 顶部安全区域 + 标题栏高度
     final topPadding = MediaQuery.of(context).padding.top + 56;
     // 迷你播放器高度
@@ -481,20 +543,38 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
     // 列表顶部 padding = 状态栏 + 标题栏 + 工具栏
     final listTopPadding = topPadding + toolbarHeight;
 
+    // 服务器模式下的分页信息
+    final isServerMode = musicSourceMode == MusicSourceMode.server;
+    final hasMore = storageState.hasMoreServerSongs;
+    final isLoadingMore = storageState.isLoadingMore;
+    final totalCount = storageState.serverTotalCount;
+
     // 使用 Stack 布局：列表在底层，工具栏浮动在上方带毛玻璃效果
     return Stack(
       children: [
         // 歌曲列表（从顶部开始，内容可以滚动到工具栏下面）
         ListView.builder(
-          controller: widget.scrollController,
+          controller: _effectiveScrollController,
           padding: EdgeInsets.only(
             top: listTopPadding,
             bottom: _isMultiSelectMode
                 ? 72 + miniPlayerHeight
                 : 8 + miniPlayerHeight, // 底部留出迷你播放器空间
           ),
-          itemCount: songs.length,
+          // 服务器模式下多一个item用于显示加载更多或已加载完成
+          itemCount: isServerMode ? songs.length + 1 : songs.length,
           itemBuilder: (context, index) {
+            // 最后一个item：加载更多指示器
+            if (isServerMode && index == songs.length) {
+              return _buildLoadMoreIndicator(
+                isDark: isDark,
+                isLoading: isLoadingMore,
+                hasMore: hasMore,
+                loadedCount: songs.length,
+                totalCount: totalCount,
+              );
+            }
+
             final song = songs[index];
             final isPlaying = playerState.currentSong?.id == song.id;
             final isSelected = _selectedSongIds.contains(song.id);
@@ -756,6 +836,53 @@ class _MusicSongsPageState extends ConsumerState<MusicSongsPage> {
                   ),
                 ],
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 加载更多指示器
+  Widget _buildLoadMoreIndicator({
+    required bool isDark,
+    required bool isLoading,
+    required bool hasMore,
+    required int loadedCount,
+    required int totalCount,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isLoading) ...[
+              const CupertinoActivityIndicator(),
+              const SizedBox(height: 8),
+              Text(
+                '加载中...',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.white38 : Colors.black38,
+                ),
+              ),
+            ] else if (hasMore) ...[
+              Text(
+                '上拉加载更多',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.white38 : Colors.black38,
+                ),
+              ),
+            ] else ...[
+              Text(
+                '已加载全部 $totalCount 首歌曲',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.white38 : Colors.black38,
+                ),
+              ),
+            ],
           ],
         ),
       ),

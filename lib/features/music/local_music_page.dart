@@ -495,6 +495,11 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
     final songs = storageState.songs;
     final iconColor = isDark ? Colors.white70 : Colors.black54;
 
+    // 媒体库模式下使用服务器总数，本地模式使用列表长度
+    final isServerMode = storageState.sourceMode == MusicSourceMode.server;
+    final songCount =
+        isServerMode ? storageState.serverTotalCount : songs.length;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
@@ -519,9 +524,9 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
             ),
           ),
           const SizedBox(width: 8),
-          // 歌曲数量（只显示数字）
+          // 歌曲数量（只显示数字）- 媒体库模式显示总数
           Text(
-            '${songs.length}',
+            '$songCount',
             style: TextStyle(
               fontSize: 14,
               color: isDark ? Colors.white54 : Colors.black45,

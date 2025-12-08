@@ -68,6 +68,7 @@ class DefaultAlbumCover extends StatelessWidget {
 }
 
 /// 带封面图片的组件，如果没有封面则显示默认封面
+/// 支持本地文件路径和网络URL
 class AlbumCoverImage extends StatelessWidget {
   const AlbumCoverImage({
     super.key,
@@ -78,7 +79,7 @@ class AlbumCoverImage extends StatelessWidget {
     this.fit = BoxFit.cover,
   });
 
-  /// 封面图片路径
+  /// 封面图片路径（本地文件路径或网络URL）
   final String? albumArt;
 
   /// 封面尺寸（宽高相等）
@@ -95,12 +96,7 @@ class AlbumCoverImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 检查是否有有效的封面图片
-    final hasValidCover = albumArt != null &&
-        albumArt!.isNotEmpty &&
-        File(albumArt!).existsSync();
-
-    if (!hasValidCover) {
+    if (albumArt == null || albumArt!.isEmpty) {
       return DefaultAlbumCover(
         size: size,
         iconSize: iconSize,
@@ -108,20 +104,57 @@ class AlbumCoverImage extends StatelessWidget {
       );
     }
 
-    Widget image = Image.file(
-      File(albumArt!),
-      width: size,
-      height: size,
-      fit: fit,
-      gaplessPlayback: true,
-      errorBuilder: (context, error, stackTrace) {
-        return DefaultAlbumCover(
-          size: size,
-          iconSize: iconSize,
-          borderRadius: borderRadius,
-        );
-      },
-    );
+    Widget image;
+
+    // 检查是否为网络URL
+    if (albumArt!.startsWith('http://') || albumArt!.startsWith('https://')) {
+      image = Image.network(
+        albumArt!,
+        width: size,
+        height: size,
+        fit: fit,
+        gaplessPlayback: true,
+        errorBuilder: (context, error, stackTrace) {
+          return DefaultAlbumCover(
+            size: size,
+            iconSize: iconSize,
+            borderRadius: borderRadius,
+          );
+        },
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          // 加载中显示默认封面
+          return DefaultAlbumCover(
+            size: size,
+            iconSize: iconSize,
+            borderRadius: borderRadius,
+          );
+        },
+      );
+    } else if (File(albumArt!).existsSync()) {
+      // 本地文件
+      image = Image.file(
+        File(albumArt!),
+        width: size,
+        height: size,
+        fit: fit,
+        gaplessPlayback: true,
+        errorBuilder: (context, error, stackTrace) {
+          return DefaultAlbumCover(
+            size: size,
+            iconSize: iconSize,
+            borderRadius: borderRadius,
+          );
+        },
+      );
+    } else {
+      // 无效路径
+      return DefaultAlbumCover(
+        size: size,
+        iconSize: iconSize,
+        borderRadius: borderRadius,
+      );
+    }
 
     if (borderRadius != null) {
       image = ClipRRect(
@@ -135,6 +168,7 @@ class AlbumCoverImage extends StatelessWidget {
 }
 
 /// 圆形封面图片组件
+/// 支持本地文件路径和网络URL
 class CircularAlbumCover extends StatelessWidget {
   const CircularAlbumCover({
     super.key,
@@ -143,7 +177,7 @@ class CircularAlbumCover extends StatelessWidget {
     this.iconSize,
   });
 
-  /// 封面图片路径
+  /// 封面图片路径（本地文件路径或网络URL）
   final String? albumArt;
 
   /// 封面尺寸（直径）
@@ -154,12 +188,57 @@ class CircularAlbumCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 检查是否有有效的封面图片
-    final hasValidCover = albumArt != null &&
-        albumArt!.isNotEmpty &&
-        File(albumArt!).existsSync();
+    if (albumArt == null || albumArt!.isEmpty) {
+      return ClipOval(
+        child: DefaultAlbumCover(
+          size: size,
+          iconSize: iconSize,
+        ),
+      );
+    }
 
-    if (!hasValidCover) {
+    Widget imageWidget;
+
+    // 检查是否为网络URL
+    if (albumArt!.startsWith('http://') || albumArt!.startsWith('https://')) {
+      imageWidget = Image.network(
+        albumArt!,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (context, error, stackTrace) {
+          return DefaultAlbumCover(
+            size: size,
+            iconSize: iconSize,
+          );
+        },
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          // 加载中显示默认封面
+          return DefaultAlbumCover(
+            size: size,
+            iconSize: iconSize,
+          );
+        },
+      );
+    } else if (File(albumArt!).existsSync()) {
+      // 本地文件
+      imageWidget = Image.file(
+        File(albumArt!),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (context, error, stackTrace) {
+          return DefaultAlbumCover(
+            size: size,
+            iconSize: iconSize,
+          );
+        },
+      );
+    } else {
+      // 无效路径
       return ClipOval(
         child: DefaultAlbumCover(
           size: size,
@@ -174,19 +253,7 @@ class CircularAlbumCover extends StatelessWidget {
         height: size,
         // 使用与默认封面一致的背景色作为加载时的占位
         color: const Color(0xFF2C2C2E),
-        child: Image.file(
-          File(albumArt!),
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-          errorBuilder: (context, error, stackTrace) {
-            return DefaultAlbumCover(
-              size: size,
-              iconSize: iconSize,
-            );
-          },
-        ),
+        child: imageWidget,
       ),
     );
   }

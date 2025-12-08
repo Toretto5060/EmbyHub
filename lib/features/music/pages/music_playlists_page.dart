@@ -396,11 +396,17 @@ class _MusicPlaylistsPageState extends ConsumerState<MusicPlaylistsPage> {
     final isDark = isDarkModeFromContext(context, ref);
     final storageState = ref.watch(localMusicStorageProvider);
     final playlists = storageState.playlists;
+    final sourceMode = ref.watch(musicSourceModeProvider);
 
     // 顶部安全区域 + 标题栏高度
     final topPadding = MediaQuery.of(context).padding.top + 56;
     // 迷你播放器高度
     const miniPlayerHeight = 72.0;
+
+    // 服务器模式下显示提示
+    if (sourceMode == MusicSourceMode.server) {
+      return _buildServerModeState(isDark, topPadding);
+    }
 
     return Column(
       children: [
@@ -570,6 +576,43 @@ class _MusicPlaylistsPageState extends ConsumerState<MusicPlaylistsPage> {
             const SizedBox(height: 8),
             Text(
               '点击上方按钮创建新歌单',
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white54 : Colors.black38,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 服务器模式下的提示页面
+  Widget _buildServerModeState(bool isDark, double topPadding) {
+    return Center(
+      child: Padding(
+        padding: EdgeInsets.only(top: topPadding, left: 32, right: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              CupertinoIcons.globe,
+              size: 64,
+              color: isDark ? Colors.white24 : Colors.black12,
+            ),
+            const SizedBox(height: 24),
+            Text(
+              '媒体库模式',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '当前为服务器媒体库模式\n歌单功能仅在本地模式下可用',
               style: TextStyle(
                 fontSize: 14,
                 color: isDark ? Colors.white54 : Colors.black38,

@@ -4,7 +4,10 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../providers/library_provider.dart';
 import '../../providers/local_music_provider.dart';
+import '../../providers/local_music_storage_provider.dart';
+import '../../providers/settings_provider.dart';
 import '../../utils/theme_utils.dart';
 
 class MusicDrawer extends ConsumerWidget {
@@ -17,11 +20,84 @@ class MusicDrawer extends ConsumerWidget {
   final VoidCallback onExit;
   final VoidCallback onClose;
 
+  /// 上一次检测到的用户ID（用于检测账号切换）
+  static String? _lastUserId;
+
+  /// 检查服务器是否有音乐媒体库
+  void _checkServerMusicLibrary(WidgetRef ref) {
+    // 获取认证状态
+    final authAsync = ref.watch(authStateProvider);
+    final auth = authAsync.value;
+
+    // 检测账号切换：如果用户ID变化，重置为本地模式
+    final currentUserId = auth?.userId;
+    if (_lastUserId != null && _lastUserId != currentUserId) {
+      // 账号切换了，重置为本地模式
+      Future.microtask(() {
+        // 切换存储到本地模式（会停止播放并恢复本地歌曲列表）
+        ref.read(localMusicStorageProvider.notifier).switchToLocalMode();
+        ref.read(serverMusicLibraryProvider.notifier).state =
+            const ServerMusicLibrary();
+      });
+    }
+    _lastUserId = currentUserId;
+
+    // 未登录或未连接服务器
+    if (auth == null || !auth.isLoggedIn) {
+      // 更新为不可用状态，并重置为本地模式
+      final currentState = ref.read(serverMusicLibraryProvider);
+      final currentMode = ref.read(musicSourceModeProvider);
+      if (currentState.isAvailable || currentMode == MusicSourceMode.server) {
+        // 使用 Future.microtask 避免在 build 期间修改状态
+        Future.microtask(() {
+          ref.read(serverMusicLibraryProvider.notifier).state =
+              const ServerMusicLibrary();
+          // 切换存储到本地模式（会停止播放并恢复本地歌曲列表）
+          ref.read(localMusicStorageProvider.notifier).switchToLocalMode();
+        });
+      }
+      return;
+    }
+
+    // 获取媒体库列表
+    final viewsAsync = ref.watch(viewsProvider);
+    viewsAsync.whenData((views) {
+      // 查找 music 类型的媒体库
+      final musicLibrary =
+          views.where((v) => v.collectionType == 'music').firstOrNull;
+
+      final newState = musicLibrary != null
+          ? ServerMusicLibrary(
+              isAvailable: true,
+              libraryId: musicLibrary.id,
+              libraryName: musicLibrary.name,
+            )
+          : const ServerMusicLibrary();
+
+      // 仅当状态变化时更新
+      final currentState = ref.read(serverMusicLibraryProvider);
+      if (currentState.isAvailable != newState.isAvailable ||
+          currentState.libraryId != newState.libraryId) {
+        // 使用 Future.microtask 避免在 build 期间修改状态
+        Future.microtask(() {
+          ref.read(serverMusicLibraryProvider.notifier).state = newState;
+          // 如果服务器没有音乐媒体库，也重置为本地模式
+          if (!newState.isAvailable) {
+            ref.read(localMusicStorageProvider.notifier).switchToLocalMode();
+          }
+        });
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = isDarkModeFromContext(context, ref);
     final currentNav = ref.watch(currentMusicNavProvider);
     final musicSourceMode = ref.watch(musicSourceModeProvider);
+
+    // 检查服务器连接状态和音乐媒体库
+    _checkServerMusicLibrary(ref);
 
     // 页面背景色
     final pageBackgroundColor =
@@ -194,6 +270,10 @@ class MusicDrawer extends ConsumerWidget {
 
   Widget _buildHeader(BuildContext context, bool isDark, WidgetRef ref,
       MusicSourceMode musicSourceMode, Color backgroundColor) {
+    // 检查服务器是否有音乐媒体库
+    final serverMusicLibrary = ref.watch(serverMusicLibraryProvider);
+    final hasServerMusicLibrary = serverMusicLibrary.isAvailable;
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
@@ -230,35 +310,48 @@ class MusicDrawer extends ConsumerWidget {
                   ),
                 ),
               ),
-              // 切换本地/媒体库按钮 - 只显示图标
-              CupertinoButton(
-                padding: EdgeInsets.zero,
-                minSize: 32,
-                onPressed: () {
-                  // 切换音乐来源模式
-                  final currentMode = ref.read(musicSourceModeProvider);
-                  ref.read(musicSourceModeProvider.notifier).state =
-                      currentMode == MusicSourceMode.local
-                          ? MusicSourceMode.server
-                          : MusicSourceMode.local;
-                  onClose();
-                },
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: CupertinoColors.activeBlue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
+              // 切换本地/媒体库按钮 - 仅在服务器有音乐媒体库时显示
+              if (hasServerMusicLibrary)
+                CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  minSize: 32,
+                  onPressed: () {
+                    // 切换音乐来源模式
+                    final currentMode = ref.read(musicSourceModeProvider);
+                    final storageNotifier =
+                        ref.read(localMusicStorageProvider.notifier);
+
+                    if (currentMode == MusicSourceMode.local) {
+                      // 切换到服务器模式
+                      final libraryId = serverMusicLibrary.libraryId;
+                      if (libraryId != null) {
+                        storageNotifier.switchToServerMode(libraryId);
+                      }
+                    } else {
+                      // 切换到本地模式
+                      storageNotifier.switchToLocalMode();
+                    }
+                    onClose();
+                  },
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.activeBlue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      musicSourceMode == MusicSourceMode.local
+                          ? CupertinoIcons.device_phone_portrait
+                          : CupertinoIcons.globe,
+                      size: 16,
+                      color: CupertinoColors.activeBlue,
+                    ),
                   ),
-                  child: Icon(
-                    musicSourceMode == MusicSourceMode.local
-                        ? CupertinoIcons.device_phone_portrait
-                        : CupertinoIcons.globe,
-                    size: 16,
-                    color: CupertinoColors.activeBlue,
-                  ),
-                ),
-              ),
+                )
+              else
+                // 占位，保持布局对齐
+                const SizedBox(width: 32),
             ],
           ),
         ),

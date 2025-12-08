@@ -526,11 +526,13 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     }
 
     // 检测歌曲切换，触发封面动画
+    // 优先使用大尺寸封面
+    final currentCoverUrl = currentSong.albumArtLarge ?? currentSong.albumArt;
     if (_previousSongId != null && _previousSongId != currentSong.id) {
       // 传入上一张封面路径用于淡出效果（注意：此时 _previousAlbumArt 是上一首歌的封面）
       final oldAlbumArt = _previousAlbumArt;
       // 先更新为当前封面，再触发动画
-      _previousAlbumArt = currentSong.albumArt;
+      _previousAlbumArt = currentCoverUrl;
       _triggerCoverAnimation(
         playerState.currentIndex,
         oldAlbumArt: oldAlbumArt,
@@ -541,7 +543,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
       });
     } else {
       // 没有切换歌曲时，更新当前封面路径
-      _previousAlbumArt = currentSong.albumArt;
+      _previousAlbumArt = currentCoverUrl;
     }
     _previousSongId = currentSong.id;
 
@@ -1233,9 +1235,12 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                         final isAnimating = _coverFadeAnimation.value < 1.0 &&
                             _fadingOutAlbumArt != null;
 
+                        // 优先使用大尺寸封面，没有则使用普通封面
+                        final coverUrl = song.albumArtLarge ?? song.albumArt;
+
                         if (!isAnimating) {
                           // 没有动画时，直接显示当前封面
-                          return _buildCoverImage(song.albumArt, isDark);
+                          return _buildCoverImage(coverUrl, isDark);
                         }
 
                         return Stack(
@@ -1255,7 +1260,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                               opacity: _coverFadeAnimation.value,
                               child: Transform.scale(
                                 scale: _newCoverScaleAnimation.value,
-                                child: _buildCoverImage(song.albumArt, isDark),
+                                child: _buildCoverImage(coverUrl, isDark),
                               ),
                             ),
                           ],
@@ -1272,13 +1277,45 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     );
   }
 
-  // 构建封面图片
+  // 构建封面图片（支持本地文件和网络URL）
   Widget _buildCoverImage(String? albumArt, bool isDark) {
-    if (albumArt != null &&
-        albumArt.isNotEmpty &&
-        File(albumArt).existsSync()) {
+    if (albumArt == null || albumArt.isEmpty) {
+      return DefaultAlbumCover(iconSize: 80);
+    }
+
+    // 检查是否为网络URL
+    if (albumArt.startsWith('http://') || albumArt.startsWith('https://')) {
+      return Image.network(
+        albumArt,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (context, error, stackTrace) {
+          return DefaultAlbumCover(iconSize: 80);
+        },
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Center(
+            child: CircularProgressIndicator(
+              value: loadingProgress.expectedTotalBytes != null
+                  ? loadingProgress.cumulativeBytesLoaded /
+                      loadingProgress.expectedTotalBytes!
+                  : null,
+              strokeWidth: 2,
+              color: isDark ? Colors.white38 : Colors.black26,
+            ),
+          );
+        },
+      );
+    }
+
+    // 本地文件
+    if (File(albumArt).existsSync()) {
       return Image.file(
         File(albumArt),
+        width: double.infinity,
+        height: double.infinity,
         fit: BoxFit.cover,
         gaplessPlayback: true,
         errorBuilder: (context, error, stackTrace) {
@@ -1286,6 +1323,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
         },
       );
     }
+
     return DefaultAlbumCover(iconSize: 80);
   }
 

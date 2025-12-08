@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/emby_api.dart';
 import 'local_music_provider.dart';
+import 'settings_provider.dart';
 
 /// 本地音乐数据存储管理
 /// 支持按用户（本地/服务器用户）存储数据
@@ -74,41 +76,100 @@ class MusicPlaylist {
   }
 }
 
+/// 播放队列缓存（用于切换模式时保存/恢复）
+class PlayQueueCache {
+  final LocalSong? currentSong;
+  final List<LocalSong> playlist;
+  final int currentIndex;
+  final Duration position;
+
+  const PlayQueueCache({
+    this.currentSong,
+    this.playlist = const [],
+    this.currentIndex = 0,
+    this.position = Duration.zero,
+  });
+
+  bool get isEmpty => currentSong == null && playlist.isEmpty;
+}
+
 /// 本地音乐数据状态
 class LocalMusicStorageState {
-  final List<LocalSong> songs;
+  final List<LocalSong> songs; // 当前显示的歌曲列表（本地或服务器）
+  final List<LocalSong> localSongs; // 本地扫描的歌曲（始终保留）
+  final List<LocalSong> serverSongs; // 服务器音乐列表
   final List<MusicPlaylist> playlists;
   final bool isLoading;
+  final bool isLoadingMore; // 是否正在加载更多
   final String? error;
+  final MusicSourceMode sourceMode; // 当前数据来源模式
+  final PlayQueueCache localPlayQueue; // 本地播放队列缓存
+  final PlayQueueCache serverPlayQueue; // 服务器播放队列缓存
+  final int serverTotalCount; // 服务器音乐总数
+  final bool hasMoreServerSongs; // 是否还有更多服务器歌曲
+  final String? currentServerId; // 当前服务器ID（用于区分存储）
+  final String? currentLibraryId; // 当前媒体库ID
 
   const LocalMusicStorageState({
     this.songs = const [],
+    this.localSongs = const [],
+    this.serverSongs = const [],
     this.playlists = const [],
     this.isLoading = false,
+    this.isLoadingMore = false,
     this.error,
+    this.sourceMode = MusicSourceMode.local,
+    this.localPlayQueue = const PlayQueueCache(),
+    this.serverPlayQueue = const PlayQueueCache(),
+    this.serverTotalCount = 0,
+    this.hasMoreServerSongs = false,
+    this.currentServerId,
+    this.currentLibraryId,
   });
 
   LocalMusicStorageState copyWith({
     List<LocalSong>? songs,
+    List<LocalSong>? localSongs,
+    List<LocalSong>? serverSongs,
     List<MusicPlaylist>? playlists,
     bool? isLoading,
+    bool? isLoadingMore,
     String? error,
+    MusicSourceMode? sourceMode,
+    PlayQueueCache? localPlayQueue,
+    PlayQueueCache? serverPlayQueue,
+    int? serverTotalCount,
+    bool? hasMoreServerSongs,
+    String? currentServerId,
+    String? currentLibraryId,
   }) {
     return LocalMusicStorageState(
       songs: songs ?? this.songs,
+      localSongs: localSongs ?? this.localSongs,
+      serverSongs: serverSongs ?? this.serverSongs,
       playlists: playlists ?? this.playlists,
       isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       error: error,
+      sourceMode: sourceMode ?? this.sourceMode,
+      localPlayQueue: localPlayQueue ?? this.localPlayQueue,
+      serverPlayQueue: serverPlayQueue ?? this.serverPlayQueue,
+      serverTotalCount: serverTotalCount ?? this.serverTotalCount,
+      hasMoreServerSongs: hasMoreServerSongs ?? this.hasMoreServerSongs,
+      currentServerId: currentServerId ?? this.currentServerId,
+      currentLibraryId: currentLibraryId ?? this.currentLibraryId,
     );
   }
 }
 
 /// 本地音乐数据存储管理器
 class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
-  LocalMusicStorageNotifier()
+  LocalMusicStorageNotifier(this._ref)
       : super(const LocalMusicStorageState(isLoading: true)) {
     _initialize();
   }
+
+  final Ref _ref;
 
   /// 默认歌单列表
   static const List<Map<String, String>> defaultPlaylists = [
@@ -130,12 +191,12 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
       final keyPrefix = await _getUserKeyPrefix();
       final prefs = await SharedPreferences.getInstance();
 
-      // 加载歌曲列表
+      // 加载本地歌曲列表
       final songsJson = prefs.getString('${keyPrefix}_songs');
-      List<LocalSong> songs = [];
+      List<LocalSong> localSongs = [];
       if (songsJson != null && songsJson.isNotEmpty) {
         final songsList = jsonDecode(songsJson) as List<dynamic>;
-        songs = songsList.map((json) => _localSongFromJson(json)).toList();
+        localSongs = songsList.map((json) => _localSongFromJson(json)).toList();
       }
 
       // 加载歌单列表
@@ -160,10 +221,13 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
         await _savePlaylists(playlists);
       }
 
+      // 默认显示本地歌曲
       state = state.copyWith(
-        songs: songs,
+        songs: localSongs,
+        localSongs: localSongs,
         playlists: playlists,
         isLoading: false,
+        sourceMode: MusicSourceMode.local,
       );
     } catch (e) {
       state = state.copyWith(
@@ -375,6 +439,412 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     );
     return playlist.songIds.contains(songId);
   }
+
+  /// 切换到本地模式
+  Future<void> switchToLocalMode() async {
+    final playerNotifier = _ref.read(localMusicPlayerProvider.notifier);
+    final playerState = _ref.read(localMusicPlayerProvider);
+
+    // 保存当前服务器播放队列
+    final serverQueueCache = PlayQueueCache(
+      currentSong: playerState.currentSong,
+      playlist: playerState.playlist,
+      currentIndex: playerState.currentIndex,
+      position: playerState.position,
+    );
+
+    // 停止当前播放并清空状态
+    await playerNotifier.clear();
+
+    // 切换显示本地歌曲，并保存服务器播放队列
+    state = state.copyWith(
+      songs: state.localSongs,
+      sourceMode: MusicSourceMode.local,
+      serverPlayQueue: serverQueueCache,
+    );
+
+    // 更新全局模式
+    _ref.read(musicSourceModeProvider.notifier).state = MusicSourceMode.local;
+
+    // 恢复本地播放队列（如果有）
+    if (!state.localPlayQueue.isEmpty) {
+      await _restorePlayQueue(state.localPlayQueue);
+    }
+  }
+
+  /// 切换到服务器模式并加载音乐
+  Future<void> switchToServerMode(String libraryId) async {
+    final playerNotifier = _ref.read(localMusicPlayerProvider.notifier);
+    final playerState = _ref.read(localMusicPlayerProvider);
+
+    // 保存当前本地播放队列
+    final localQueueCache = PlayQueueCache(
+      currentSong: playerState.currentSong,
+      playlist: playerState.playlist,
+      currentIndex: playerState.currentIndex,
+      position: playerState.position,
+    );
+
+    // 停止当前播放并清空状态
+    await playerNotifier.clear();
+
+    // 获取服务器ID
+    final prefs = await SharedPreferences.getInstance();
+    final serverId = prefs.getString('emby_server_id') ?? 'default';
+
+    // 设置加载状态，并保存本地播放队列
+    state = state.copyWith(
+      isLoading: true,
+      sourceMode: MusicSourceMode.server,
+      localPlayQueue: localQueueCache,
+      currentServerId: serverId,
+      currentLibraryId: libraryId,
+    );
+
+    // 更新全局模式
+    _ref.read(musicSourceModeProvider.notifier).state = MusicSourceMode.server;
+
+    try {
+      // 先尝试从缓存加载
+      final cachedData = await _loadServerMusicCache(serverId, libraryId);
+
+      if (cachedData != null && cachedData.songs.isNotEmpty) {
+        // 有缓存，直接显示全部缓存数据
+        // 缓存数据已经是完整的，不需要上拉加载更多
+        state = state.copyWith(
+          songs: cachedData.songs,
+          serverSongs: cachedData.songs,
+          serverTotalCount: cachedData.totalCount,
+          hasMoreServerSongs: false, // 缓存数据不需要上拉加载
+          isLoading: false,
+        );
+
+        // 恢复服务器播放队列（如果有）
+        if (!state.serverPlayQueue.isEmpty) {
+          await _restorePlayQueue(state.serverPlayQueue);
+        }
+        // 不在这里后台刷新，而是在滚动时触发
+      } else {
+        // 没有缓存，从服务器获取（需要分页加载）
+        await _fetchAndCacheServerMusic(libraryId, serverId);
+      }
+    } catch (e) {
+      // 加载失败，回退到本地模式
+      state = state.copyWith(
+        songs: state.localSongs,
+        sourceMode: MusicSourceMode.local,
+        isLoading: false,
+        error: '加载服务器音乐失败: $e',
+        currentServerId: null,
+        currentLibraryId: null,
+      );
+      _ref.read(musicSourceModeProvider.notifier).state = MusicSourceMode.local;
+      // 恢复本地播放队列
+      if (!localQueueCache.isEmpty) {
+        await _restorePlayQueue(localQueueCache);
+      }
+    }
+  }
+
+  /// 从服务器获取并缓存音乐
+  Future<void> _fetchAndCacheServerMusic(
+      String libraryId, String serverId) async {
+    final result = await _fetchServerMusicListWithTotal(libraryId, 0, 100);
+
+    state = state.copyWith(
+      songs: result.songs,
+      serverSongs: result.songs,
+      serverTotalCount: result.totalCount,
+      hasMoreServerSongs: result.songs.length < result.totalCount,
+      isLoading: false,
+    );
+
+    // 保存到缓存
+    await _saveServerMusicCache(
+        serverId, libraryId, result.songs, result.totalCount);
+
+    // 恢复服务器播放队列（如果有）
+    if (!state.serverPlayQueue.isEmpty) {
+      await _restorePlayQueue(state.serverPlayQueue);
+    }
+  }
+
+  // 是否正在后台刷新
+  bool _isBackgroundRefreshing = false;
+
+  /// 后台静默刷新服务器音乐数据（滚动时触发）
+  /// 获取全部数据并与现有数据对比，有变化才更新
+  Future<void> refreshServerMusicInBackground() async {
+    if (state.sourceMode != MusicSourceMode.server) return;
+    if (_isBackgroundRefreshing) return;
+
+    final libraryId = state.currentLibraryId;
+    final serverId = state.currentServerId;
+    if (libraryId == null || serverId == null) return;
+
+    _isBackgroundRefreshing = true;
+
+    try {
+      // 分批获取全部数据
+      final allSongs = <LocalSong>[];
+      int startIndex = 0;
+      int totalCount = 0;
+      const batchSize = 100;
+
+      do {
+        final result = await _fetchServerMusicListWithTotal(
+            libraryId, startIndex, batchSize);
+        totalCount = result.totalCount;
+        allSongs.addAll(result.songs);
+        startIndex += result.songs.length;
+
+        // 如果获取的数量小于请求的数量，说明已经获取完毕
+        if (result.songs.length < batchSize) break;
+      } while (allSongs.length < totalCount);
+
+      // 只有在仍然是服务器模式时才更新
+      if (state.sourceMode == MusicSourceMode.server &&
+          state.currentLibraryId == libraryId) {
+        // 检查数据是否有变化
+        final hasChanges = _hasDataChanges(state.serverSongs, allSongs);
+
+        if (hasChanges) {
+          state = state.copyWith(
+            songs: allSongs,
+            serverSongs: allSongs,
+            serverTotalCount: totalCount,
+            hasMoreServerSongs: false, // 已经获取全部数据
+          );
+
+          // 更新缓存
+          await _saveServerMusicCache(
+              serverId, libraryId, allSongs, totalCount);
+        }
+      }
+    } catch (e) {
+      // 后台刷新失败，静默处理
+    } finally {
+      _isBackgroundRefreshing = false;
+    }
+  }
+
+  /// 检查数据是否有变化
+  bool _hasDataChanges(List<LocalSong> oldSongs, List<LocalSong> newSongs) {
+    if (oldSongs.length != newSongs.length) return true;
+
+    // 简单比较：检查ID列表是否一致
+    final oldIds = oldSongs.map((s) => s.id).toSet();
+    final newIds = newSongs.map((s) => s.id).toSet();
+
+    return !oldIds.containsAll(newIds) || !newIds.containsAll(oldIds);
+  }
+
+  /// 加载更多服务器音乐（首次加载时使用，有缓存时不需要）
+  Future<void> loadMoreServerSongs() async {
+    if (state.sourceMode != MusicSourceMode.server) return;
+    if (state.isLoadingMore) return;
+    if (!state.hasMoreServerSongs) return;
+
+    final libraryId = state.currentLibraryId;
+    final serverId = state.currentServerId;
+    if (libraryId == null || serverId == null) return;
+
+    state = state.copyWith(isLoadingMore: true);
+
+    try {
+      final currentCount = state.serverSongs.length;
+      final result =
+          await _fetchServerMusicListWithTotal(libraryId, currentCount, 100);
+
+      final allServerSongs = [...state.serverSongs, ...result.songs];
+      final hasMore = allServerSongs.length < result.totalCount;
+
+      state = state.copyWith(
+        songs: allServerSongs,
+        serverSongs: allServerSongs,
+        serverTotalCount: result.totalCount,
+        hasMoreServerSongs: hasMore,
+        isLoadingMore: false,
+      );
+
+      // 更新缓存
+      await _saveServerMusicCache(
+          serverId, libraryId, allServerSongs, result.totalCount);
+    } catch (e) {
+      state = state.copyWith(
+        isLoadingMore: false,
+        error: '加载更多音乐失败: $e',
+      );
+    }
+  }
+
+  /// 从服务器获取音乐列表（带总数）
+  Future<({List<LocalSong> songs, int totalCount})>
+      _fetchServerMusicListWithTotal(
+    String libraryId,
+    int startIndex,
+    int limit,
+  ) async {
+    final authAsync = _ref.read(authStateProvider);
+    final auth = authAsync.value;
+    if (auth == null || !auth.isLoggedIn || auth.userId == null) {
+      throw Exception('未登录');
+    }
+
+    final api = await EmbyApi.create();
+
+    final result = await api.getItemsByParentWithTotal(
+      userId: auth.userId!,
+      parentId: libraryId,
+      includeItemTypes: 'Audio',
+      sortBy: 'SortName',
+      sortOrder: 'Ascending',
+      startIndex: startIndex,
+      limit: limit,
+    );
+
+    final songs = <LocalSong>[];
+    for (final item in result.items) {
+      final song = _convertItemInfoToLocalSong(item, api);
+      songs.add(song);
+    }
+
+    return (songs: songs, totalCount: result.totalCount ?? 0);
+  }
+
+  /// 获取服务器音乐缓存的存储键
+  String _getServerMusicCacheKey(String serverId, String libraryId) {
+    return 'server_music_${serverId}_$libraryId';
+  }
+
+  /// 保存服务器音乐到缓存
+  Future<void> _saveServerMusicCache(
+    String serverId,
+    String libraryId,
+    List<LocalSong> songs,
+    int totalCount,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _getServerMusicCacheKey(serverId, libraryId);
+
+      final cacheData = {
+        'songs': songs.map((s) => _localSongToJson(s)).toList(),
+        'totalCount': totalCount,
+        'cachedAt': DateTime.now().toIso8601String(),
+      };
+
+      await prefs.setString(key, jsonEncode(cacheData));
+    } catch (e) {
+      // 缓存保存失败，静默处理
+    }
+  }
+
+  /// 从缓存加载服务器音乐
+  Future<({List<LocalSong> songs, int totalCount})?> _loadServerMusicCache(
+    String serverId,
+    String libraryId,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _getServerMusicCacheKey(serverId, libraryId);
+
+      final cacheJson = prefs.getString(key);
+      if (cacheJson == null || cacheJson.isEmpty) {
+        return null;
+      }
+
+      final cacheData = jsonDecode(cacheJson) as Map<String, dynamic>;
+      final songsList = cacheData['songs'] as List<dynamic>;
+      final songs = songsList
+          .map((json) => _localSongFromJson(json as Map<String, dynamic>))
+          .toList();
+      final totalCount = cacheData['totalCount'] as int? ?? 0;
+
+      return (songs: songs, totalCount: totalCount);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 恢复播放队列（不自动播放，只恢复状态）
+  Future<void> _restorePlayQueue(PlayQueueCache cache) async {
+    if (cache.isEmpty) return;
+
+    final playerNotifier = _ref.read(localMusicPlayerProvider.notifier);
+
+    // 恢复播放列表状态（不自动播放）
+    // 直接设置播放器状态，而不是调用 setPlaylist（那会自动播放）
+    await playerNotifier.restorePlayQueue(
+      playlist: cache.playlist,
+      currentIndex: cache.currentIndex,
+      position: cache.position,
+    );
+  }
+
+  /// 将 ItemInfo 转换为 LocalSong
+  LocalSong _convertItemInfoToLocalSong(ItemInfo item, EmbyApi api) {
+    // 获取时长（runTimeTicks 是 100纳秒为单位）
+    Duration? duration;
+    if (item.runTimeTicks != null) {
+      duration = Duration(microseconds: item.runTimeTicks! ~/ 10);
+    }
+
+    // 获取艺术家（优先使用 artists 字段，其次 albumArtist，最后 performers）
+    String artist = '未知艺术家';
+    if (item.artists != null && item.artists!.isNotEmpty) {
+      artist = item.artists!.join(', ');
+    } else if (item.albumArtist != null && item.albumArtist!.isNotEmpty) {
+      artist = item.albumArtist!;
+    } else if (item.performers != null && item.performers!.isNotEmpty) {
+      artist = item.performers!.map((p) => p.name).join(', ');
+    }
+
+    // 获取封面图片tag（用于缓存控制）
+    String? imageTag;
+    if (item.imageTags != null && item.imageTags!['Primary'] != null) {
+      imageTag = item.imageTags!['Primary'];
+    }
+
+    // 获取专辑封面URL - 直接使用歌曲自己的ID
+    // 小尺寸（80x80）用于歌曲列表和迷你播放器
+    String? albumArt;
+    // 大尺寸（300x300）用于全屏播放页面
+    String? albumArtLarge;
+
+    if (item.id != null) {
+      albumArt = api.getMusicCoverUrl(item.id!, tag: imageTag);
+      albumArtLarge = api.getMusicCoverUrlLarge(item.id!, tag: imageTag);
+    }
+
+    // 获取播放URL
+    String? playUrl;
+    if (item.id != null) {
+      playUrl = api.getAudioStreamUrl(item.id!);
+    }
+
+    // 获取比特率
+    int? bitrate;
+    if (item.mediaSources != null && item.mediaSources!.isNotEmpty) {
+      final mediaSource = item.mediaSources!.first;
+      bitrate = (mediaSource['Bitrate'] as num?)?.toInt();
+      if (bitrate != null) {
+        bitrate = bitrate ~/ 1000; // 转换为 kbps
+      }
+    }
+
+    return LocalSong(
+      id: item.id ?? '',
+      title: item.name,
+      artist: artist,
+      album: item.album, // 使用专辑字段
+      albumArt: albumArt,
+      albumArtLarge: albumArtLarge,
+      duration: duration,
+      path: playUrl,
+      bitrate: bitrate,
+    );
+  }
 }
 
 /// LocalSong 的 JSON 序列化辅助方法
@@ -385,6 +855,7 @@ Map<String, dynamic> _localSongToJson(LocalSong song) {
     'artist': song.artist,
     'album': song.album,
     'albumArt': song.albumArt,
+    'albumArtLarge': song.albumArtLarge,
     'lyrics': song.lyrics,
     'bitrate': song.bitrate,
     'bitDepth': song.bitDepth,
@@ -401,6 +872,7 @@ LocalSong _localSongFromJson(Map<String, dynamic> json) {
     artist: json['artist'] as String,
     album: json['album'] as String?,
     albumArt: json['albumArt'] as String?,
+    albumArtLarge: json['albumArtLarge'] as String?,
     lyrics: json['lyrics'] as String?,
     bitrate: json['bitrate'] as int?,
     bitDepth: json['bitDepth'] as int?,
@@ -415,5 +887,5 @@ LocalSong _localSongFromJson(Map<String, dynamic> json) {
 /// Provider
 final localMusicStorageProvider =
     StateNotifierProvider<LocalMusicStorageNotifier, LocalMusicStorageState>(
-  (ref) => LocalMusicStorageNotifier(),
+  (ref) => LocalMusicStorageNotifier(ref),
 );

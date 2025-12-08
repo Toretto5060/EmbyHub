@@ -1386,6 +1386,47 @@ class EmbyApi {
     return _dio.options.baseUrl + '/Users/$userId/Images/Primary';
   }
 
+  // ✅ 获取图片URL（简化版）
+  String getImageUrl(String itemId, String type,
+      {int? maxWidth, int? maxHeight, String? tag, int quality = 90}) {
+    final buffer = StringBuffer(
+        '${_dio.options.baseUrl}/Items/$itemId/Images/$type?quality=$quality');
+    if (maxWidth != null) {
+      buffer.write('&maxWidth=$maxWidth');
+    }
+    if (maxHeight != null) {
+      buffer.write('&maxHeight=$maxHeight');
+    }
+    if (tag != null && tag.isNotEmpty) {
+      buffer.write('&tag=$tag');
+    }
+    return buffer.toString();
+  }
+
+  // ✅ 获取音乐封面URL（小尺寸，用于列表和迷你播放器）
+  String getMusicCoverUrl(String itemId, {String? tag}) {
+    return getImageUrl(itemId, 'Primary',
+        maxWidth: 80, maxHeight: 80, tag: tag, quality: 90);
+  }
+
+  // ✅ 获取音乐封面URL（大尺寸，用于全屏播放页面）
+  String getMusicCoverUrlLarge(String itemId, {String? tag}) {
+    return getImageUrl(itemId, 'Primary',
+        maxWidth: 300, maxHeight: 300, tag: tag, quality: 90);
+  }
+
+  // ✅ 获取音频流URL
+  String getAudioStreamUrl(String itemId) {
+    return '${_dio.options.baseUrl}/Audio/$itemId/universal?Container=opus,webm|opus,mp3,aac,m4a|aac,m4b|aac,flac,webma,webm|webma,wav,ogg&TranscodingContainer=ts&TranscodingProtocol=hls&AudioCodec=aac&api_key=${_getToken()}';
+  }
+
+  // 获取当前token
+  String _getToken() {
+    // 从 dio headers 中获取 token
+    final authHeader = _dio.options.headers['X-Emby-Token'] as String?;
+    return authHeader ?? '';
+  }
+
   // ✅ 获取类型列表（返回完整信息，包括图片）
   Future<List<GenreInfo>> getGenres({
     required String userId,
@@ -2283,6 +2324,10 @@ class ItemInfo {
     this.providerIds,
     this.dateCreated,
     this.status,
+    this.album, // 音频专用：专辑名
+    this.albumId, // 音频专用：专辑ID
+    this.artists, // 音频专用：艺术家列表
+    this.albumArtist, // 音频专用：专辑艺术家
   });
 
   final String? id;
@@ -2316,6 +2361,10 @@ class ItemInfo {
   final String? dateCreated;
   final String? status; // Series状态：Ended, Canceled, In Production, Continuing
   final List<ExternalUrlInfo>? externalUrls;
+  final String? album; // 音频专用：专辑名
+  final String? albumId; // 音频专用：专辑ID
+  final List<String>? artists; // 音频专用：艺术家列表
+  final String? albumArtist; // 音频专用：专辑艺术家
 
   // 获取评分和来源
   double? getRating() {
@@ -2390,6 +2439,14 @@ class ItemInfo {
       providerIds: json['ProviderIds'] as Map<String, dynamic>?,
       dateCreated: json['DateCreated'] as String?,
       status: json['Status'] as String?,
+      // 音频专用字段
+      album: json['Album'] as String?,
+      albumId: json['AlbumId'] as String?,
+      artists: (json['Artists'] as List?)
+          ?.map((e) => e?.toString() ?? '')
+          .where((e) => e.isNotEmpty)
+          .toList(),
+      albumArtist: json['AlbumArtist'] as String?,
     );
   }
 
@@ -2428,6 +2485,11 @@ class ItemInfo {
       'ProviderIds': providerIds,
       'DateCreated': dateCreated,
       'Status': status,
+      // 音频专用字段
+      'Album': album,
+      'AlbumId': albumId,
+      'Artists': artists,
+      'AlbumArtist': albumArtist,
     };
   }
 
