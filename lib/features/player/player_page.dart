@@ -268,6 +268,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Map<String, dynamic>? _sessionInfo;
   Timer? _sessionInfoUpdateTimer; // ✅ 弹窗打开时的实时更新定时器
 
+  // ✅ 屏幕常亮控制
+  static const _brightnessChannel = MethodChannel('com.embyhub/brightness');
+
   Duration? get _initialSeekPosition {
     final ticks = widget.initialPositionTicks;
     _playerLogImportant('🎬 [Player] Initial position ticks: $ticks');
@@ -597,6 +600,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             _hasStartedPlayback = true;
           }
         });
+
+        // ✅ 根据播放状态设置屏幕常亮
+        // 播放时保持屏幕常亮，暂停时允许屏幕自动熄灭
+        unawaited(_setKeepScreenOn(isPlaying));
 
         // ✅ 通知原生层播放状态，用于 onUserLeaveHint 自动进入 PiP
         if (Platform.isAndroid) {
@@ -1367,6 +1374,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   void dispose() {
     _playerLog('🎬 [Player] 🔴 PlayerPage disposing...');
 
+    // ✅ 关闭屏幕常亮（退出播放页面时）
+    unawaited(_setKeepScreenOn(false));
+
     // ✅ 上报播放统计
     _reportPlaybackStats();
 
@@ -1543,6 +1553,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           '❌ [Player] Failed to get volume (code: ${e.code}): ${e.message}');
     } catch (e) {
       _playerLog('🎬 [Player] Failed to get volume: $e');
+    }
+  }
+
+  // ✅ 设置屏幕常亮状态
+  Future<void> _setKeepScreenOn(bool keepOn) async {
+    try {
+      if (Platform.isAndroid) {
+        await _brightnessChannel.invokeMethod('setKeepScreenOn', {'keepOn': keepOn});
+        _playerLog('🔆 [Player] Screen keep-on set to: $keepOn');
+      }
+      // iOS 可以使用 UIApplication.shared.isIdleTimerDisabled，但需要额外的原生代码
+    } catch (e) {
+      _playerLog('❌ [Player] Failed to set keep screen on: $e');
     }
   }
 

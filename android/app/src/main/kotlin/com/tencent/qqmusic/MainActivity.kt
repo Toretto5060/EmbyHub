@@ -467,7 +467,7 @@ class MainActivity: FlutterActivity() {
             }
         }
         
-        // ✅ 亮度/音量控制 channel
+        // ✅ 亮度/音量/屏幕常亮控制 channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, brightnessChannelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "setBrightness" -> {
@@ -487,6 +487,11 @@ class MainActivity: FlutterActivity() {
                 "getVolume" -> {
                     val volume = getSystemVolume()
                     result.success(volume)
+                }
+                "setKeepScreenOn" -> {
+                    val keepOn = call.argument<Boolean>("keepOn") ?: false
+                    setKeepScreenOn(keepOn)
+                    result.success(true)
                 }
                 else -> result.notImplemented()
             }
@@ -540,6 +545,19 @@ class MainActivity: FlutterActivity() {
             val maxVolume = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
             (currentVolume.toDouble() / maxVolume * 100.0).coerceIn(0.0, 100.0)
         } ?: 50.0
+    }
+    
+    // ✅ 设置屏幕常亮
+    private fun setKeepScreenOn(keepOn: Boolean) {
+        runOnUiThread {
+            if (keepOn) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                android.util.Log.d("MainActivity", "🔆 Screen keep-on enabled")
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                android.util.Log.d("MainActivity", "🔅 Screen keep-on disabled")
+            }
+        }
     }
 
     // ✅ 退出 PiP 模式
