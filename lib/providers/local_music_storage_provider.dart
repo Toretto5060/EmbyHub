@@ -222,6 +222,11 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
         await _savePlaylists(playlists);
       }
 
+      // 检查上次的音乐来源模式
+      final lastModeIsServer =
+          await LocalMusicPlayerNotifier.getLastSourceModeIsServer();
+      print('🎵 [Storage] Last source mode is server: $lastModeIsServer');
+
       // 默认显示本地歌曲
       state = state.copyWith(
         songs: localSongs,
@@ -231,9 +236,19 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
         sourceMode: MusicSourceMode.local,
       );
 
-      // 恢复本地模式的播放状态
+      // 根据上次的模式恢复播放状态
       final playerNotifier = _ref.read(localMusicPlayerProvider.notifier);
-      await playerNotifier.restoreLastPlayingState(isServerMode: false);
+      if (lastModeIsServer) {
+        // 上次是服务器模式，恢复服务器播放状态
+        // 注意：此时歌曲列表显示的是本地的，但播放器显示的是服务器的
+        // 这是正确的行为，因为用户可能想继续听之前的歌
+        print('🎵 [Storage] Restoring server playlist...');
+        await playerNotifier.restoreLastPlayingState(isServerMode: true);
+      } else {
+        // 上次是本地模式，恢复本地播放状态
+        print('🎵 [Storage] Restoring local playlist...');
+        await playerNotifier.restoreLastPlayingState(isServerMode: false);
+      }
     } catch (e) {
       state = state.copyWith(
         isLoading: false,

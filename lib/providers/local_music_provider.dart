@@ -8,12 +8,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/emby_api.dart';
 import '../features/music/exoplayer_music_controller.dart';
 
-/// 持久化存储的键
-const String _lastPlayingSongKey = 'last_playing_song';
-const String _lastPlayingPositionKey = 'last_playing_position';
-const String _lastPlaylistKey = 'last_playlist';
-const String _lastPlaylistIndexKey = 'last_playlist_index';
-const String _lastSourceModeKey = 'last_music_source_mode'; // 上次的音乐来源模式
+/// 持久化存储的键 - 本地模式
+const String _localLastPlayingSongKey = 'local_last_playing_song';
+const String _localLastPlayingPositionKey = 'local_last_playing_position';
+const String _localLastPlaylistKey = 'local_last_playlist';
+const String _localLastPlaylistIndexKey = 'local_last_playlist_index';
+
+/// 持久化存储的键 - 服务器模式
+const String _serverLastPlayingSongKey = 'server_last_playing_song';
+const String _serverLastPlayingPositionKey = 'server_last_playing_position';
+const String _serverLastPlaylistKey = 'server_last_playlist';
+const String _serverLastPlaylistIndexKey = 'server_last_playlist_index';
+
+/// 上次的音乐来源模式
+const String _lastSourceModeKey = 'last_music_source_mode';
 
 /// 播放模式键 - 使用 app_ 前缀表示这是应用级别设置，不会被缓存清除影响
 /// 本地音乐和媒体库音乐共用同一个播放模式
@@ -672,26 +680,32 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     try {
       final prefs = await SharedPreferences.getInstance();
 
+      // 根据模式选择存储键
+      final songKey =
+          isServerMode ? _serverLastPlayingSongKey : _localLastPlayingSongKey;
+      final positionKey = isServerMode
+          ? _serverLastPlayingPositionKey
+          : _localLastPlayingPositionKey;
+      final playlistKey =
+          isServerMode ? _serverLastPlaylistKey : _localLastPlaylistKey;
+
       // 加载上次播放的歌曲
-      final songJson = prefs.getString(_lastPlayingSongKey);
-      if (songJson == null) return;
+      final songJson = prefs.getString(songKey);
+      if (songJson == null) {
+        print(
+            '🎵 [Music] No saved ${isServerMode ? "server" : "local"} playlist to restore');
+        return;
+      }
 
       final songData = jsonDecode(songJson) as Map<String, dynamic>;
       final song = LocalSong.fromJson(songData);
 
-      // 检查歌曲类型是否与当前模式匹配
-      if (song.isServerMusic != isServerMode) {
-        print(
-            '🎵 [Music] Skipping restore: song mode mismatch (song: ${song.isServerMusic ? "server" : "local"}, current: ${isServerMode ? "server" : "local"})');
-        return;
-      }
-
       // 加载上次播放位置
-      final positionMs = prefs.getInt(_lastPlayingPositionKey) ?? 0;
+      final positionMs = prefs.getInt(positionKey) ?? 0;
       final position = Duration(milliseconds: positionMs);
 
       // 加载播放列表
-      final playlistJson = prefs.getString(_lastPlaylistKey);
+      final playlistJson = prefs.getString(playlistKey);
       List<LocalSong> playlist = [];
       if (playlistJson != null) {
         final playlistData = jsonDecode(playlistJson) as List;
@@ -700,12 +714,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
             .toList();
       }
 
-      // 过滤播放列表，只保留与当前模式匹配的歌曲
+      // 过滤播放列表
       final validPlaylist = <LocalSong>[];
       for (final s in playlist) {
-        // 只保留与当前模式匹配的歌曲
-        if (s.isServerMusic != isServerMode) continue;
-
         if (s.isServerMusic) {
           // 服务器音乐直接保留
           validPlaylist.add(s);
@@ -808,31 +819,44 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     }
   }
 
-  /// 保存当前播放状态
+  /// 保存当前播放状态（根据歌曲类型保存到对应的存储键）
   Future<void> _savePlayingState() async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
       if (state.currentSong != null) {
+        final isServerMusic = state.currentSong!.isServerMusic;
+
+        // 根据歌曲类型选择存储键
+        final songKey = isServerMusic
+            ? _serverLastPlayingSongKey
+            : _localLastPlayingSongKey;
+        final positionKey = isServerMusic
+            ? _serverLastPlayingPositionKey
+            : _localLastPlayingPositionKey;
+        final playlistKey =
+            isServerMusic ? _serverLastPlaylistKey : _localLastPlaylistKey;
+        final indexKey = isServerMusic
+            ? _serverLastPlaylistIndexKey
+            : _localLastPlaylistIndexKey;
+
         // 保存当前歌曲
         final songJson = jsonEncode(state.currentSong!.toJson());
-        await prefs.setString(_lastPlayingSongKey, songJson);
+        await prefs.setString(songKey, songJson);
 
         // 保存播放位置
-        await prefs.setInt(
-            _lastPlayingPositionKey, state.position.inMilliseconds);
+        await prefs.setInt(positionKey, state.position.inMilliseconds);
 
         // 保存播放列表（保存全部）
         if (state.playlist.isNotEmpty) {
           final playlistJson = jsonEncode(
             state.playlist.map((s) => s.toJson()).toList(),
           );
-          await prefs.setString(_lastPlaylistKey, playlistJson);
-          await prefs.setInt(_lastPlaylistIndexKey, state.currentIndex);
+          await prefs.setString(playlistKey, playlistJson);
+          await prefs.setInt(indexKey, state.currentIndex);
         }
 
-        // 保存音乐来源模式（根据当前歌曲类型）
-        final isServerMusic = state.currentSong!.isServerMusic;
+        // 保存当前音乐来源模式
         await prefs.setString(
             _lastSourceModeKey, isServerMusic ? 'server' : 'local');
       }
@@ -1569,14 +1593,22 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     await _clearSavedState();
   }
 
-  /// 清除保存的播放状态
+  /// 清除保存的播放状态（清除所有模式的）
   Future<void> _clearSavedState() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_lastPlayingSongKey);
-      await prefs.remove(_lastPlayingPositionKey);
-      await prefs.remove(_lastPlaylistKey);
-      await prefs.remove(_lastPlaylistIndexKey);
+      // 清除本地模式的存储
+      await prefs.remove(_localLastPlayingSongKey);
+      await prefs.remove(_localLastPlayingPositionKey);
+      await prefs.remove(_localLastPlaylistKey);
+      await prefs.remove(_localLastPlaylistIndexKey);
+      // 清除服务器模式的存储
+      await prefs.remove(_serverLastPlayingSongKey);
+      await prefs.remove(_serverLastPlayingPositionKey);
+      await prefs.remove(_serverLastPlaylistKey);
+      await prefs.remove(_serverLastPlaylistIndexKey);
+      // 清除模式标记
+      await prefs.remove(_lastSourceModeKey);
     } catch (e) {
       print('Failed to clear saved state: $e');
     }
