@@ -89,7 +89,7 @@ class MusicMiniPlayer extends ConsumerWidget {
                         ],
                       ),
                     ),
-                    // 播放/暂停按钮
+                    // 播放/暂停按钮（带加载状态）
                     CupertinoButton(
                       padding: EdgeInsets.zero,
                       minSize: 44,
@@ -100,25 +100,52 @@ class MusicMiniPlayer extends ConsumerWidget {
                                   .togglePlayPause();
                             }
                           : null,
-                      child: Container(
+                      child: SizedBox(
                         width: 44,
                         height: 44,
-                        decoration: BoxDecoration(
-                          color: hasCurrentSong
-                              ? CupertinoColors.activeBlue.withOpacity(0.1)
-                              : (isDark
-                                  ? Colors.white10
-                                  : Colors.black.withOpacity(0.05)),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          playerState.isPlaying
-                              ? CupertinoIcons.pause_fill
-                              : CupertinoIcons.play_fill,
-                          size: 22,
-                          color: hasCurrentSong
-                              ? CupertinoColors.activeBlue
-                              : (isDark ? Colors.white24 : Colors.black26),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // 加载指示器（环形，圆角）- 仅服务器音乐显示
+                            if (playerState.isBuffering &&
+                                hasCurrentSong &&
+                                currentSong.isServerMusic)
+                              SizedBox(
+                                width: 44,
+                                height: 44,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  strokeCap: StrokeCap.round,
+                                  color: CupertinoColors.activeBlue
+                                      .withOpacity(0.6),
+                                ),
+                              ),
+                            // 播放/暂停按钮背景和图标
+                            Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: hasCurrentSong
+                                    ? CupertinoColors.activeBlue
+                                        .withOpacity(0.1)
+                                    : (isDark
+                                        ? Colors.white10
+                                        : Colors.black.withOpacity(0.05)),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                playerState.isPlaying
+                                    ? CupertinoIcons.pause_fill
+                                    : CupertinoIcons.play_fill,
+                                size: 20,
+                                color: hasCurrentSong
+                                    ? CupertinoColors.activeBlue
+                                    : (isDark
+                                        ? Colors.white24
+                                        : Colors.black26),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

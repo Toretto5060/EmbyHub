@@ -415,9 +415,57 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage>
                     ),
                   ),
                 ),
+              // 全局 Loading 遮罩（切换本地/媒体库时显示）
+              if (_shouldShowGlobalLoading())
+                Positioned.fill(
+                  child: _buildGlobalLoadingContent(isDark),
+                ),
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// 是否显示全局 Loading
+  bool _shouldShowGlobalLoading() {
+    final storageState = ref.watch(localMusicStorageProvider);
+    return storageState.isLoading;
+  }
+
+  /// 全局 Loading 遮罩（切换本地/媒体库时显示）
+  Widget _buildGlobalLoadingContent(bool isDark) {
+    final storageState = ref.watch(localMusicStorageProvider);
+
+    return Container(
+      color: isDark
+          ? Colors.black.withOpacity(0.6)
+          : Colors.white.withOpacity(0.6),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 48,
+              height: 48,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                strokeCap: StrokeCap.round,
+                color: CupertinoColors.activeBlue,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              storageState.sourceMode == MusicSourceMode.server
+                  ? '正在加载媒体库音乐...'
+                  : '正在切换...',
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white70 : Colors.black54,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

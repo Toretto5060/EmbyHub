@@ -1490,6 +1490,88 @@ class EmbyApi {
     );
   }
 
+  /// 获取音乐歌词（从 Emby 字幕流获取）
+  ///
+  /// [itemId] 媒体项 ID
+  /// [subtitleIndex] 字幕流索引
+  /// [mediaSourceId] 媒体源 ID（可选，默认为 itemId）
+  ///
+  /// 返回 LRC 格式的歌词字符串，如果获取失败返回 null
+  Future<String?> getMusicLyrics({
+    required String itemId,
+    required int subtitleIndex,
+    String? mediaSourceId,
+  }) async {
+    try {
+      final prefs = await sp.SharedPreferences.getInstance();
+      final token = prefs.getString('emby_token') ?? '';
+      final effectiveMediaSourceId = mediaSourceId ?? itemId;
+
+      // 构建歌词请求 URL（使用 Emby 的字幕流接口）
+      // 格式: /Items/{itemId}/mediasource_{mediaSourceId}/Subtitles/{index}/Stream.js
+      final url =
+          '/Items/$itemId/mediasource_$effectiveMediaSourceId/Subtitles/$subtitleIndex/Stream.js';
+
+      _apiLog('🎵 [API] Fetching lyrics: $url');
+
+      final response = await _dio.get(
+        url,
+        queryParameters: {
+          'api_key': token,
+        },
+      );
+
+      if (response.statusCode == 200 && response.data != null) {
+        final data = response.data as Map<String, dynamic>;
+        final trackEvents = data['TrackEvents'] as List<dynamic>?;
+
+        if (trackEvents == null || trackEvents.isEmpty) {
+          _apiLog('🎵 [API] No lyrics track events found');
+          return null;
+        }
+
+        // 将 TrackEvents 转换为 LRC 格式
+        final lrcLines = <String>[];
+
+        for (final event in trackEvents) {
+          if (event is Map<String, dynamic>) {
+            final text = event['Text'] as String? ?? '';
+            final startTicks = event['StartPositionTicks'] as int? ?? 0;
+
+            // 跳过空行
+            if (text.isEmpty) continue;
+
+            // 将 ticks 转换为时间（1 tick = 100 纳秒 = 0.0001 毫秒）
+            final totalMs = startTicks ~/ 10000;
+            final minutes = totalMs ~/ 60000;
+            final seconds = (totalMs % 60000) ~/ 1000;
+            final centiseconds = (totalMs % 1000) ~/ 10;
+
+            // 格式化为 LRC 时间标签 [mm:ss.xx]
+            final timeTag =
+                '[${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}.${centiseconds.toString().padLeft(2, '0')}]';
+            lrcLines.add('$timeTag$text');
+          }
+        }
+
+        if (lrcLines.isEmpty) {
+          _apiLog('🎵 [API] No valid lyrics lines');
+          return null;
+        }
+
+        final lrc = lrcLines.join('\n');
+        _apiLog(
+            '🎵 [API] Lyrics fetched successfully: ${lrcLines.length} lines');
+        return lrc;
+      }
+
+      return null;
+    } catch (e) {
+      _apiLog('🎵 [API] Failed to fetch lyrics: $e');
+      return null;
+    }
+  }
+
   /// 获取设备ID
   Future<String> _getDeviceId() async {
     final prefs = await sp.SharedPreferences.getInstance();

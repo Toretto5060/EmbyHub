@@ -445,6 +445,12 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     final playerNotifier = _ref.read(localMusicPlayerProvider.notifier);
     final playerState = _ref.read(localMusicPlayerProvider);
 
+    // 记录开始时间
+    final startTime = DateTime.now();
+
+    // 设置加载状态
+    state = state.copyWith(isLoading: true);
+
     // 保存当前服务器播放队列
     final serverQueueCache = PlayQueueCache(
       currentSong: playerState.currentSong,
@@ -470,12 +476,28 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     if (!state.localPlayQueue.isEmpty) {
       await _restorePlayQueue(state.localPlayQueue);
     }
+
+    // 确保 loading 至少显示 1 秒
+    await _ensureMinLoadingTime(startTime);
+    state = state.copyWith(isLoading: false);
+  }
+
+  /// 确保 loading 至少显示指定时间
+  Future<void> _ensureMinLoadingTime(DateTime startTime,
+      {Duration minDuration = const Duration(milliseconds: 1000)}) async {
+    final elapsed = DateTime.now().difference(startTime);
+    if (elapsed < minDuration) {
+      await Future.delayed(minDuration - elapsed);
+    }
   }
 
   /// 切换到服务器模式并加载音乐
   Future<void> switchToServerMode(String libraryId) async {
     final playerNotifier = _ref.read(localMusicPlayerProvider.notifier);
     final playerState = _ref.read(localMusicPlayerProvider);
+
+    // 记录开始时间
+    final startTime = DateTime.now();
 
     // 保存当前本地播放队列
     final localQueueCache = PlayQueueCache(
@@ -516,7 +538,6 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
           serverSongs: cachedData.songs,
           serverTotalCount: cachedData.totalCount,
           hasMoreServerSongs: false, // 缓存数据不需要上拉加载
-          isLoading: false,
         );
 
         // 恢复服务器播放队列（如果有）
@@ -524,12 +545,18 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
           await _restorePlayQueue(state.serverPlayQueue);
         }
         // 不在这里后台刷新，而是在滚动时触发
+
+        // 确保 loading 至少显示 1 秒
+        await _ensureMinLoadingTime(startTime);
+        state = state.copyWith(isLoading: false);
       } else {
         // 没有缓存，从服务器获取（需要分页加载）
-        await _fetchAndCacheServerMusic(libraryId, serverId);
+        await _fetchAndCacheServerMusic(libraryId, serverId, startTime);
       }
     } catch (e) {
       // 加载失败，回退到本地模式
+      // 确保 loading 至少显示 1 秒
+      await _ensureMinLoadingTime(startTime);
       state = state.copyWith(
         songs: state.localSongs,
         sourceMode: MusicSourceMode.local,
@@ -548,15 +575,14 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
 
   /// 从服务器获取并缓存音乐
   Future<void> _fetchAndCacheServerMusic(
-      String libraryId, String serverId) async {
-    final result = await _fetchServerMusicListWithTotal(libraryId, 0, 100);
+      String libraryId, String serverId, DateTime startTime) async {
+    final result = await _fetchServerMusicListWithTotal(libraryId, 0, 5000);
 
     state = state.copyWith(
       songs: result.songs,
       serverSongs: result.songs,
       serverTotalCount: result.totalCount,
       hasMoreServerSongs: result.songs.length < result.totalCount,
-      isLoading: false,
     );
 
     // 保存到缓存
@@ -567,6 +593,10 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     if (!state.serverPlayQueue.isEmpty) {
       await _restorePlayQueue(state.serverPlayQueue);
     }
+
+    // 确保 loading 至少显示 1 秒
+    await _ensureMinLoadingTime(startTime);
+    state = state.copyWith(isLoading: false);
   }
 
   // 是否正在后台刷新
@@ -589,7 +619,7 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
       final allSongs = <LocalSong>[];
       int startIndex = 0;
       int totalCount = 0;
-      const batchSize = 100;
+      const batchSize = 5000;
 
       do {
         final result = await _fetchServerMusicListWithTotal(
@@ -654,7 +684,7 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
     try {
       final currentCount = state.serverSongs.length;
       final result =
-          await _fetchServerMusicListWithTotal(libraryId, currentCount, 100);
+          await _fetchServerMusicListWithTotal(libraryId, currentCount, 5000);
 
       final allServerSongs = [...state.serverSongs, ...result.songs];
       final hasMore = allServerSongs.length < result.totalCount;
@@ -848,10 +878,12 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
       playUrl = await api.getAudioStreamUrlAsync(item.id!);
     }
 
-    // 获取音频信息（比特率、位深、采样率）
+    // 获取音频信息（比特率、位深、采样率、容器格式、字幕索引）
     int? bitrate;
     int? bitDepth;
     int? sampleRate;
+    String? container;
+    int? subtitleIndex; // 歌词字幕流索引
     if (item.mediaSources != null && item.mediaSources!.isNotEmpty) {
       final mediaSource = item.mediaSources!.first;
       // 获取比特率
@@ -859,25 +891,37 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
       if (bitrate != null) {
         bitrate = bitrate ~/ 1000; // 转换为 kbps
       }
+      // 获取容器格式（如 flac, mp3, aac）
+      container = mediaSource['Container'] as String?;
 
-      // 从 MediaStreams 中获取音频流的位深和采样率
+      // 从 MediaStreams 中获取音频流的位深和采样率，以及字幕流索引
       final mediaStreams = mediaSource['MediaStreams'] as List<dynamic>?;
-      print(
-          '🎵 [Music] ${item.name} - MediaStreams: ${mediaStreams?.length ?? 0} streams');
       if (mediaStreams != null && mediaStreams.isNotEmpty) {
-        // 找到音频流（Type == 'Audio'）
         for (final stream in mediaStreams) {
-          if (stream is Map<String, dynamic> && stream['Type'] == 'Audio') {
-            bitDepth = (stream['BitDepth'] as num?)?.toInt();
-            sampleRate = (stream['SampleRate'] as num?)?.toInt();
-            print(
-                '🎵 [Music] ${item.name} - BitDepth: $bitDepth, SampleRate: $sampleRate');
-            break;
+          if (stream is Map<String, dynamic>) {
+            final streamType = stream['Type'] as String?;
+            final streamIndex = (stream['Index'] as num?)?.toInt();
+            final codec = stream['Codec'] as String?;
+
+            // 获取音频流信息
+            if (streamType == 'Audio') {
+              bitDepth = (stream['BitDepth'] as num?)?.toInt();
+              sampleRate = (stream['SampleRate'] as num?)?.toInt();
+            }
+
+            // 获取字幕流索引（用于歌词）
+            // 字幕流类型可能是 'Subtitle'，Codec 可能是 'lrc', 'srt', 'ass', 'subrip' 等
+            if ((streamType == 'Subtitle' ||
+                    codec == 'lrc' ||
+                    codec == 'srt' ||
+                    codec == 'ass' ||
+                    codec == 'subrip') &&
+                subtitleIndex == null) {
+              subtitleIndex = streamIndex;
+            }
           }
         }
       }
-    } else {
-      print('🎵 [Music] ${item.name} - No MediaSources');
     }
 
     return LocalSong(
@@ -892,8 +936,10 @@ class LocalMusicStorageNotifier extends StateNotifier<LocalMusicStorageState> {
       bitrate: bitrate,
       bitDepth: bitDepth,
       sampleRate: sampleRate,
+      container: container, // 音频容器格式
       isServerMusic: true, // 标记为服务器音乐
       embyItemId: item.id, // 保存 Emby 媒体项ID
+      subtitleIndex: subtitleIndex, // 歌词字幕流索引
     );
   }
 }
@@ -911,10 +957,12 @@ Map<String, dynamic> _localSongToJson(LocalSong song) {
     'bitrate': song.bitrate,
     'bitDepth': song.bitDepth,
     'sampleRate': song.sampleRate,
+    'container': song.container,
     'duration': song.duration?.inMilliseconds,
     'path': song.path,
     'isServerMusic': song.isServerMusic,
     'embyItemId': song.embyItemId,
+    'subtitleIndex': song.subtitleIndex,
   };
 }
 
@@ -930,12 +978,14 @@ LocalSong _localSongFromJson(Map<String, dynamic> json) {
     bitrate: json['bitrate'] as int?,
     bitDepth: json['bitDepth'] as int?,
     sampleRate: json['sampleRate'] as int?,
+    container: json['container'] as String?,
     duration: json['duration'] != null
         ? Duration(milliseconds: json['duration'] as int)
         : null,
     path: json['path'] as String?,
     isServerMusic: json['isServerMusic'] as bool? ?? false,
     embyItemId: json['embyItemId'] as String?,
+    subtitleIndex: json['subtitleIndex'] as int?,
   );
 }
 

@@ -1042,8 +1042,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
   /// 构建音轨信息（格式、位深、采样率等）
   Widget _buildTrackInfo(BuildContext context, bool isDark, LocalSong song) {
-    // 从文件路径获取格式
-    final format = _getAudioFormat(song.path);
+    // 优先使用 container 字段，其次从文件路径获取格式
+    final format = song.container?.toUpperCase() ?? _getAudioFormat(song.path);
     // 构建音轨信息文本
     final trackInfo = _buildTrackInfoText(
       format,
@@ -1172,14 +1172,39 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     final lyrics = song.lyrics;
 
     if (lyrics == null || lyrics.isEmpty) {
+      // 如果是服务器音乐且有字幕索引，说明正在加载歌词
+      final isLoadingLyrics = song.isServerMusic && song.subtitleIndex != null;
+
       return Center(
-        child: Text(
-          '暂无歌词',
-          style: TextStyle(
-            fontSize: 18,
-            color: isDark ? Colors.white38 : Colors.black38,
-          ),
-        ),
+        child: isLoadingLyrics
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: isDark ? Colors.white38 : Colors.black38,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '歌词加载中...',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? Colors.white38 : Colors.black38,
+                    ),
+                  ),
+                ],
+              )
+            : Text(
+                '暂无歌词',
+                style: TextStyle(
+                  fontSize: 18,
+                  color: isDark ? Colors.white38 : Colors.black38,
+                ),
+              ),
       );
     }
 
@@ -1485,17 +1510,14 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
             },
           ),
           const SizedBox(width: 16),
-          // 播放/暂停
-          _ControlButton(
-            icon: playerState.isPlaying
-                ? CupertinoIcons.pause_fill
-                : CupertinoIcons.play_fill,
+          // 播放/暂停（带加载状态，仅服务器音乐显示 loading）
+          _PlayPauseButton(
+            isPlaying: playerState.isPlaying,
+            isBuffering: playerState.isBuffering &&
+                (playerState.currentSong?.isServerMusic ?? false),
             size: 72,
             iconSize: 40,
             isDark: isDark,
-            // 播放图标需要微调位置
-            iconOffset:
-                playerState.isPlaying ? Offset.zero : const Offset(2, 0),
             onPressed: () {
               ref.read(localMusicPlayerProvider.notifier).togglePlayPause();
             },
@@ -1685,13 +1707,122 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   }
 }
 
+/// 播放/暂停按钮（带加载状态）
+class _PlayPauseButton extends StatefulWidget {
+  final bool isPlaying;
+  final bool isBuffering;
+  final double size;
+  final double iconSize;
+  final bool isDark;
+  final VoidCallback onPressed;
+
+  const _PlayPauseButton({
+    required this.isPlaying,
+    required this.isBuffering,
+    required this.size,
+    required this.iconSize,
+    required this.isDark,
+    required this.onPressed,
+  });
+
+  @override
+  State<_PlayPauseButton> createState() => _PlayPauseButtonState();
+}
+
+class _PlayPauseButtonState extends State<_PlayPauseButton> {
+  bool _isPressed = false;
+
+  void _onTapDown(TapDownDetails details) {
+    setState(() {
+      _isPressed = true;
+    });
+  }
+
+  void _onTapUp(TapUpDetails details) {
+    setState(() {
+      _isPressed = false;
+    });
+    widget.onPressed();
+  }
+
+  void _onTapCancel() {
+    setState(() {
+      _isPressed = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 播放图标需要微调位置
+    final iconOffset = widget.isPlaying ? Offset.zero : const Offset(2, 0);
+
+    return GestureDetector(
+      onTapDown: _onTapDown,
+      onTapUp: _onTapUp,
+      onTapCancel: _onTapCancel,
+      child: SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 加载指示器（环形，圆角）
+            if (widget.isBuffering)
+              SizedBox(
+                width: widget.size,
+                height: widget.size,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  strokeCap: StrokeCap.round,
+                  color: widget.isDark
+                      ? Colors.white.withOpacity(0.6)
+                      : Colors.black.withOpacity(0.4),
+                ),
+              ),
+            // 播放/暂停按钮
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 100),
+              width: widget.size - 8,
+              height: widget.size - 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: _isPressed
+                    ? [
+                        BoxShadow(
+                          color: (widget.isDark ? Colors.white : Colors.black)
+                              .withOpacity(0.15),
+                          blurRadius: 12,
+                          spreadRadius: 2,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Center(
+                child: Transform.translate(
+                  offset: iconOffset,
+                  child: Icon(
+                    widget.isPlaying
+                        ? CupertinoIcons.pause_fill
+                        : CupertinoIcons.play_fill,
+                    size: widget.iconSize,
+                    color: widget.isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// 控制按钮（带阴影点击效果）
 class _ControlButton extends StatefulWidget {
   final IconData icon;
   final double size;
   final double iconSize;
   final bool isDark;
-  final Offset iconOffset;
   final VoidCallback onPressed;
 
   const _ControlButton({
@@ -1699,7 +1830,6 @@ class _ControlButton extends StatefulWidget {
     required this.size,
     required this.iconSize,
     required this.isDark,
-    this.iconOffset = Offset.zero,
     required this.onPressed,
   });
 
@@ -1753,13 +1883,10 @@ class _ControlButtonState extends State<_ControlButton> {
               : null,
         ),
         child: Center(
-          child: Transform.translate(
-            offset: widget.iconOffset,
-            child: Icon(
-              widget.icon,
-              size: widget.iconSize,
-              color: widget.isDark ? Colors.white : Colors.black87,
-            ),
+          child: Icon(
+            widget.icon,
+            size: widget.iconSize,
+            color: widget.isDark ? Colors.white : Colors.black87,
           ),
         ),
       ),

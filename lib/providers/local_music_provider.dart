@@ -12,7 +12,10 @@ const String _lastPlayingSongKey = 'last_playing_song';
 const String _lastPlayingPositionKey = 'last_playing_position';
 const String _lastPlaylistKey = 'last_playlist';
 const String _lastPlaylistIndexKey = 'last_playlist_index';
-const String _playModeKey = 'play_mode';
+
+/// 播放模式键 - 使用 app_ 前缀表示这是应用级别设置，不会被缓存清除影响
+/// 本地音乐和媒体库音乐共用同一个播放模式
+const String _playModeKey = 'app_music_play_mode';
 
 /// LRC 歌词行数据（用于车载蓝牙歌词显示）
 class _LyricLine {
@@ -151,10 +154,12 @@ class LocalSong {
     this.bitrate,
     this.bitDepth,
     this.sampleRate,
+    this.container, // 音频容器格式（如 flac, mp3, aac）
     this.duration,
     this.path,
     this.isServerMusic = false, // 是否为服务器媒体库音乐
     this.embyItemId, // Emby 媒体项ID（用于服务器音乐）
+    this.subtitleIndex, // 歌词字幕流索引（用于从服务器获取歌词）
   });
 
   final String id;
@@ -167,10 +172,12 @@ class LocalSong {
   final int? bitrate; // 比特率 (kbps)
   final int? bitDepth; // 位深 (bits)
   final int? sampleRate; // 采样率 (Hz)
+  final String? container; // 音频容器格式（如 flac, mp3, aac）
   final Duration? duration;
   final String? path;
   final bool isServerMusic; // 是否为服务器媒体库音乐
   final String? embyItemId; // Emby 媒体项ID（用于服务器音乐播放上报）
+  final int? subtitleIndex; // 歌词字幕流索引（用于从服务器获取歌词）
 
   /// 从 JSON 创建 LocalSong
   factory LocalSong.fromJson(Map<String, dynamic> json) {
@@ -185,12 +192,14 @@ class LocalSong {
       bitrate: json['bitrate'] as int?,
       bitDepth: json['bitDepth'] as int?,
       sampleRate: json['sampleRate'] as int?,
+      container: json['container'] as String?,
       duration: json['duration'] != null
           ? Duration(milliseconds: json['duration'] as int)
           : null,
       path: json['path'] as String?,
       isServerMusic: json['isServerMusic'] as bool? ?? false,
       embyItemId: json['embyItemId'] as String?,
+      subtitleIndex: json['subtitleIndex'] as int?,
     );
   }
 
@@ -207,10 +216,12 @@ class LocalSong {
       'bitrate': bitrate,
       'bitDepth': bitDepth,
       'sampleRate': sampleRate,
+      'container': container,
       'duration': duration?.inMilliseconds,
       'path': path,
       'isServerMusic': isServerMusic,
       'embyItemId': embyItemId,
+      'subtitleIndex': subtitleIndex,
     };
   }
 
@@ -226,10 +237,12 @@ class LocalSong {
     int? bitrate,
     int? bitDepth,
     int? sampleRate,
+    String? container,
     Duration? duration,
     String? path,
     bool? isServerMusic,
     String? embyItemId,
+    int? subtitleIndex,
   }) {
     return LocalSong(
       id: id ?? this.id,
@@ -242,10 +255,12 @@ class LocalSong {
       bitrate: bitrate ?? this.bitrate,
       bitDepth: bitDepth ?? this.bitDepth,
       sampleRate: sampleRate ?? this.sampleRate,
+      container: container ?? this.container,
       duration: duration ?? this.duration,
       path: path ?? this.path,
       isServerMusic: isServerMusic ?? this.isServerMusic,
       embyItemId: embyItemId ?? this.embyItemId,
+      subtitleIndex: subtitleIndex ?? this.subtitleIndex,
     );
   }
 }
@@ -437,6 +452,25 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
       // 上报播放开始
       await _reportPlaybackStart(song);
+
+      // 获取歌词（如果有字幕流且尚未获取）
+      if (song.subtitleIndex != null && song.lyrics == null) {
+        final songWithLyrics = await _fetchLyricsForSong(song);
+        if (songWithLyrics.lyrics != null) {
+          // 更新播放列表中的歌曲
+          final currentIndex = state.currentIndex;
+          if (currentIndex >= 0 && currentIndex < state.playlist.length) {
+            final updatedPlaylist = List<LocalSong>.from(state.playlist);
+            updatedPlaylist[currentIndex] = songWithLyrics;
+            state = state.copyWith(
+              currentSong: songWithLyrics,
+              playlist: updatedPlaylist,
+            );
+            // 重新解析歌词（用于车载蓝牙显示）
+            _parseLyricsForCurrentSong();
+          }
+        }
+      }
     } catch (e) {
       print('⚠️ [Music] Failed to update server music session: $e');
     }
@@ -542,6 +576,12 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     _mediaButtonPauseSubscription = player.mediaButtonPauseStream.listen((_) {
       // 更新 UI 状态为暂停
       state = state.copyWith(isPlaying: false);
+
+      // 上报暂停状态到 Emby 服务器
+      final currentSong = state.currentSong;
+      if (currentSong != null && currentSong.isServerMusic) {
+        _reportPlaybackProgress(currentSong, state.position, isPaused: true);
+      }
     });
   }
 
@@ -685,6 +725,12 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     if (_player != null) {
       if (wasPlaying) {
         _player!.pause(); // 不使用 await
+
+        // 上报暂停状态到 Emby 服务器
+        final currentSong = state.currentSong;
+        if (currentSong != null && currentSong.isServerMusic) {
+          _reportPlaybackProgress(currentSong, state.position, isPaused: true);
+        }
       } else {
         // 使用与 play() 相同的逻辑：检查播放器是否真正准备好
         if (state.currentSong != null) {
@@ -855,7 +901,7 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       List<LocalSong> songs, int startIndex) async {
     if (_embyApi == null || _player == null) return;
 
-    final currentSong = songs[startIndex];
+    var currentSong = songs[startIndex];
 
     // 为当前播放的歌曲获取带会话信息的播放地址
     String? currentSongUrl;
@@ -873,6 +919,22 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         // 失败时使用预存的 URL
         currentSongUrl = currentSong.path;
       }
+    }
+
+    // 获取当前歌曲的歌词（如果有字幕流）
+    if (currentSong.isServerMusic &&
+        currentSong.embyItemId != null &&
+        currentSong.subtitleIndex != null &&
+        currentSong.lyrics == null) {
+      currentSong = await _fetchLyricsForSong(currentSong);
+      // 更新播放列表中的歌曲
+      final updatedSongs = List<LocalSong>.from(songs);
+      updatedSongs[startIndex] = currentSong;
+      // 更新状态中的当前歌曲和播放列表
+      state = state.copyWith(
+        currentSong: currentSong,
+        playlist: updatedSongs,
+      );
     }
 
     // 为所有歌曲构建播放地址
@@ -911,6 +973,33 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         await _reportPlaybackStart(currentSong);
       }
     }
+  }
+
+  /// 获取歌曲的歌词
+  Future<LocalSong> _fetchLyricsForSong(LocalSong song) async {
+    if (_embyApi == null ||
+        song.embyItemId == null ||
+        song.subtitleIndex == null) {
+      return song;
+    }
+
+    try {
+      print(
+          '🎵 [Music] Fetching lyrics for: ${song.title}, subtitleIndex: ${song.subtitleIndex}');
+      final lyrics = await _embyApi!.getMusicLyrics(
+        itemId: song.embyItemId!,
+        subtitleIndex: song.subtitleIndex!,
+      );
+
+      if (lyrics != null && lyrics.isNotEmpty) {
+        print('🎵 [Music] Lyrics fetched successfully for: ${song.title}');
+        return song.copyWith(lyrics: lyrics);
+      }
+    } catch (e) {
+      print('⚠️ [Music] Failed to fetch lyrics for ${song.title}: $e');
+    }
+
+    return song;
   }
 
   /// 下一首
@@ -1233,7 +1322,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     // 重置 Emby 会话
     _resetEmbySession();
 
-    state = const LocalMusicPlayerState();
+    // 保留播放模式，重置其他状态
+    final currentPlayMode = state.playMode;
+    state = LocalMusicPlayerState(playMode: currentPlayMode);
     await _clearSavedState();
   }
 
