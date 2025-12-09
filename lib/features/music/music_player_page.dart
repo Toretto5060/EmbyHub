@@ -209,7 +209,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
   // 封面切换动画（缩放 + 淡入淡出）
   late AnimationController _coverAnimationController;
-  late Animation<double> _coverFadeAnimation; // 淡入淡出
+  late Animation<double> _coverFadeAnimation; // 新封面淡入（0->1）
+  late Animation<double> _oldCoverFadeAnimation; // 旧封面淡出（1->0）
   late Animation<double> _oldCoverScaleAnimation; // 旧封面放大
   late Animation<double> _newCoverScaleAnimation; // 新封面缩小
   String? _previousSongId;
@@ -219,6 +220,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
   // 封面旋转动画
   late AnimationController _rotationAnimationController;
+  // 使用 ValueNotifier 来通知旋转角度变化，避免 setState
+  final ValueNotifier<double> _rotationNotifier = ValueNotifier<double>(0);
   double _currentRotation = 0; // 当前旋转角度
   bool _wasPlaying = false; // 上一次的播放状态
 
@@ -280,8 +283,15 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     _newCoverScaleAnimation = Tween<double>(begin: 1.8, end: 1.0).animate(
       CurvedAnimation(parent: _coverAnimationController, curve: Curves.easeOut),
     );
-    // 淡入淡出动画：0->1 表示从旧封面淡出到新封面淡入
+    // 新封面淡入动画：0->1
     _coverFadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _coverAnimationController,
+        curve: Curves.easeInOut,
+      ),
+    );
+    // 旧封面淡出动画：1->0
+    _oldCoverFadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
       CurvedAnimation(
         parent: _coverAnimationController,
         curve: Curves.easeInOut,
@@ -289,17 +299,14 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     );
     _coverAnimationController.value = 1.0; // 初始状态为完成（显示新封面）
 
-    // 初始化封面旋转动画控制器（30秒转一圈）
+    // 初始化封面旋转动画控制器（26秒转一圈）
     _rotationAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 26),
     );
-    _rotationAnimationController.addListener(() {
-      setState(() {
-        _currentRotation =
-            _rotationAnimationController.value * 2 * 3.14159265359;
-      });
-    });
+    // 不再使用 setState，而是通过 AnimatedBuilder 监听动画
+    // 这样只会重建旋转部分，而不是整个页面
+    _rotationAnimationController.addListener(_updateRotation);
 
     // 初始化歌曲信息滑动动画控制器
     _songInfoSlideController = AnimationController(
@@ -390,6 +397,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     _pageController.dispose();
     _playlistScrollController.dispose();
     _coverLyricsPageController.dispose();
+    _rotationNotifier.dispose();
     super.dispose();
   }
 
@@ -404,6 +412,12 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
       // 在封面页面（page == 0）或其他页面时恢复正常
       unawaited(_setKeepScreenOn(page == 1));
     }
+  }
+
+  // 更新旋转角度（不使用 setState，由 ValueListenableBuilder 监听）
+  void _updateRotation() {
+    _currentRotation = _rotationAnimationController.value * 2 * 3.14159265359;
+    _rotationNotifier.value = _currentRotation;
   }
 
   // 设置屏幕常亮状态
@@ -478,74 +492,54 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     // 切换歌曲时，停止旋转
     _rotationAnimationController.stop();
 
-    // 先执行旋转回原点动画，完成后再执行封面替换动画
-    _animateRotationAndScale();
+    // 同时执行旋转回原点和封面切换动画
+    _startCombinedAnimation();
   }
 
-  // 切换歌曲时：先旋转回原点，再执行封面替换动画
-  void _animateRotationAndScale() {
+  // 同时执行旋转回原点和封面切换动画
+  void _startCombinedAnimation() {
     const twoPi = 2 * 3.14159265359;
     final normalizedRotation = _currentRotation % twoPi;
 
-    // 如果已经接近原点，直接执行封面替换动画
-    if (normalizedRotation < 0.05) {
-      _currentRotation = 0;
-      _startCoverReplaceAnimation();
-      return;
-    }
-
     // 计算旋转回原点的参数
     double targetRotation = 0;
-    double rotationDistance = normalizedRotation;
-
     if (normalizedRotation > twoPi / 2) {
       targetRotation = twoPi;
-      rotationDistance = twoPi - normalizedRotation;
     }
-
-    // 计算旋转动画时长
-    final rotationDurationMs = (rotationDistance / twoPi * 600).toInt().clamp(
-          100,
-          600,
-        );
-
     final startRotation = normalizedRotation;
+    final needsRotation = normalizedRotation >= 0.05;
 
-    // 创建旋转回原点的动画控制器
-    _returnToOriginController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: rotationDurationMs),
-    );
+    // 如果需要旋转，创建旋转动画控制器
+    if (needsRotation) {
+      _returnToOriginController = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 300), // 与封面动画同步
+      );
 
-    _returnToOriginController!.addListener(() {
-      if (!mounted) return;
-      setState(() {
+      // 不使用 setState，直接更新 _currentRotation 和 _rotationNotifier
+      _returnToOriginController!.addListener(() {
+        if (!mounted) return;
         _currentRotation = startRotation +
             (targetRotation - startRotation) *
                 Curves.easeOutCubic.transform(_returnToOriginController!.value);
+        _rotationNotifier.value = _currentRotation;
       });
-    });
 
-    _returnToOriginController!.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        _currentRotation = 0;
-        _returnToOriginController?.dispose();
-        _returnToOriginController = null;
-
-        if (mounted) {
-          setState(() {});
-          // 旋转回原点完成后，执行封面替换动画
-          _startCoverReplaceAnimation();
+      _returnToOriginController!.addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          _currentRotation = 0;
+          _returnToOriginController?.dispose();
+          _returnToOriginController = null;
         }
-      }
-    });
+      });
 
-    // 启动旋转回原点动画
-    _returnToOriginController!.forward();
-  }
+      // 启动旋转动画
+      _returnToOriginController!.forward();
+    } else {
+      _currentRotation = 0;
+    }
 
-  // 执行封面替换动画（淡入淡出+缩放）
-  void _startCoverReplaceAnimation() {
+    // 同时启动封面切换动画
     _coverAnimationController.forward(from: 0).then((_) {
       // 封面动画完成后，清除旧封面引用并标记动画结束
       _fadingOutAlbumArt = null;
@@ -1011,47 +1005,52 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
                       return Transform.translate(
                         offset: Offset(slideOffset, 0),
-                        child: Opacity(
-                          opacity: _songInfoSlideAnimation.value,
-                          child: child,
-                        ),
+                        child: child,
                       );
                     },
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // 歌曲标题 + 本地文件标识
-                          Row(
+                    // 使用 FadeTransition 替代 Opacity，性能更好
+                    child: FadeTransition(
+                      opacity: _songInfoSlideAnimation,
+                      child: RepaintBoundary(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 24),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Flexible(
-                                child: _MarqueeText(
-                                  text: song.title,
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                    color:
-                                        isDark ? Colors.white : Colors.black87,
+                              // 歌曲标题 + 本地文件标识
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: _MarqueeText(
+                                      text: song.title,
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
+                                      ),
+                                    ),
                                   ),
+                                  // 本地文件标识（绿色对勾）
+                                  if (_checkHasLocalFile(song)) ...[
+                                    const SizedBox(width: 6),
+                                    LocalFileBadge(size: 14),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              _MarqueeText(
+                                text: song.artist,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  color:
+                                      isDark ? Colors.white60 : Colors.black54,
                                 ),
                               ),
-                              // 本地文件标识（绿色对勾）
-                              if (_checkHasLocalFile(song)) ...[
-                                const SizedBox(width: 6),
-                                LocalFileBadge(size: 14),
-                              ],
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          _MarqueeText(
-                            text: song.artist,
-                            style: TextStyle(
-                              fontSize: 15,
-                              color: isDark ? Colors.white60 : Colors.black54,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -1324,44 +1323,48 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     // 优先使用大尺寸封面，没有则使用普通封面
     final coverUrl = song.albumArtLarge ?? song.albumArt;
 
+    // 预计算阴影，避免在动画中重复计算
+    final shadow = BoxShadow(
+      color: Colors.black.withOpacity(isDark ? 0.4 : 0.2),
+      blurRadius: 8,
+      spreadRadius: 0,
+      offset: const Offset(0, 4),
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(35, 60, 35, 0),
       child: Align(
         alignment: Alignment.topCenter,
         // 圆容器缩放动画（播放时正常大小，暂停时缩小）
-        child: AnimatedBuilder(
-          animation: _containerScaleAnimation,
-          builder: (context, child) {
-            return Transform.scale(
-              scale: _containerScaleAnimation.value,
-              child: child,
-            );
-          },
+        child: ScaleTransition(
+          scale: _containerScaleAnimation,
           child: AspectRatio(
             aspectRatio: 1,
-            child: Transform.rotate(
-              angle: _currentRotation,
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    // 轻微阴影
-                    BoxShadow(
-                      color: Colors.black.withOpacity(isDark ? 0.4 : 0.2),
-                      blurRadius: 8,
-                      spreadRadius: 0,
-                      offset: const Offset(0, 4),
+            // 使用 ValueListenableBuilder 仅重建旋转部分
+            // 监听 _rotationNotifier 的变化，避免整个页面重建
+            child: ValueListenableBuilder<double>(
+              valueListenable: _rotationNotifier,
+              builder: (context, rotation, child) {
+                return Transform.rotate(
+                  angle: rotation,
+                  child: child,
+                );
+              },
+              child: RepaintBoundary(
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [shadow],
+                  ),
+                  child: ClipOval(
+                    // 切换歌曲时封面：放大+淡出 / 缩小+淡入
+                    child: ColoredBox(
+                      // 添加背景色，避免图片加载时透出页面背景
+                      color: isDark
+                          ? Colors.white10
+                          : Colors.black.withOpacity(0.05),
+                      child: _buildAnimatedCover(coverUrl, isDark),
                     ),
-                  ],
-                ),
-                child: ClipOval(
-                  // 切换歌曲时封面：放大+淡出 / 缩小+淡入
-                  child: Container(
-                    // 添加背景色，避免图片加载时透出页面背景
-                    color: isDark
-                        ? Colors.white10
-                        : Colors.black.withOpacity(0.05),
-                    child: _buildAnimatedCover(coverUrl, isDark),
                   ),
                 ),
               ),
@@ -1384,36 +1387,31 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
       );
     }
 
-    // 动画过程中使用 AnimatedBuilder
-    return AnimatedBuilder(
-      animation: _coverAnimationController,
-      builder: (context, child) {
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            // 旧封面（放大 + 淡出）- 使用 RepaintBoundary 避免重绘
-            RepaintBoundary(
-              child: Opacity(
-                opacity: 1.0 - _coverFadeAnimation.value,
-                child: Transform.scale(
-                  scale: _oldCoverScaleAnimation.value,
-                  child: _buildCoverImage(_fadingOutAlbumArt, isDark),
-                ),
-              ),
+    // 动画过程中使用 FadeTransition 和 ScaleTransition（比 Opacity 和 Transform.scale 更高效）
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // 旧封面（放大 + 淡出）- 使用 RepaintBoundary 避免重绘
+        RepaintBoundary(
+          child: FadeTransition(
+            opacity: _oldCoverFadeAnimation,
+            child: ScaleTransition(
+              scale: _oldCoverScaleAnimation,
+              child: _buildCoverImage(_fadingOutAlbumArt, isDark),
             ),
-            // 新封面（缩小 + 淡入）- 使用 RepaintBoundary 避免重绘
-            RepaintBoundary(
-              child: Opacity(
-                opacity: _coverFadeAnimation.value,
-                child: Transform.scale(
-                  scale: _newCoverScaleAnimation.value,
-                  child: _buildCoverImage(coverUrl, isDark),
-                ),
-              ),
+          ),
+        ),
+        // 新封面（缩小 + 淡入）- 使用 RepaintBoundary 避免重绘
+        RepaintBoundary(
+          child: FadeTransition(
+            opacity: _coverFadeAnimation,
+            child: ScaleTransition(
+              scale: _newCoverScaleAnimation,
+              child: _buildCoverImage(coverUrl, isDark),
             ),
-          ],
-        );
-      },
+          ),
+        ),
+      ],
     );
   }
 
