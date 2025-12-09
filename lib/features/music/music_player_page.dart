@@ -1475,11 +1475,34 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     LocalMusicPlayerState playerState,
   ) {
     final position = playerState.position;
-    final duration = playerState.duration.inMilliseconds > 0
-        ? playerState.duration
+    final rawDuration = playerState.duration;
+
+    // 确定要显示的 duration
+    // 如果原生端还没返回有效的 duration，使用默认值
+    final duration = rawDuration.inMilliseconds > 0
+        ? rawDuration
         : const Duration(minutes: 3, seconds: 30);
+
+    // 确定要显示的 position
+    // 防止闪烁：如果 position 超过 duration，或者 position 异常大（可能是旧歌曲的数据），显示 0
+    Duration displayedPosition;
+    if (rawDuration.inMilliseconds > 0 &&
+        position.inMilliseconds <= rawDuration.inMilliseconds) {
+      // 数据合理
+      displayedPosition = position;
+    } else if (rawDuration.inMilliseconds <= 0 &&
+        position.inMilliseconds < 5000) {
+      // duration 还没更新，但 position 较小，可能是新歌曲刚开始
+      displayedPosition = position;
+    } else {
+      // 数据不合理，显示 0
+      displayedPosition = Duration.zero;
+    }
+
+    // 计算进度
     final progress = duration.inMilliseconds > 0
-        ? position.inMilliseconds / duration.inMilliseconds
+        ? (displayedPosition.inMilliseconds / duration.inMilliseconds)
+            .clamp(0.0, 1.0)
         : 0.0;
 
     // 显示的进度：拖动时显示拖动进度，否则显示实际进度
@@ -1489,7 +1512,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
         ? Duration(
             milliseconds: (duration.inMilliseconds * _dragProgress).round(),
           )
-        : position;
+        : displayedPosition;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 40),

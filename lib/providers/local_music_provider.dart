@@ -52,9 +52,8 @@ List<_LyricLine> _parseLrc(String lrc) {
       final seconds = int.parse(match.group(2)!);
       final msStr = match.group(3)!;
       // 处理两位或三位毫秒
-      final milliseconds = msStr.length == 2
-          ? int.parse(msStr) * 10
-          : int.parse(msStr);
+      final milliseconds =
+          msStr.length == 2 ? int.parse(msStr) * 10 : int.parse(msStr);
       final text = match.group(4)?.trim() ?? '';
 
       // 跳过空歌词行
@@ -321,6 +320,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   /// 是否正在切换歌曲（用于在 trackChanged 事件中判断是手动还是自动切换）
   bool _isSwitchingTrack = false;
 
+  /// 歌曲切换后的宽限期计数（用于忽略旧歌曲的进度数据）
+  int _songChangeGracePeriod = 0;
+
   /// 随机播放历史记录（存储播放过的歌曲索引）
   final List<int> _shuffleHistory = [];
 
@@ -557,9 +559,39 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       final oldPositionSec = state.position.inSeconds;
       final newPositionSec = playerState.position.inSeconds;
 
+      // 防止切换歌曲时进度条闪烁
+      var newPosition = playerState.position;
+      var newDuration = playerState.duration;
+
+      // 在宽限期内，严格过滤数据
+      if (_songChangeGracePeriod > 0) {
+        _songChangeGracePeriod--;
+
+        // 宽限期内，只接受合理的数据：
+        // 1. position 应该接近 0（新歌曲刚开始）
+        // 2. 或者 position 和 duration 都是有效的且 position <= duration
+        if (newPosition.inMilliseconds > 2000) {
+          // position 太大，可能是旧歌曲的数据，忽略
+          newPosition = Duration.zero;
+        }
+        if (newDuration.inMilliseconds > 0 &&
+            newPosition.inMilliseconds <= newDuration.inMilliseconds &&
+            newPosition.inMilliseconds < 2000) {
+          // 数据合理，结束宽限期
+          _songChangeGracePeriod = 0;
+        }
+      } else {
+        // 正常播放时的防护
+        // 如果 position > duration，是异常数据
+        if (newDuration.inMilliseconds > 0 &&
+            newPosition.inMilliseconds > newDuration.inMilliseconds) {
+          newPosition = state.position; // 保持原来的位置
+        }
+      }
+
       state = state.copyWith(
-        position: playerState.position,
-        duration: playerState.duration,
+        position: newPosition,
+        duration: newDuration,
         isBuffering: playerState.isBuffering,
       );
 
@@ -714,15 +746,13 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       final prefs = await SharedPreferences.getInstance();
 
       // 根据模式选择存储键
-      final songKey = isServerMode
-          ? _serverLastPlayingSongKey
-          : _localLastPlayingSongKey;
+      final songKey =
+          isServerMode ? _serverLastPlayingSongKey : _localLastPlayingSongKey;
       final positionKey = isServerMode
           ? _serverLastPlayingPositionKey
           : _localLastPlayingPositionKey;
-      final playlistKey = isServerMode
-          ? _serverLastPlaylistKey
-          : _localLastPlaylistKey;
+      final playlistKey =
+          isServerMode ? _serverLastPlaylistKey : _localLastPlaylistKey;
 
       // 加载上次播放的歌曲
       final songJson = prefs.getString(songKey);
@@ -874,9 +904,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         final positionKey = isServerMusic
             ? _serverLastPlayingPositionKey
             : _localLastPlayingPositionKey;
-        final playlistKey = isServerMusic
-            ? _serverLastPlaylistKey
-            : _localLastPlaylistKey;
+        final playlistKey =
+            isServerMusic ? _serverLastPlaylistKey : _localLastPlaylistKey;
         final indexKey = isServerMusic
             ? _serverLastPlaylistIndexKey
             : _localLastPlaylistIndexKey;
@@ -1061,6 +1090,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     _resetEmbySession();
 
     final currentSong = songs[startIndex];
+
+    // 设置宽限期，忽略接下来的旧进度数据
+    _songChangeGracePeriod = 10;
 
     // 更新 UI 状态
     state = state.copyWith(
@@ -1344,6 +1376,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         break;
     }
 
+    // 设置宽限期，忽略接下来的旧进度数据
+    _songChangeGracePeriod = 10;
+
     // 更新 UI 状态（方向为下一首，切换后自动播放）
     state = state.copyWith(
       currentIndex: nextIndex,
@@ -1392,11 +1427,13 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         break;
       case PlayMode.listLoop:
         // 列表循环：顺序播放
-        prevIndex =
-            (state.currentIndex - 1 + state.playlist.length) %
+        prevIndex = (state.currentIndex - 1 + state.playlist.length) %
             state.playlist.length;
         break;
     }
+
+    // 设置宽限期，忽略接下来的旧进度数据
+    _songChangeGracePeriod = 10;
 
     // 更新 UI 状态（方向为上一首，切换后自动播放）
     state = state.copyWith(
@@ -1734,7 +1771,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     if (lyrics == null || lyrics.isEmpty) return;
 
     // 提前显示歌词（使用统一的提前量）
-    final adjustedPosition = position + const Duration(milliseconds: kLyricAdvanceMs);
+    final adjustedPosition =
+        position + const Duration(milliseconds: kLyricAdvanceMs);
 
     // 查找当前应该显示的歌词
     int currentIndex = -1;
@@ -1770,8 +1808,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
 final localMusicPlayerProvider =
     StateNotifierProvider<LocalMusicPlayerNotifier, LocalMusicPlayerState>(
-      (ref) => LocalMusicPlayerNotifier(),
-    );
+  (ref) => LocalMusicPlayerNotifier(),
+);
 
 /// 音乐页面是否显示的状态
 final musicPageVisibleProvider = StateProvider<bool>((ref) => false);
@@ -1990,8 +2028,8 @@ class SleepTimerState {
 /// 睡眠定时器 Provider
 final sleepTimerProvider =
     StateNotifierProvider<SleepTimerNotifier, SleepTimerState>((ref) {
-      return SleepTimerNotifier(ref);
-    });
+  return SleepTimerNotifier(ref);
+});
 
 class SleepTimerNotifier extends StateNotifier<SleepTimerState> {
   SleepTimerNotifier(this.ref) : super(const SleepTimerState());
