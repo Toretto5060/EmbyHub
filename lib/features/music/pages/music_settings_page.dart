@@ -21,10 +21,8 @@ class MusicSettingsPage extends ConsumerStatefulWidget {
 }
 
 class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
-  bool _autoPlay = true;
-  bool _gaplessPlayback = true;
-  bool _crossfade = false;
-  double _crossfadeDuration = 3.0;
+  bool _crossfade = true; // 默认开启
+  double _crossfadeDuration = 3.0; // 默认3秒
   bool _showLyrics = true;
   bool _savePlayHistory = true;
   bool _isLoading = true;
@@ -40,10 +38,16 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
-        _crossfade = prefs.getBool(_crossfadeEnabledKey) ?? false;
-        _crossfadeDuration = prefs.getDouble(_crossfadeDurationKey) ?? 3.0;
+        _crossfade = prefs.getBool(_crossfadeEnabledKey) ?? true; // 默认开启
+        _crossfadeDuration =
+            prefs.getDouble(_crossfadeDurationKey) ?? 3.0; // 默认3秒
         _isLoading = false;
       });
+
+      // 如果之前没有保存过设置，立即保存默认值并同步到播放器
+      if (!prefs.containsKey(_crossfadeEnabledKey)) {
+        await _saveCrossfadeSettings();
+      }
     } catch (e) {
       setState(() => _isLoading = false);
     }
@@ -90,22 +94,6 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
         children: [
           // 播放设置
           _buildSectionTitle('播放', isDark),
-          _buildSwitchItem(
-            icon: CupertinoIcons.play_circle,
-            title: '自动播放',
-            subtitle: '播放完成后自动播放下一首',
-            value: _autoPlay,
-            isDark: isDark,
-            onChanged: (value) => setState(() => _autoPlay = value),
-          ),
-          _buildSwitchItem(
-            icon: CupertinoIcons.link,
-            title: '无缝播放',
-            subtitle: '歌曲之间无间隙切换',
-            value: _gaplessPlayback,
-            isDark: isDark,
-            onChanged: (value) => setState(() => _gaplessPlayback = value),
-          ),
           _buildSwitchItem(
             icon: CupertinoIcons.waveform,
             title: '淡入淡出',

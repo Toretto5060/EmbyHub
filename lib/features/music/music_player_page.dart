@@ -45,10 +45,7 @@ _QualityInfo? _getQualityInfo(int? bitrate) {
 
 /// 滚动文字组件 - 当文字超出宽度时自动滚动
 class _MarqueeText extends StatefulWidget {
-  const _MarqueeText({
-    required this.text,
-    required this.style,
-  });
+  const _MarqueeText({required this.text, required this.style});
 
   final String text;
   final TextStyle style;
@@ -147,11 +144,7 @@ class _MarqueeTextState extends State<_MarqueeText> {
         controller: _scrollController,
         scrollDirection: Axis.horizontal,
         physics: const NeverScrollableScrollPhysics(),
-        child: Text(
-          widget.text,
-          style: widget.style,
-          maxLines: 1,
-        ),
+        child: Text(widget.text, style: widget.style, maxLines: 1),
       );
     }
 
@@ -283,17 +276,11 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     );
     // 旧封面：1.0 -> 1.15 放大 + 淡出
     _oldCoverScaleAnimation = Tween<double>(begin: 1.0, end: 1.15).animate(
-      CurvedAnimation(
-        parent: _coverAnimationController,
-        curve: Curves.easeOut,
-      ),
+      CurvedAnimation(parent: _coverAnimationController, curve: Curves.easeOut),
     );
     // 新封面：1.15 -> 1.0 缩小 + 淡入
     _newCoverScaleAnimation = Tween<double>(begin: 1.15, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _coverAnimationController,
-        curve: Curves.easeOut,
-      ),
+      CurvedAnimation(parent: _coverAnimationController, curve: Curves.easeOut),
     );
     // 淡入淡出动画：0->1 表示从旧封面淡出到新封面淡入
     _coverFadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -401,13 +388,9 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
   void _animateToTop() {
     // 从当前偏移量动画到 0
-    _resetAnimation = Tween<double>(
-      begin: _dragOffset,
-      end: 0,
-    ).animate(CurvedAnimation(
-      parent: _resetAnimationController,
-      curve: Curves.easeOut,
-    ));
+    _resetAnimation = Tween<double>(begin: _dragOffset, end: 0).animate(
+      CurvedAnimation(parent: _resetAnimationController, curve: Curves.easeOut),
+    );
     _resetAnimationController.forward(from: 0);
   }
 
@@ -461,8 +444,10 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     }
 
     // 计算旋转动画时长
-    final rotationDurationMs =
-        (rotationDistance / twoPi * 600).toInt().clamp(100, 600);
+    final rotationDurationMs = (rotationDistance / twoPi * 600).toInt().clamp(
+      100,
+      600,
+    );
 
     final startRotation = normalizedRotation;
 
@@ -475,7 +460,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     _returnToOriginController!.addListener(() {
       if (!mounted) return;
       setState(() {
-        _currentRotation = startRotation +
+        _currentRotation =
+            startRotation +
             (targetRotation - startRotation) *
                 Curves.easeOutCubic.transform(_returnToOriginController!.value);
       });
@@ -580,14 +566,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: isDark
-              ? [
-                  const Color(0xFF1A1A2E),
-                  const Color(0xFF0A0A0A),
-                ]
-              : [
-                  const Color(0xFFE8E8F0),
-                  const Color(0xFFF8F8F8),
-                ],
+              ? [const Color(0xFF1A1A2E), const Color(0xFF0A0A0A)]
+              : [const Color(0xFFE8E8F0), const Color(0xFFF8F8F8)],
         ),
       ),
       child: NotificationListener<ScrollNotification>(
@@ -674,7 +654,11 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
               // 专辑封面 + 音轨信息（可左滑显示歌词）
               Expanded(
                 child: _buildCoverAndLyricsSection(
-                    context, isDark, currentSong, playerState),
+                  context,
+                  isDark,
+                  currentSong,
+                  playerState,
+                ),
               ),
               // 进度条
               _buildProgressBar(context, isDark, playerState),
@@ -851,16 +835,17 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                   return CupertinoButton(
                     padding: EdgeInsets.zero,
                     onPressed: () {
-                      ref.read(localMusicPlayerProvider.notifier).setPlaylist(
-                            playerState.playlist,
-                            startIndex: index,
-                          );
+                      ref
+                          .read(localMusicPlayerProvider.notifier)
+                          .setPlaylist(playerState.playlist, startIndex: index);
                       // 切换歌曲后滚动回播放页面
                       scrollToPlayer();
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
                       color: isCurrentSong
                           ? CupertinoColors.activeBlue.withOpacity(0.1)
                           : Colors.transparent,
@@ -896,8 +881,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                                     color: isCurrentSong
                                         ? CupertinoColors.activeBlue
                                         : (isDark
-                                            ? Colors.white
-                                            : Colors.black87),
+                                              ? Colors.white
+                                              : Colors.black87),
                                   ),
                                 ),
                                 const SizedBox(height: 2),
@@ -984,8 +969,9 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                                   style: TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.w600,
-                                    color:
-                                        isDark ? Colors.white : Colors.black87,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
                                   ),
                                 ),
                               ),
@@ -1051,13 +1037,14 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
 
   /// 构建封面 + 音轨信息页面
   Widget _buildCoverWithTrackInfo(
-      BuildContext context, bool isDark, LocalSong song) {
+    BuildContext context,
+    bool isDark,
+    LocalSong song,
+  ) {
     return Column(
       children: [
         // 专辑封面
-        Expanded(
-          child: _buildAlbumArt(context, isDark, song),
-        ),
+        Expanded(child: _buildAlbumArt(context, isDark, song)),
         // 音轨信息（带切换动画）
         _buildTrackInfo(context, isDark, song),
       ],
@@ -1252,10 +1239,9 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     final matcherState = ref.watch(localMusicMatcherProvider);
     if (!matcherState.isInitialized) return false;
 
-    final match = ref.read(localMusicMatcherProvider.notifier).matchLocalFile(
-          song.title,
-          song.artist,
-        );
+    final match = ref
+        .read(localMusicMatcherProvider.notifier)
+        .matchLocalFile(song.title, song.artist);
     return match.hasLocalFile;
   }
 
@@ -1315,7 +1301,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                       animation: _coverAnimationController,
                       builder: (context, child) {
                         // 是否正在进行淡入淡出动画
-                        final isAnimating = _coverFadeAnimation.value < 1.0 &&
+                        final isAnimating =
+                            _coverFadeAnimation.value < 1.0 &&
                             _fadingOutAlbumArt != null;
 
                         // 优先使用大尺寸封面，没有则使用普通封面
@@ -1335,7 +1322,9 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                               child: Transform.scale(
                                 scale: _oldCoverScaleAnimation.value,
                                 child: _buildCoverImage(
-                                    _fadingOutAlbumArt, isDark),
+                                  _fadingOutAlbumArt,
+                                  isDark,
+                                ),
                               ),
                             ),
                             // 新封面（缩小 + 淡入）
@@ -1383,7 +1372,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
             child: CircularProgressIndicator(
               value: loadingProgress.expectedTotalBytes != null
                   ? loadingProgress.cumulativeBytesLoaded /
-                      loadingProgress.expectedTotalBytes!
+                        loadingProgress.expectedTotalBytes!
                   : null,
               strokeWidth: 2,
               color: isDark ? Colors.white38 : Colors.black26,
@@ -1415,7 +1404,10 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   double _dragProgress = 0.0;
 
   Widget _buildProgressBar(
-      BuildContext context, bool isDark, LocalMusicPlayerState playerState) {
+    BuildContext context,
+    bool isDark,
+    LocalMusicPlayerState playerState,
+  ) {
     final position = playerState.position;
     final duration = playerState.duration.inMilliseconds > 0
         ? playerState.duration
@@ -1429,7 +1421,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
     // 显示的时间：拖动时显示拖动位置的时间
     final displayPosition = _isDraggingProgress
         ? Duration(
-            milliseconds: (duration.inMilliseconds * _dragProgress).round())
+            milliseconds: (duration.inMilliseconds * _dragProgress).round(),
+          )
         : position;
 
     return Padding(
@@ -1448,8 +1441,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
             onHorizontalDragUpdate: (details) {
               final RenderBox box = context.findRenderObject() as RenderBox;
               final width = box.size.width - 80; // 减去左右 padding
-              final newProgress =
-                  (_dragProgress + details.delta.dx / width).clamp(0.0, 1.0);
+              final newProgress = (_dragProgress + details.delta.dx / width)
+                  .clamp(0.0, 1.0);
               setState(() {
                 _dragProgress = newProgress;
               });
@@ -1469,8 +1462,10 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
               final RenderBox box = context.findRenderObject() as RenderBox;
               final localPosition = box.globalToLocal(details.globalPosition);
               final width = box.size.width - 80; // 减去左右 padding
-              final tapProgress =
-                  ((localPosition.dx - 40) / width).clamp(0.0, 1.0);
+              final tapProgress = ((localPosition.dx - 40) / width).clamp(
+                0.0,
+                1.0,
+              );
               setState(() {
                 _isDraggingProgress = true;
                 _dragProgress = tapProgress;
@@ -1493,8 +1488,9 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                 duration: const Duration(milliseconds: 100),
                 height: _isDraggingProgress ? 6 : 4, // 拖动时变粗
                 decoration: BoxDecoration(
-                  borderRadius:
-                      BorderRadius.circular(_isDraggingProgress ? 3 : 2),
+                  borderRadius: BorderRadius.circular(
+                    _isDraggingProgress ? 3 : 2,
+                  ),
                 ),
                 child: Stack(
                   children: [
@@ -1502,8 +1498,9 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                     Container(
                       decoration: BoxDecoration(
                         color: isDark ? Colors.white12 : Colors.black12,
-                        borderRadius:
-                            BorderRadius.circular(_isDraggingProgress ? 3 : 2),
+                        borderRadius: BorderRadius.circular(
+                          _isDraggingProgress ? 3 : 2,
+                        ),
                       ),
                     ),
                     // 已播放部分
@@ -1513,7 +1510,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
                         decoration: BoxDecoration(
                           color: CupertinoColors.activeBlue,
                           borderRadius: BorderRadius.circular(
-                              _isDraggingProgress ? 3 : 2),
+                            _isDraggingProgress ? 3 : 2,
+                          ),
                         ),
                       ),
                     ),
@@ -1551,7 +1549,10 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
   }
 
   Widget _buildControls(
-      BuildContext context, bool isDark, LocalMusicPlayerState playerState) {
+    BuildContext context,
+    bool isDark,
+    LocalMusicPlayerState playerState,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
       child: Row(
@@ -1571,7 +1572,8 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
           // 播放/暂停（带加载状态，仅服务器音乐显示 loading）
           _PlayPauseButton(
             isPlaying: playerState.isPlaying,
-            isBuffering: playerState.isBuffering &&
+            isBuffering:
+                playerState.isBuffering &&
                 (playerState.currentSong?.isServerMusic ?? false),
             size: 72,
             iconSize: 40,
@@ -1717,10 +1719,7 @@ class MusicPlayerPageState extends ConsumerState<MusicPlayerPage>
             padding: const EdgeInsets.only(top: 8),
             child: Text(
               _formatTimerDuration(sleepTimerState.remainingSeconds),
-              style: TextStyle(
-                fontSize: 12,
-                color: CupertinoColors.activeBlue,
-              ),
+              style: TextStyle(fontSize: 12, color: CupertinoColors.activeBlue),
             ),
           ),
       ],
@@ -2029,8 +2028,9 @@ class _SleepTimerSheetState extends ConsumerState<_SleepTimerSheet> {
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 12),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
                 activeTrackColor: CupertinoColors.activeBlue,
-                inactiveTrackColor:
-                    widget.isDark ? Colors.white12 : Colors.black12,
+                inactiveTrackColor: widget.isDark
+                    ? Colors.white12
+                    : Colors.black12,
                 thumbColor: CupertinoColors.activeBlue,
                 overlayColor: CupertinoColors.activeBlue.withOpacity(0.2),
               ),
@@ -2053,26 +2053,20 @@ class _SleepTimerSheetState extends ConsumerState<_SleepTimerSheet> {
                 color: CupertinoColors.activeBlue,
                 borderRadius: BorderRadius.circular(12),
                 onPressed: () {
-                  ref.read(sleepTimerProvider.notifier).startTimer(
-                        _minutes.round(),
-                        _extendToSongEnd,
-                      );
+                  ref
+                      .read(sleepTimerProvider.notifier)
+                      .startTimer(_minutes.round(), _extendToSongEnd);
                   Navigator.of(context).pop();
                 },
                 child: const Text(
                   '开始',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
             const SizedBox(height: 24),
             // 分隔线
-            Divider(
-              color: widget.isDark ? Colors.white12 : Colors.black12,
-            ),
+            Divider(color: widget.isDark ? Colors.white12 : Colors.black12),
             const SizedBox(height: 16),
             // 自动延长选项
             Row(
@@ -2093,8 +2087,9 @@ class _SleepTimerSheetState extends ConsumerState<_SleepTimerSheet> {
                         '开启将在睡眠定时结束后，将当前歌曲播放完成后停止',
                         style: TextStyle(
                           fontSize: 12,
-                          color:
-                              widget.isDark ? Colors.white38 : Colors.black38,
+                          color: widget.isDark
+                              ? Colors.white38
+                              : Colors.black38,
                         ),
                       ),
                     ],
@@ -2188,10 +2183,7 @@ class _SleepTimerCountdownSheet extends ConsumerWidget {
                 },
                 child: const Text(
                   '停止定时',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -2344,8 +2336,9 @@ List<_LyricLine> _parseLrc(String lrc) {
       final seconds = int.parse(match.group(2)!);
       final msStr = match.group(3)!;
       // 处理两位或三位毫秒
-      final milliseconds =
-          msStr.length == 2 ? int.parse(msStr) * 10 : int.parse(msStr);
+      final milliseconds = msStr.length == 2
+          ? int.parse(msStr) * 10
+          : int.parse(msStr);
       var text = match.group(4)?.trim() ?? '';
 
       // 跳过空歌词行（但保留时间戳用于间奏）
@@ -2353,14 +2346,16 @@ List<_LyricLine> _parseLrc(String lrc) {
         // 处理双语歌词：自动在分隔符处换行
         text = _formatBilingualLyrics(text);
 
-        lines.add(_LyricLine(
-          Duration(
-            minutes: minutes,
-            seconds: seconds,
-            milliseconds: milliseconds,
+        lines.add(
+          _LyricLine(
+            Duration(
+              minutes: minutes,
+              seconds: seconds,
+              milliseconds: milliseconds,
+            ),
+            text,
           ),
-          text,
-        ));
+        );
       }
     }
   }
@@ -2447,17 +2442,21 @@ class _LyricsViewState extends State<_LyricsView> {
   /// 根据当前播放位置找到对应的歌词索引
   /// 如果位置在第一句歌词之前，返回 0（最近的歌词）
   /// 如果位置在最后一句歌词之后，返回最后一句的索引
+  /// 提前量由 kLyricAdvanceMs 统一控制
   int _findCurrentIndex(Duration position) {
     if (_lines.isEmpty) return -1;
 
+    // 提前显示歌词（使用统一的提前量）
+    final adjustedPosition = position + const Duration(milliseconds: kLyricAdvanceMs);
+
     // 如果位置在第一句歌词之前，返回第一句（最近的）
-    if (position < _lines.first.time) {
+    if (adjustedPosition < _lines.first.time) {
       return 0;
     }
 
     // 正常查找：找到最后一个时间小于等于当前位置的歌词
     for (int i = _lines.length - 1; i >= 0; i--) {
-      if (position >= _lines[i].time) {
+      if (adjustedPosition >= _lines[i].time) {
         return i;
       }
     }
@@ -2622,13 +2621,16 @@ class _LyricsViewState extends State<_LyricsView> {
     if (scrollableRenderBox == null) return;
 
     // 计算当前项相对于 ListView 的位置
-    final itemPosition =
-        renderBox.localToGlobal(Offset.zero, ancestor: scrollableRenderBox);
+    final itemPosition = renderBox.localToGlobal(
+      Offset.zero,
+      ancestor: scrollableRenderBox,
+    );
     final itemHeight = renderBox.size.height;
 
     // 计算目标滚动位置（让当前歌词在容器中间）
     final currentOffset = _scrollController.offset;
-    final targetOffset = currentOffset +
+    final targetOffset =
+        currentOffset +
         itemPosition.dy -
         (_containerHeight / 2) +
         (itemHeight / 2);
@@ -2795,17 +2797,14 @@ class _LyricsViewState extends State<_LyricsView> {
                     curve: Curves.easeOutCubic,
                     style: TextStyle(
                       fontSize: isCurrent ? 26 : 21,
-                      fontWeight:
-                          isCurrent ? FontWeight.bold : FontWeight.normal,
+                      fontWeight: isCurrent
+                          ? FontWeight.bold
+                          : FontWeight.normal,
                       color: isCurrent
                           ? (widget.isDark ? Colors.white : Colors.black87)
                           : isPast
-                              ? (widget.isDark
-                                  ? Colors.white30
-                                  : Colors.black26)
-                              : (widget.isDark
-                                  ? Colors.white54
-                                  : Colors.black45),
+                          ? (widget.isDark ? Colors.white30 : Colors.black26)
+                          : (widget.isDark ? Colors.white54 : Colors.black45),
                       height: 1.4,
                     ),
                     child: AnimatedScale(
@@ -2813,9 +2812,7 @@ class _LyricsViewState extends State<_LyricsView> {
                       curve: Curves.easeOutCubic,
                       scale: isCurrent ? 1.0 : 0.95,
                       alignment: Alignment.centerLeft,
-                      child: Text(
-                        line.text,
-                      ),
+                      child: Text(line.text),
                     ),
                   ),
                 );

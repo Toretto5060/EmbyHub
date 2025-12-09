@@ -27,6 +27,11 @@ const String _lastSourceModeKey = 'last_music_source_mode';
 /// 本地音乐和媒体库音乐共用同一个播放模式
 const String _playModeKey = 'app_music_play_mode';
 
+/// 歌词提前显示时间（毫秒）
+/// 用于歌词滚动显示和车载蓝牙歌词同步
+/// 修改此值可统一调整所有歌词的提前量
+const int kLyricAdvanceMs = 600;
+
 /// LRC 歌词行数据（用于车载蓝牙歌词显示）
 class _LyricLine {
   final Duration time;
@@ -378,9 +383,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final crossfadeEnabled =
-          prefs.getBool('music_crossfade_enabled') ?? false;
+          prefs.getBool('music_crossfade_enabled') ?? true; // 默认开启
       final crossfadeDuration =
-          prefs.getDouble('music_crossfade_duration') ?? 3.0;
+          prefs.getDouble('music_crossfade_duration') ?? 3.0; // 默认3秒
 
       await _player?.setCrossfadeEnabled(crossfadeEnabled);
       if (crossfadeEnabled) {
@@ -1728,10 +1733,13 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     final lyrics = _parsedLyrics;
     if (lyrics == null || lyrics.isEmpty) return;
 
+    // 提前显示歌词（使用统一的提前量）
+    final adjustedPosition = position + const Duration(milliseconds: kLyricAdvanceMs);
+
     // 查找当前应该显示的歌词
     int currentIndex = -1;
     for (int i = lyrics.length - 1; i >= 0; i--) {
-      if (position >= lyrics[i].time) {
+      if (adjustedPosition >= lyrics[i].time) {
         currentIndex = i;
         break;
       }
