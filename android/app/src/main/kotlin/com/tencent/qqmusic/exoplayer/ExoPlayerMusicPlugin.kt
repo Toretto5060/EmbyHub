@@ -578,10 +578,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // 注意：handleAudioFocus 设为 false，我们手动管理音频焦点
         // 这样可以避免与手动请求的音频焦点冲突
         exoPlayer.setAudioAttributes(
-            com.google.android.exoplayer2.audio.AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                .build(),
+            buildMusicAudioAttributes(),
             false  // 不让 ExoPlayer 自动管理音频焦点
         )
         
@@ -1134,10 +1131,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // 创建第二个播放器用于播放下一首
         val newPlayer = ExoPlayer.Builder(ctx).build().apply {
             setAudioAttributes(
-                com.google.android.exoplayer2.audio.AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .build(),
+                buildMusicAudioAttributes(),
                 false  // 不自动处理音频焦点
             )
             setHandleAudioBecomingNoisy(true)
@@ -1566,6 +1560,42 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         mediaSession = null
     }
     
+    // ==================== 音频属性 ====================
+    
+    /**
+     * 构建 ExoPlayer 使用的音频属性
+     * 禁用空间音频/沉浸感效果，但保留杜比等其他音效
+     */
+    private fun buildMusicAudioAttributes(): com.google.android.exoplayer2.audio.AudioAttributes {
+        val builder = com.google.android.exoplayer2.audio.AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        
+        // Android 13+ 禁用空间音频/沉浸感
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            builder.setSpatializationBehavior(C.SPATIALIZATION_BEHAVIOR_NEVER)
+        }
+        
+        return builder.build()
+    }
+    
+    /**
+     * 构建音频焦点请求使用的音频属性
+     * 禁用空间音频/沉浸感效果，但保留杜比等其他音效
+     */
+    private fun buildAudioFocusAttributes(): AudioAttributes {
+        val builder = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+        
+        // Android 13+ 禁用空间音频/沉浸感
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            builder.setSpatializationBehavior(AudioAttributes.SPATIALIZATION_BEHAVIOR_NEVER)
+        }
+        
+        return builder.build()
+    }
+    
     // ==================== 音频焦点 ====================
     
     private fun requestAudioFocus() {
@@ -1577,10 +1607,7 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 audioMgr.abandonAudioFocusRequest(it)
             }
             
-            val audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .build()
+            val audioAttributes = buildAudioFocusAttributes()
             
             val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                 .setAudioAttributes(audioAttributes)
