@@ -12,6 +12,13 @@ import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.Equalizer
+import android.media.audiofx.BassBoost
+import android.media.audiofx.Virtualizer
+import android.media.audiofx.LoudnessEnhancer
+import android.media.audiofx.PresetReverb
+import android.media.audiofx.EnvironmentalReverb
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -105,6 +112,12 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     // ✅ Crossfade 时长设置（可通过 Flutter 端动态配置）
     private var crossfadeDurationMs: Long = DEFAULT_CROSSFADE_DURATION_MS
     private var crossfadeEnabled: Boolean = true  // 是否启用淡入淡出效果
+    
+    // ✅ 禁用系统音效设置（默认禁用杜比等所有音效）
+    private var disableSystemAudioEffects: Boolean = true
+    
+    // ✅ 音效禁用相关
+    private var disabledAudioEffects: MutableList<AudioEffect> = mutableListOf()
     
     companion object {
         private const val TAG = "ExoPlayerMusicPlugin"
@@ -284,8 +297,11 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             updateMediaSessionState()
             
             // 当播放器准备好时，更新 MediaSession 元数据（此时 duration 才有效）
+            // 同时重新应用音效设置，确保在播放器完全准备好后音效禁用生效
             if (playbackState == Player.STATE_READY) {
                 updateMediaSessionMetadata()
+                // 重新应用音效设置（播放器准备好后 audioSessionId 才稳定）
+                player?.let { applyAudioEffectsSettings(it) }
             }
             
             // 播放结束时自动播放下一首（但 crossfade 过程中不处理，避免冲突）
@@ -563,6 +579,17 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(null)
             }
             
+            "setDisableSystemAudioEffects" -> {
+                // 设置是否禁用系统音效（杜比等）
+                val disabled = call.argument<Boolean>("disabled") ?: true
+                disableSystemAudioEffects = disabled
+                // 重新应用音频属性到当前播放器
+                player?.setAudioAttributes(buildMusicAudioAttributes(), false)
+                // 应用/取消音效禁用
+                player?.let { applyAudioEffectsSettings(it) }
+                result.success(null)
+            }
+            
             else -> result.notImplemented()
         }
     }
@@ -587,6 +614,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         exoPlayer.addListener(playerListener)
         
         player = exoPlayer
+        
+        // 应用音效禁用设置
+        applyAudioEffectsSettings(exoPlayer)
         
         // 初始化 MediaSession
         initMediaSession()
@@ -1564,14 +1594,20 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     /**
      * 构建 ExoPlayer 使用的音频属性
-     * 禁用空间音频/沉浸感效果，但保留杜比等其他音效
+     * - 空间音频/沉浸感始终禁用
+     * - 当 disableSystemAudioEffects=true 时，禁用杜比等所有系统音效
      */
     private fun buildMusicAudioAttributes(): com.google.android.exoplayer2.audio.AudioAttributes {
         val builder = com.google.android.exoplayer2.audio.AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
         
-        // Android 13+ 禁用空间音频/沉浸感
+        // Android 10+ 禁用系统音效（杜比等）
+        if (disableSystemAudioEffects && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setAllowedCapturePolicy(C.ALLOW_CAPTURE_BY_NONE)
+        }
+        
+        // Android 13+ 始终禁用空间音频/沉浸感
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             builder.setSpatializationBehavior(C.SPATIALIZATION_BEHAVIOR_NEVER)
         }
@@ -1581,19 +1617,160 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     /**
      * 构建音频焦点请求使用的音频属性
-     * 禁用空间音频/沉浸感效果，但保留杜比等其他音效
+     * - 空间音频/沉浸感始终禁用
+     * - 当 disableSystemAudioEffects=true 时，禁用杜比等所有系统音效
      */
     private fun buildAudioFocusAttributes(): AudioAttributes {
         val builder = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
         
-        // Android 13+ 禁用空间音频/沉浸感
+        // Android 10+ 禁用系统音效（杜比等）
+        if (disableSystemAudioEffects && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_NONE)
+        }
+        
+        // Android 13+ 始终禁用空间音频/沉浸感
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             builder.setSpatializationBehavior(AudioAttributes.SPATIALIZATION_BEHAVIOR_NEVER)
         }
         
         return builder.build()
+    }
+    
+    /**
+     * 应用音效禁用设置
+     * 通过 AudioEffect API 禁用系统音效（均衡器、低音增强、虚拟环绕、响度增强等）
+     */
+    private fun applyAudioEffectsSettings(player: ExoPlayer) {
+        try {
+            val audioSessionId = player.audioSessionId
+            if (audioSessionId == C.AUDIO_SESSION_ID_UNSET) {
+                Log.w(TAG, "⚠️ Audio session ID not set, cannot apply audio effects settings")
+                return
+            }
+            
+            // 先释放之前创建的音效
+            releaseDisabledAudioEffects()
+            
+            if (disableSystemAudioEffects) {
+                // 禁用系统音效：创建并禁用各种音效
+                Log.d(TAG, "🔇 Disabling system audio effects for session: $audioSessionId")
+                disableAllAudioEffects(audioSessionId)
+            } else {
+                Log.d(TAG, "🔊 System audio effects enabled")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to apply audio effects settings: ${e.message}")
+        }
+    }
+    
+    /**
+     * 禁用所有系统音效
+     * 通过创建音效实例并设置为禁用状态来覆盖系统音效
+     * 包括：均衡器、低音增强、虚拟环绕、响度增强，以及所有可查询到的系统音效
+     */
+    private fun disableAllAudioEffects(audioSessionId: Int) {
+        try {
+            // 尝试禁用均衡器
+            try {
+                val equalizer = Equalizer(Int.MAX_VALUE, audioSessionId)
+                equalizer.enabled = false
+                disabledAudioEffects.add(equalizer)
+                Log.d(TAG, "  ✓ Equalizer disabled")
+            } catch (e: Exception) {
+                Log.w(TAG, "  ✗ Could not disable Equalizer: ${e.message}")
+            }
+            
+            // 尝试禁用低音增强
+            try {
+                val bassBoost = BassBoost(Int.MAX_VALUE, audioSessionId)
+                bassBoost.enabled = false
+                disabledAudioEffects.add(bassBoost)
+                Log.d(TAG, "  ✓ BassBoost disabled")
+            } catch (e: Exception) {
+                Log.w(TAG, "  ✗ Could not disable BassBoost: ${e.message}")
+            }
+            
+            // 尝试禁用虚拟环绕声
+            try {
+                val virtualizer = Virtualizer(Int.MAX_VALUE, audioSessionId)
+                virtualizer.enabled = false
+                disabledAudioEffects.add(virtualizer)
+                Log.d(TAG, "  ✓ Virtualizer disabled")
+            } catch (e: Exception) {
+                Log.w(TAG, "  ✗ Could not disable Virtualizer: ${e.message}")
+            }
+            
+            // 尝试禁用响度增强
+            try {
+                val loudnessEnhancer = LoudnessEnhancer(audioSessionId)
+                loudnessEnhancer.enabled = false
+                disabledAudioEffects.add(loudnessEnhancer)
+                Log.d(TAG, "  ✓ LoudnessEnhancer disabled")
+            } catch (e: Exception) {
+                Log.w(TAG, "  ✗ Could not disable LoudnessEnhancer: ${e.message}")
+            }
+            
+            // 尝试禁用预设混响
+            try {
+                val presetReverb = PresetReverb(Int.MAX_VALUE, audioSessionId)
+                presetReverb.enabled = false
+                disabledAudioEffects.add(presetReverb)
+                Log.d(TAG, "  ✓ PresetReverb disabled")
+            } catch (e: Exception) {
+                Log.w(TAG, "  ✗ Could not disable PresetReverb: ${e.message}")
+            }
+            
+            // 尝试禁用环境混响
+            try {
+                val envReverb = EnvironmentalReverb(Int.MAX_VALUE, audioSessionId)
+                envReverb.enabled = false
+                disabledAudioEffects.add(envReverb)
+                Log.d(TAG, "  ✓ EnvironmentalReverb disabled")
+            } catch (e: Exception) {
+                Log.w(TAG, "  ✗ Could not disable EnvironmentalReverb: ${e.message}")
+            }
+            
+            // 查询并记录所有可用的系统音效（仅用于调试）
+            try {
+                val effects = AudioEffect.queryEffects()
+                Log.d(TAG, "  📋 Available audio effects: ${effects?.size ?: 0}")
+                effects?.forEach { descriptor ->
+                    Log.d(TAG, "    - ${descriptor.name} (type: ${descriptor.type}, uuid: ${descriptor.uuid})")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "  ✗ Could not query audio effects: ${e.message}")
+            }
+            
+            // 发送广播通知系统禁用音效（某些系统会响应此广播）
+            try {
+                val intent = Intent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION)
+                intent.putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId)
+                intent.putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context?.packageName)
+                context?.sendBroadcast(intent)
+                Log.d(TAG, "  📢 Sent ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION broadcast")
+            } catch (e: Exception) {
+                Log.w(TAG, "  ✗ Could not send audio effect close broadcast: ${e.message}")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to disable audio effects: ${e.message}")
+        }
+    }
+    
+    /**
+     * 释放已禁用的音效实例
+     */
+    private fun releaseDisabledAudioEffects() {
+        disabledAudioEffects.forEach { effect ->
+            try {
+                effect.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Failed to release audio effect: ${e.message}")
+            }
+        }
+        disabledAudioEffects.clear()
     }
     
     // ==================== 音频焦点 ====================
@@ -1945,6 +2122,9 @@ class ExoPlayerMusicPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // 取消淡入淡出动画和 Crossfade
         cancelFadeAnimation()
         cancelCrossfade()
+        
+        // 释放禁用的音效实例
+        releaseDisabledAudioEffects()
         
         val toRelease = player ?: return
         player = null

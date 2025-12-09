@@ -250,6 +250,17 @@ class ExoPlayerMusicController {
     });
   }
 
+  /// 设置是否禁用系统音效（杜比等）
+  /// [disabled] true: 禁用所有系统音效，false: 只禁用空间音频/沉浸感
+  /// 注意：空间音频/沉浸感始终禁用
+  Future<void> setDisableSystemAudioEffects(bool disabled) async {
+    _ensureNotDisposed();
+    await _ensureInitialized();
+    await _channel.invokeMethod('setDisableSystemAudioEffects', {
+      'disabled': disabled,
+    });
+  }
+
   /// 检查播放器是否准备好（有媒体源且可以播放）
   /// 用于在播放前检测播放器状态，如果通知被清除导致播放器停止，需要重新加载媒体
   Future<bool> checkPlayerReady() async {

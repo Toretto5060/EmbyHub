@@ -11,6 +11,10 @@ import '../exoplayer_music_controller.dart';
 const String _crossfadeEnabledKey = 'music_crossfade_enabled';
 const String _crossfadeDurationKey = 'music_crossfade_duration';
 
+/// 禁用系统音效设置的持久化键
+const String _disableSystemAudioEffectsKey =
+    'music_disable_system_audio_effects';
+
 class MusicSettingsPage extends ConsumerStatefulWidget {
   const MusicSettingsPage({super.key, this.scrollController});
 
@@ -23,6 +27,7 @@ class MusicSettingsPage extends ConsumerStatefulWidget {
 class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
   bool _crossfade = true; // 默认开启
   double _crossfadeDuration = 3.0; // 默认3秒
+  bool _disableSystemAudioEffects = true; // 默认开启（禁用杜比等系统音效）
   bool _showLyrics = true;
   bool _savePlayHistory = true;
   bool _isLoading = true;
@@ -41,12 +46,17 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
         _crossfade = prefs.getBool(_crossfadeEnabledKey) ?? true; // 默认开启
         _crossfadeDuration =
             prefs.getDouble(_crossfadeDurationKey) ?? 3.0; // 默认3秒
+        _disableSystemAudioEffects =
+            prefs.getBool(_disableSystemAudioEffectsKey) ?? true; // 默认开启
         _isLoading = false;
       });
 
       // 如果之前没有保存过设置，立即保存默认值并同步到播放器
       if (!prefs.containsKey(_crossfadeEnabledKey)) {
         await _saveCrossfadeSettings();
+      }
+      if (!prefs.containsKey(_disableSystemAudioEffectsKey)) {
+        await _saveDisableSystemAudioEffectsSettings();
       }
     } catch (e) {
       setState(() => _isLoading = false);
@@ -69,6 +79,22 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
       }
     } catch (e) {
       print('⚠️ [Settings] Failed to save crossfade settings: $e');
+    }
+  }
+
+  /// 保存并同步禁用系统音效设置到原生播放器
+  Future<void> _saveDisableSystemAudioEffectsSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(
+          _disableSystemAudioEffectsKey, _disableSystemAudioEffects);
+
+      // 同步到原生播放器
+      final player = ExoPlayerMusicController.instance;
+      await player.setDisableSystemAudioEffects(_disableSystemAudioEffects);
+    } catch (e) {
+      print(
+          '⚠️ [Settings] Failed to save disable system audio effects settings: $e');
     }
   }
 
@@ -119,6 +145,24 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
                 _saveCrossfadeSettings();
               },
             ),
+          const SizedBox(height: 24),
+          // 音效设置
+          _buildSectionTitle('音效', isDark),
+          _buildSwitchItem(
+            icon: CupertinoIcons.speaker_slash,
+            title: '禁用系统音效',
+            subtitle: '禁用杜比等系统音效增强',
+            value: _disableSystemAudioEffects,
+            isDark: isDark,
+            onChanged: (value) {
+              setState(() => _disableSystemAudioEffects = value);
+              _saveDisableSystemAudioEffectsSettings();
+            },
+          ),
+          _buildInfoHint(
+            '开启后将禁用杜比全景声等系统音效处理，保持原始音质。空间音频/沉浸感效果始终禁用。',
+            isDark,
+          ),
           const SizedBox(height: 24),
           // 媒体库设置
           _buildSectionTitle('媒体库', isDark),
