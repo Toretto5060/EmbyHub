@@ -1295,6 +1295,10 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       isNextDirection: true, // 下一首方向
     );
 
+    // 立即更新车载歌词（清空或显示新歌词）
+    // 这样可以避免切换到无歌词歌曲时仍显示上一首的歌词
+    _parseLyricsForCurrentSong();
+
     // 调用原生播放器切换并播放
     if (state.playMode == PlayMode.singleLoop) {
       // 单曲循环：重新播放当前歌曲
@@ -1342,6 +1346,10 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       isPlaying: true, // 切换后自动播放
       isNextDirection: false, // 上一首方向
     );
+
+    // 立即更新车载歌词（清空或显示新歌词）
+    // 这样可以避免切换到无歌词歌曲时仍显示上一首的歌词
+    _parseLyricsForCurrentSong();
 
     // 调用原生播放器切换并播放
     if (state.playMode == PlayMode.singleLoop) {
