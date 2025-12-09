@@ -47,8 +47,9 @@ List<_LyricLine> _parseLrc(String lrc) {
       final seconds = int.parse(match.group(2)!);
       final msStr = match.group(3)!;
       // 处理两位或三位毫秒
-      final milliseconds =
-          msStr.length == 2 ? int.parse(msStr) * 10 : int.parse(msStr);
+      final milliseconds = msStr.length == 2
+          ? int.parse(msStr) * 10
+          : int.parse(msStr);
       final text = match.group(4)?.trim() ?? '';
 
       // 跳过空歌词行
@@ -56,14 +57,16 @@ List<_LyricLine> _parseLrc(String lrc) {
         // 清理双语歌词中的分隔符，只保留第一行（主歌词）
         final cleanText = _cleanLyricForBluetooth(text);
         if (cleanText.isNotEmpty) {
-          lines.add(_LyricLine(
-            Duration(
-              minutes: minutes,
-              seconds: seconds,
-              milliseconds: milliseconds,
+          lines.add(
+            _LyricLine(
+              Duration(
+                minutes: minutes,
+                seconds: seconds,
+                milliseconds: milliseconds,
+              ),
+              cleanText,
             ),
-            cleanText,
-          ));
+          );
         }
       }
     }
@@ -358,6 +361,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       _player = ExoPlayerMusicController.instance;
       await _player!.initialize();
       _setupPlayerListeners();
+
+      // 加载并应用淡入淡出设置
+      await _loadCrossfadeSettings();
     }
 
     // 初始化 Emby API
@@ -365,6 +371,24 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
     // 加载上次播放状态
     await _loadLastPlayingState();
+  }
+
+  /// 加载淡入淡出设置并应用到播放器
+  Future<void> _loadCrossfadeSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final crossfadeEnabled =
+          prefs.getBool('music_crossfade_enabled') ?? false;
+      final crossfadeDuration =
+          prefs.getDouble('music_crossfade_duration') ?? 3.0;
+
+      await _player?.setCrossfadeEnabled(crossfadeEnabled);
+      if (crossfadeEnabled) {
+        await _player?.setCrossfadeDuration(crossfadeDuration);
+      }
+    } catch (e) {
+      print('⚠️ [Music] Failed to load crossfade settings: $e');
+    }
   }
 
   /// 初始化 Emby API
@@ -414,8 +438,11 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
   /// 上报播放进度到 Emby 服务器
   /// 注意：本地文件不应调用此方法
-  Future<void> _reportPlaybackProgress(LocalSong song, Duration position,
-      {bool isPaused = false}) async {
+  Future<void> _reportPlaybackProgress(
+    LocalSong song,
+    Duration position, {
+    bool isPaused = false,
+  }) async {
     // 本地文件不上报
     if (song.hasLocalFile) return;
     if (!song.isServerMusic || song.embyItemId == null) return;
@@ -620,8 +647,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     });
 
     // 监听媒体按钮上一曲（支持随机播放模式）
-    _mediaButtonPreviousSubscription =
-        player.mediaButtonPreviousStream.listen((_) {
+    _mediaButtonPreviousSubscription = player.mediaButtonPreviousStream.listen((
+      _,
+    ) {
       playPrevious();
     });
 
@@ -681,19 +709,22 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       final prefs = await SharedPreferences.getInstance();
 
       // 根据模式选择存储键
-      final songKey =
-          isServerMode ? _serverLastPlayingSongKey : _localLastPlayingSongKey;
+      final songKey = isServerMode
+          ? _serverLastPlayingSongKey
+          : _localLastPlayingSongKey;
       final positionKey = isServerMode
           ? _serverLastPlayingPositionKey
           : _localLastPlayingPositionKey;
-      final playlistKey =
-          isServerMode ? _serverLastPlaylistKey : _localLastPlaylistKey;
+      final playlistKey = isServerMode
+          ? _serverLastPlaylistKey
+          : _localLastPlaylistKey;
 
       // 加载上次播放的歌曲
       final songJson = prefs.getString(songKey);
       if (songJson == null) {
         print(
-            '🎵 [Music] No saved ${isServerMode ? "server" : "local"} playlist to restore');
+          '🎵 [Music] No saved ${isServerMode ? "server" : "local"} playlist to restore',
+        );
         return;
       }
 
@@ -727,7 +758,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
             validPlaylist.add(s);
           } else {
             print(
-                '🎵 [Music] Removed non-existent song from playlist: ${s.title}');
+              '🎵 [Music] Removed non-existent song from playlist: ${s.title}',
+            );
           }
         }
       }
@@ -768,7 +800,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       await _preloadPlaylistToPlayer(validPlaylist, finalIndex, position);
 
       print(
-          '🎵 [Music] Restored ${isServerMode ? "server" : "local"} playlist with ${validPlaylist.length} songs');
+        '🎵 [Music] Restored ${isServerMode ? "server" : "local"} playlist with ${validPlaylist.length} songs',
+      );
     } catch (e) {
       print('Failed to restore last playing state: $e');
     }
@@ -788,13 +821,15 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       // 优先使用本地文件路径，其次使用服务器路径
       final url = s.localFilePath ?? s.path;
       if (url != null) {
-        items.add(MusicItem(
-          url: url,
-          title: s.title,
-          artist: s.artist,
-          album: s.album ?? '',
-          coverUrl: s.albumArt,
-        ));
+        items.add(
+          MusicItem(
+            url: url,
+            title: s.title,
+            artist: s.artist,
+            album: s.album ?? '',
+            coverUrl: s.albumArt,
+          ),
+        );
       }
     }
 
@@ -834,8 +869,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         final positionKey = isServerMusic
             ? _serverLastPlayingPositionKey
             : _localLastPlayingPositionKey;
-        final playlistKey =
-            isServerMusic ? _serverLastPlaylistKey : _localLastPlaylistKey;
+        final playlistKey = isServerMusic
+            ? _serverLastPlaylistKey
+            : _localLastPlaylistKey;
         final indexKey = isServerMusic
             ? _serverLastPlaylistIndexKey
             : _localLastPlaylistIndexKey;
@@ -858,7 +894,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
         // 保存当前音乐来源模式
         await prefs.setString(
-            _lastSourceModeKey, isServerMusic ? 'server' : 'local');
+          _lastSourceModeKey,
+          isServerMusic ? 'server' : 'local',
+        );
       }
     } catch (e) {
       // 保存失败时忽略错误
@@ -960,14 +998,16 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     if (state.playlist.isNotEmpty) {
       final items = state.playlist
           .where((s) => s.path != null || s.localFilePath != null)
-          .map((s) => MusicItem(
-                // 优先使用本地文件路径
-                url: s.localFilePath ?? s.path!,
-                title: s.title,
-                artist: s.artist,
-                album: s.album ?? '',
-                coverUrl: s.albumArt,
-              ))
+          .map(
+            (s) => MusicItem(
+              // 优先使用本地文件路径
+              url: s.localFilePath ?? s.path!,
+              title: s.title,
+              artist: s.artist,
+              album: s.album ?? '',
+              coverUrl: s.albumArt,
+            ),
+          )
           .toList();
 
       if (items.isNotEmpty) {
@@ -1036,13 +1076,15 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         // 本地音乐：直接使用本地路径
         final items = songs
             .where((s) => s.path != null)
-            .map((s) => MusicItem(
-                  url: s.path!,
-                  title: s.title,
-                  artist: s.artist,
-                  album: s.album ?? '',
-                  coverUrl: s.albumArt,
-                ))
+            .map(
+              (s) => MusicItem(
+                url: s.path!,
+                title: s.title,
+                artist: s.artist,
+                album: s.album ?? '',
+                coverUrl: s.albumArt,
+              ),
+            )
             .toList();
 
         if (items.isNotEmpty) {
@@ -1065,7 +1107,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
   /// 优先使用本地文件，如果没有本地文件则使用服务器流
   /// 本地文件播放时不与 Emby 服务器交互
   Future<void> _playServerMusicPlaylist(
-      List<LocalSong> songs, int startIndex) async {
+    List<LocalSong> songs,
+    int startIndex,
+  ) async {
     if (_player == null) return;
 
     var currentSong = songs[startIndex];
@@ -1080,7 +1124,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       // 使用本地文件，不与 Emby 交互
       currentSongUrl = currentSong.localFilePath;
       print(
-          '🎵 [Music] Using local file (no Emby interaction): $currentSongUrl');
+        '🎵 [Music] Using local file (no Emby interaction): $currentSongUrl',
+      );
 
       // 重置 Emby 会话（本地文件不需要）
       _playSessionId = null;
@@ -1103,13 +1148,15 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
           currentSong.isServerMusic &&
           currentSong.embyItemId != null) {
         try {
-          final audioInfo =
-              await _embyApi!.getAudioPlaybackInfo(currentSong.embyItemId!);
+          final audioInfo = await _embyApi!.getAudioPlaybackInfo(
+            currentSong.embyItemId!,
+          );
           _playSessionId = audioInfo.playSessionId;
           _mediaSourceId = audioInfo.mediaSourceId;
           currentSongUrl = audioInfo.url; // 使用带会话信息的 URL
           print(
-              '🎵 [Music] Got playback info - PlaySessionId: $_playSessionId');
+            '🎵 [Music] Got playback info - PlaySessionId: $_playSessionId',
+          );
           print('🎵 [Music] Audio URL: $currentSongUrl');
         } catch (e) {
           print('⚠️ [Music] Failed to get playback info: $e');
@@ -1156,21 +1203,25 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       }
 
       if (url != null) {
-        items.add(MusicItem(
-          url: url,
-          title: song.title,
-          artist: song.artist,
-          album: song.album ?? '',
-          coverUrl: song.albumArt,
-        ));
+        items.add(
+          MusicItem(
+            url: url,
+            title: song.title,
+            artist: song.artist,
+            album: song.album ?? '',
+            coverUrl: song.albumArt,
+          ),
+        );
       }
     }
 
     if (items.isNotEmpty) {
       print(
-          '🎵 [Music] Starting playback with ${items.length} items, startIndex: $startIndex');
+        '🎵 [Music] Starting playback with ${items.length} items, startIndex: $startIndex',
+      );
       print(
-          '🎵 [Music] Current item URL: ${items.isNotEmpty ? items[startIndex].url : "none"}');
+        '🎵 [Music] Current item URL: ${items.isNotEmpty ? items[startIndex].url : "none"}',
+      );
 
       await _player!.setPlaylist(
         items: items,
@@ -1225,7 +1276,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         if (await lrcFile.exists()) {
           final lyrics = await lrcFile.readAsString();
           print(
-              '🎵 [Music] Loaded .lrc from same directory for: ${song.title}');
+            '🎵 [Music] Loaded .lrc from same directory for: ${song.title}',
+          );
           return song.copyWith(lyrics: lyrics);
         }
       } catch (e) {
@@ -1246,7 +1298,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
     try {
       print(
-          '🎵 [Music] Fetching lyrics for: ${song.title}, subtitleIndex: ${song.subtitleIndex}');
+        '🎵 [Music] Fetching lyrics for: ${song.title}, subtitleIndex: ${song.subtitleIndex}',
+      );
       final lyrics = await _embyApi!.getMusicLyrics(
         itemId: song.embyItemId!,
         subtitleIndex: song.subtitleIndex!,
@@ -1300,14 +1353,15 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     _parseLyricsForCurrentSong();
 
     // 调用原生播放器切换并播放
+    // skipToIndex 现在支持淡入淡出效果
     if (state.playMode == PlayMode.singleLoop) {
       // 单曲循环：重新播放当前歌曲
       await _player?.seek(Duration.zero);
       _player?.play();
     } else {
-      // 切换到指定索引并播放
+      // 切换到指定索引（原生端会根据设置应用淡入淡出效果并自动播放）
+      // 注意：不要在这里调用 play()，因为 crossfade 过程中新播放器已经设置了自动播放
       await _player?.skipToIndex(nextIndex);
-      _player?.play();
     }
 
     _isSwitchingTrack = false;
@@ -1333,7 +1387,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
         break;
       case PlayMode.listLoop:
         // 列表循环：顺序播放
-        prevIndex = (state.currentIndex - 1 + state.playlist.length) %
+        prevIndex =
+            (state.currentIndex - 1 + state.playlist.length) %
             state.playlist.length;
         break;
     }
@@ -1357,9 +1412,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
       await _player?.seek(Duration.zero);
       _player?.play();
     } else {
-      // 切换到指定索引并播放
+      // 切换到指定索引（原生端会根据设置应用淡入淡出效果并自动播放）
+      // 注意：不要在这里调用 play()，因为 crossfade 过程中新播放器已经设置了自动播放
       await _player?.skipToIndex(prevIndex);
-      _player?.play();
     }
 
     _isSwitchingTrack = false;
@@ -1442,7 +1497,9 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
     if (_shuffleHistoryIndex >= 0 &&
         _shuffleHistoryIndex < _shuffleHistory.length - 1) {
       _shuffleHistory.removeRange(
-          _shuffleHistoryIndex + 1, _shuffleHistory.length);
+        _shuffleHistoryIndex + 1,
+        _shuffleHistory.length,
+      );
     }
 
     // 添加新索引到历史记录
@@ -1705,8 +1762,8 @@ class LocalMusicPlayerNotifier extends StateNotifier<LocalMusicPlayerState> {
 
 final localMusicPlayerProvider =
     StateNotifierProvider<LocalMusicPlayerNotifier, LocalMusicPlayerState>(
-  (ref) => LocalMusicPlayerNotifier(),
-);
+      (ref) => LocalMusicPlayerNotifier(),
+    );
 
 /// 音乐页面是否显示的状态
 final musicPageVisibleProvider = StateProvider<bool>((ref) => false);
@@ -1768,8 +1825,9 @@ enum MusicNavItem {
   settings, // 设置
 }
 
-final currentMusicNavProvider =
-    StateProvider<MusicNavItem>((ref) => MusicNavItem.songs);
+final currentMusicNavProvider = StateProvider<MusicNavItem>(
+  (ref) => MusicNavItem.songs,
+);
 
 /// 音乐来源模式
 enum MusicSourceMode {
@@ -1778,8 +1836,9 @@ enum MusicSourceMode {
 }
 
 /// 当前音乐来源模式（默认本地）
-final musicSourceModeProvider =
-    StateProvider<MusicSourceMode>((ref) => MusicSourceMode.local);
+final musicSourceModeProvider = StateProvider<MusicSourceMode>(
+  (ref) => MusicSourceMode.local,
+);
 
 /// 服务器音乐媒体库信息
 class ServerMusicLibrary {
@@ -1805,8 +1864,9 @@ class ServerMusicLibrary {
 
 /// 服务器音乐媒体库状态 Provider（手动更新）
 /// 由 MusicDrawer 在检测到服务器媒体库变化时更新
-final serverMusicLibraryProvider =
-    StateProvider<ServerMusicLibrary>((ref) => const ServerMusicLibrary());
+final serverMusicLibraryProvider = StateProvider<ServerMusicLibrary>(
+  (ref) => const ServerMusicLibrary(),
+);
 
 /// 启动页面模式
 enum StartupPageMode {
@@ -1922,8 +1982,8 @@ class SleepTimerState {
 /// 睡眠定时器 Provider
 final sleepTimerProvider =
     StateNotifierProvider<SleepTimerNotifier, SleepTimerState>((ref) {
-  return SleepTimerNotifier(ref);
-});
+      return SleepTimerNotifier(ref);
+    });
 
 class SleepTimerNotifier extends StateNotifier<SleepTimerState> {
   SleepTimerNotifier(this.ref) : super(const SleepTimerState());

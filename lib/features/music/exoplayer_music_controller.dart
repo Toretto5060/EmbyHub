@@ -228,6 +228,28 @@ class ExoPlayerMusicController {
     });
   }
 
+  /// 设置淡入淡出（Crossfade）时长
+  /// [durationSeconds] 总的淡入淡出时长（秒），原生端会除以2（淡入淡出各占一半）
+  /// 例如：设置为 4 秒，则淡入 2 秒 + 淡出 2 秒
+  Future<void> setCrossfadeDuration(double durationSeconds) async {
+    _ensureNotDisposed();
+    await _ensureInitialized();
+    // 传递给原生端的是单边时长（毫秒），即总时长除以2
+    final halfDurationMs = (durationSeconds * 1000 / 2).round();
+    await _channel.invokeMethod('setCrossfadeDuration', {
+      'durationMs': halfDurationMs,
+    });
+  }
+
+  /// 启用/禁用淡入淡出效果
+  Future<void> setCrossfadeEnabled(bool enabled) async {
+    _ensureNotDisposed();
+    await _ensureInitialized();
+    await _channel.invokeMethod('setCrossfadeEnabled', {
+      'enabled': enabled,
+    });
+  }
+
   /// 检查播放器是否准备好（有媒体源且可以播放）
   /// 用于在播放前检测播放器状态，如果通知被清除导致播放器停止，需要重新加载媒体
   Future<bool> checkPlayerReady() async {

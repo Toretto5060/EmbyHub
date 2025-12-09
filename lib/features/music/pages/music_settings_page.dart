@@ -1,9 +1,15 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../providers/local_music_matcher_provider.dart';
 import '../../../utils/theme_utils.dart';
+import '../exoplayer_music_controller.dart';
+
+/// 淡入淡出设置的持久化键
+const String _crossfadeEnabledKey = 'music_crossfade_enabled';
+const String _crossfadeDurationKey = 'music_crossfade_duration';
 
 class MusicSettingsPage extends ConsumerStatefulWidget {
   const MusicSettingsPage({super.key, this.scrollController});
@@ -21,6 +27,46 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
   double _crossfadeDuration = 3.0;
   bool _showLyrics = true;
   bool _savePlayHistory = true;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  /// 加载设置
+  Future<void> _loadSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _crossfade = prefs.getBool(_crossfadeEnabledKey) ?? false;
+        _crossfadeDuration = prefs.getDouble(_crossfadeDurationKey) ?? 3.0;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  /// 保存并同步淡入淡出设置到原生播放器
+  Future<void> _saveCrossfadeSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_crossfadeEnabledKey, _crossfade);
+      await prefs.setDouble(_crossfadeDurationKey, _crossfadeDuration);
+
+      // 同步到原生播放器
+      final player = ExoPlayerMusicController.instance;
+      await player.setCrossfadeEnabled(_crossfade);
+      if (_crossfade) {
+        // 设置淡入淡出时长（秒），原生端会除以2
+        await player.setCrossfadeDuration(_crossfadeDuration);
+      }
+    } catch (e) {
+      print('⚠️ [Settings] Failed to save crossfade settings: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,10 +80,11 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
     return SingleChildScrollView(
       controller: widget.scrollController,
       padding: EdgeInsets.only(
-          top: topPadding + 20,
-          left: 20,
-          right: 20,
-          bottom: miniPlayerHeight + 20),
+        top: topPadding + 20,
+        left: 20,
+        right: 20,
+        bottom: miniPlayerHeight + 20,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -65,7 +112,10 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
             subtitle: '歌曲切换时淡入淡出效果',
             value: _crossfade,
             isDark: isDark,
-            onChanged: (value) => setState(() => _crossfade = value),
+            onChanged: (value) {
+              setState(() => _crossfade = value);
+              _saveCrossfadeSettings();
+            },
           ),
           if (_crossfade)
             _buildSliderItem(
@@ -76,6 +126,10 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
               max: 10,
               isDark: isDark,
               onChanged: (value) => setState(() => _crossfadeDuration = value),
+              onChangeEnd: (value) {
+                setState(() => _crossfadeDuration = value);
+                _saveCrossfadeSettings();
+              },
             ),
           const SizedBox(height: 24),
           // 媒体库设置
@@ -193,10 +247,7 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
                 ],
               ),
             ),
-            CupertinoSwitch(
-              value: value,
-              onChanged: onChanged,
-            ),
+            CupertinoSwitch(value: value, onChanged: onChanged),
           ],
         ),
       ),
@@ -211,6 +262,7 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
     required double max,
     required bool isDark,
     required ValueChanged<double> onChanged,
+    ValueChanged<double>? onChangeEnd,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -244,7 +296,7 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
                 ),
                 Text(
                   '${value.toInt()} 秒',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 14,
                     color: CupertinoColors.activeBlue,
                   ),
@@ -257,6 +309,7 @@ class _MusicSettingsPageState extends ConsumerState<MusicSettingsPage> {
               min: min,
               max: max,
               onChanged: onChanged,
+              onChangeEnd: onChangeEnd,
             ),
           ],
         ),
